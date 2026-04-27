@@ -1,0 +1,21 @@
+# TODO
+
+- 接入 SQLite Repository 实现，替换当前 JSON Storage。
+- 为 API Key 增加系统安全存储或加密存储，不再仅随本地 JSON 数据保存。
+- 为 AI JSON 输出增加更严格的 schema 校验和字段级错误提示。
+- 增加 AI 结果 diff 视图，方便比较角色卡原状态与建议状态。
+- 增加 AI 调用取消、重试和请求日志面板，但日志中必须脱敏 API Key。
+- 为生产流水线增加更细的“从某一步继续运行”与并发锁，避免用户重复点击启动多个任务。
+- 为 GeneratedChapterDraft 增加正文差异对比与“另存为新章节编号”的完整交互。
+- 将 MemoryUpdateCandidate.proposedPatch 从 JSON 字符串升级为更严格的 schema 化结构。
+- 为章节正文增加更强的长文本编辑体验和快捷键。
+- 为时间线增加可视化轴视图。
+- 为 Prompt 自动压缩实现真实内容裁剪和摘要替换。
+- 为 ContextBudgetManager 增加更精确的“当前章节相关性”评分，例如读取章节任务书、角色出场计划和伏笔预计回收范围。
+- 为质量门禁增加可配置阈值、历史趋势和人工复核记录。
+- 为修订候选增加局部 diff 预览和一键重新跑质量门禁。
+- 将 QualityGateReport 与 ConsistencyReviewReport 的 issue schema 合并成统一审稿问题模型。
+- 为数据路径迁移增加“合并已有数据文件”的交互，目前只支持覆盖或取消。
+- 为章节导出增加按卷/分组导出、文件编码选择和导出模板配置。
+- 为复制/导出操作增加统一 toast 系统，替代部分页面内提示和 alert。
+- 增加单元测试与端到端 UI 冒烟测试。
