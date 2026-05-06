@@ -2,9 +2,13 @@ import type {
   Character,
   CharacterStateLog,
   Chapter,
+  ChapterContinuityBridge,
+  ContinuitySource,
   Foreshadowing,
   ID,
   ContextBudgetProfile,
+  ContextSelectionResult,
+  BuildPromptResult,
   PromptBuildInput,
   PromptConfig,
   PromptModuleSelection,
@@ -12,7 +16,15 @@ import type {
   StageSummary,
   TimelineEvent
 } from '../shared/types'
+import {
+  effectiveTreatmentMode,
+  shouldRecommendForeshadowing,
+  treatmentLabel,
+  treatmentPromptRules
+} from '../shared/foreshadowingTreatment'
 import { ContextBudgetManager } from './ContextBudgetManager'
+import { formatContinuityBridgeForPrompt, resolveContinuityBridge } from './ContinuityService'
+import { TokenEstimator } from './TokenEstimator'
 
 function valueOrEmpty(value: string | number | null | undefined): string {
   if (value === null || value === undefined || value === '') return '待补充'
@@ -107,7 +119,8 @@ function formatCharacter(character: Character, logs: CharacterStateLog[]): strin
   return lines.join('\n')
 }
 
-function formatForeshadowing(item: Foreshadowing): string {
+function formatForeshadowing(item: Foreshadowing, overrides?: PromptConfig['foreshadowingTreatmentOverrides']): string {
+  const treatmentMode = effectiveTreatmentMode(item, overrides)
   const statusLabel = {
     unresolved: '未回收',
     partial: '部分推进',
@@ -123,14 +136,17 @@ function formatForeshadowing(item: Foreshadowing): string {
   }[item.weight]
 
   return [
-    `### ${item.title || '未命名伏笔'}`,
-    `首次出现章节：${valueOrEmpty(item.firstChapterOrder)}`,
+    `### 【${item.title || '未命名伏笔'}】`,
     `状态：${statusLabel}`,
-    `叙事权重：${weightLabel}`,
+    `权重：${weightLabel}`,
+    `当前处理方式：${treatmentLabel(treatmentMode)}`,
+    `首次出现：第 ${valueOrEmpty(item.firstChapterOrder)} 章`,
     `预计回收：${valueOrEmpty(item.expectedPayoff)}`,
     `回收方式：${valueOrEmpty(item.payoffMethod)}`,
     `关联主线：${valueOrEmpty(item.relatedMainPlot)}`,
-    `注意事项：${valueOrEmpty(item.notes)}`
+    `注意事项：${valueOrEmpty(item.notes)}`,
+    '本章使用规则：',
+    ...treatmentPromptRules(treatmentMode).map((rule) => `- ${rule}`)
   ].join('\n')
 }
 
@@ -250,15 +266,7 @@ function uniqueById<T extends { id: ID }>(items: T[]): T[] {
 }
 
 function automaticForeshadowings(items: Foreshadowing[], targetChapterOrder: number): Foreshadowing[] {
-  return items
-    .filter((item) => item.status !== 'resolved' && item.status !== 'abandoned')
-    .filter(
-      (item) =>
-        item.weight === 'medium' ||
-        item.weight === 'high' ||
-        item.weight === 'payoff' ||
-        expectedPayoffNear(item, targetChapterOrder)
-    )
+  return items.filter((item) => shouldRecommendForeshadowing(item, expectedPayoffNear(item, targetChapterOrder)))
 }
 
 function selectedForeshadowings(items: Foreshadowing[], targetChapterOrder: number, config: PromptConfig): Foreshadowing[] {
@@ -309,11 +317,15 @@ export class PromptBuilderService {
         stageSummaries: input.stageSummaries
       },
       input.config.targetChapterOrder,
-      budgetProfile
+      budgetProfile,
+      {
+        characterIds: input.config.selectedCharacterIds,
+        foreshadowingIds: input.config.selectedForeshadowingIds
+      }
     )
   }
 
-  static build(input: PromptBuildInput): string {
+  static buildResult(input: PromptBuildInput): BuildPromptResult {
     let workingInput = input
     const budgetSelection = input.budgetProfile ? PromptBuilderService.selectBudgetContext(input, input.budgetProfile) : null
 
@@ -340,6 +352,14 @@ export class PromptBuilderService {
     const target = config.targetChapterOrder
     const sortedChapters = [...chapters].sort((a, b) => a.order - b.order)
     const previousChapters = sortedChapters.filter((chapter) => chapter.order < target)
+    const continuity = config.useContinuityBridge === false
+      ? { bridge: null as ChapterContinuityBridge | null, source: null as ContinuitySource | null, warnings: [] as string[] }
+      : resolveContinuityBridge({
+          projectId: project.id,
+          chapters: input.chapters,
+          bridges: input.chapterContinuityBridges ?? [],
+          targetChapterOrder: target
+        })
     const recentChapters = previousChapters.slice(config.mode === 'light' ? -2 : -3)
     const summaries = [...stageSummaries]
       .filter((summary) => summary.chapterEnd < target)
@@ -389,7 +409,7 @@ export class PromptBuilderService {
       `文风要求：${valueOrEmpty(task.styleRequirement)}`
     ].join('\n')
 
-    return [
+    const finalPrompt = [
       `# 第 ${target} 章写作 Prompt`,
       section(
         'A. 写作任务声明',
@@ -398,6 +418,11 @@ export class PromptBuilderService {
       ),
       section('B. 全书核心设定摘要', config.modules.bible, bibleText),
       section('C. 当前剧情进度摘要', config.modules.progress, latestProgress),
+      section(
+        'C1. 上一章结尾衔接',
+        config.useContinuityBridge !== false,
+        formatContinuityBridgeForPrompt(continuity.bridge, config.continuityInstructions)
+      ),
       section(
         'C2. 阶段摘要档案',
         config.modules.stageSummaries,
@@ -421,7 +446,7 @@ export class PromptBuilderService {
         'F. 当前相关伏笔',
         config.modules.foreshadowing,
         foreshadowingSelection.length
-          ? foreshadowingSelection.map(formatForeshadowing).join('\n\n')
+          ? foreshadowingSelection.map((item) => formatForeshadowing(item, config.foreshadowingTreatmentOverrides)).join('\n\n')
           : '暂无需要进入本章 prompt 的未回收中/高权重伏笔。'
       ),
       section('G. 当前章节任务书', config.modules.chapterTask, taskText),
@@ -450,5 +475,22 @@ export class PromptBuilderService {
       .filter(Boolean)
       .join('\n')
       .trim()
+
+    return {
+      finalPrompt,
+      estimatedTokens: TokenEstimator.estimate(finalPrompt),
+      contextSelectionResult: budgetSelection as ContextSelectionResult | null,
+      selectedCharacterIds: config.selectedCharacterIds,
+      selectedForeshadowingIds: config.selectedForeshadowingIds,
+      foreshadowingTreatmentOverrides: config.foreshadowingTreatmentOverrides ?? {},
+      chapterTask: config.task,
+      continuityBridge: continuity.bridge,
+      continuitySource: continuity.source,
+      warnings: [...(budgetSelection?.warnings ?? []), ...continuity.warnings]
+    }
+  }
+
+  static build(input: PromptBuildInput): string {
+    return PromptBuilderService.buildResult(input).finalPrompt
   }
 }

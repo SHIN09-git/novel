@@ -8,6 +8,8 @@
     "dev": "electron-vite dev",
     "build": "tsc --noEmit && electron-vite build",
     "smoke": "set NOVEL_DIRECTOR_SMOKE_TEST=1&& electron-vite preview",
+    "rc:fixture": "node scripts/rc-regression.mjs",
+    "test": "npm run rc:fixture && node scripts/validate-app-data.mjs tmp/rc-regression/novel-director-data.json && node scripts/validate-ai-modules.mjs && node scripts/validate-revision-merge.mjs && node scripts/validate-revision-writeback.mjs && node scripts/validate-revision-contract.mjs",
     "typecheck": "tsc --noEmit",
     "preview": "electron-vite preview"
   },

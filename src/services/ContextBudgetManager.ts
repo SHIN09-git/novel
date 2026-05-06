@@ -11,6 +11,12 @@ import type {
   StoryBible,
   TimelineEvent
 } from '../shared/types'
+import {
+  effectiveTreatmentMode,
+  TREATMENT_PRIORITY,
+  treatmentAllowsDefaultPrompt,
+  treatmentOmitReason
+} from '../shared/foreshadowingTreatment'
 import { TokenEstimator } from './TokenEstimator'
 
 interface ProjectContextData {
@@ -89,16 +95,32 @@ function stringifyCharacter(character: Character): string {
 }
 
 function stringifyForeshadowing(item: Foreshadowing): string {
+  const treatmentMode = effectiveTreatmentMode(item)
   return [
     item.title,
     item.description,
     item.status,
     item.weight,
+    treatmentMode,
     item.expectedPayoff,
     item.payoffMethod,
     item.relatedMainPlot,
     item.notes
   ].join('\n')
+}
+
+function foreshadowingPriority(item: Foreshadowing): number {
+  const treatmentMode = effectiveTreatmentMode(item)
+  return TREATMENT_PRIORITY[treatmentMode] * 10 + WEIGHT_PRIORITY[item.weight]
+}
+
+function foreshadowingOmitReason(item: Foreshadowing, budgetProfile: ContextBudgetProfile): string {
+  if (item.status === 'resolved' || item.status === 'abandoned') return '已回收且未被手动选择。'
+  const treatmentMode = effectiveTreatmentMode(item)
+  const treatmentReason = treatmentOmitReason(treatmentMode)
+  if (treatmentReason) return `${treatmentReason}。`
+  if (!budgetProfile.includeForeshadowingWeights.includes(item.weight)) return '权重或状态未进入当前预算。'
+  return 'token 预算不足，低于本章推进优先级。'
 }
 
 function stringifyTimelineEvent(event: TimelineEvent): string {
@@ -150,8 +172,29 @@ function removeOne(selection: ContextSelectionResult, field: keyof Pick<
   selection[field] = selection[field].filter((item) => item !== id)
 }
 
+interface ForcedContextSelection {
+  characterIds?: ID[]
+  foreshadowingIds?: ID[]
+}
+
+function mergeUniqueById<T extends { id: ID }>(primary: T[], secondary: T[]): T[] {
+  const seen = new Set<ID>()
+  return [...primary, ...secondary].filter((item) => {
+    if (seen.has(item.id)) return false
+    seen.add(item.id)
+    return true
+  })
+}
+
 export class ContextBudgetManager {
-  static selectContext(data: ProjectContextData, targetChapterOrder: number, budgetProfile: ContextBudgetProfile): ContextSelectionResult {
+  static selectContext(
+    data: ProjectContextData,
+    targetChapterOrder: number,
+    budgetProfile: ContextBudgetProfile,
+    forcedSelection: ForcedContextSelection = {}
+  ): ContextSelectionResult {
+    const forcedCharacterIds = new Set(forcedSelection.characterIds ?? [])
+    const forcedForeshadowingIds = new Set(forcedSelection.foreshadowingIds ?? [])
     const previousChapters = [...data.chapters]
       .filter((chapter) => chapter.order < targetChapterOrder)
       .sort((a, b) => a.order - b.order)
@@ -162,13 +205,17 @@ export class ContextBudgetManager {
       .sort((a, b) => a.chapterEnd - b.chapterEnd)
     const selectedStageSummaries = takeLast(stageSummaryCandidates, budgetProfile.includeStageSummariesCount)
 
-    const activeForeshadowings = data.foreshadowings
+    const automaticForeshadowings = data.foreshadowings
       .filter((item) => item.status !== 'resolved' && item.status !== 'abandoned')
       .filter((item) => budgetProfile.includeForeshadowingWeights.includes(item.weight))
-      .sort((a, b) => WEIGHT_PRIORITY[b.weight] - WEIGHT_PRIORITY[a.weight])
+      .filter((item) => treatmentAllowsDefaultPrompt(effectiveTreatmentMode(item)))
+      .sort((a, b) => foreshadowingPriority(b) - foreshadowingPriority(a))
+    const forcedForeshadowings = byId(data.foreshadowings, [...forcedForeshadowingIds])
+    const activeForeshadowings = mergeUniqueById(forcedForeshadowings, automaticForeshadowings)
 
     const relatedCharacterIds = new Set(activeForeshadowings.flatMap((item) => item.relatedCharacterIds))
     const selectedCharacters = data.characters.filter((character) => {
+      if (forcedCharacterIds.has(character.id)) return true
       if (budgetProfile.includeRelatedCharacters && relatedCharacterIds.has(character.id)) return true
       return budgetProfile.includeMainCharacters && character.isMain
     })
@@ -205,7 +252,7 @@ export class ContextBudgetManager {
       omit(selection, 'chapter', chapter.id, '旧章节由阶段摘要替代，避免详细回顾膨胀。', itemCost(stringifyChapter(chapter)))
     }
     for (const item of data.foreshadowings.filter((item) => !selection.selectedForeshadowingIds.includes(item.id))) {
-      omit(selection, 'foreshadowing', item.id, item.status === 'resolved' ? '已回收伏笔默认归档。' : '权重或状态未进入当前预算。', itemCost(stringifyForeshadowing(item)))
+      omit(selection, 'foreshadowing', item.id, foreshadowingOmitReason(item, budgetProfile), itemCost(stringifyForeshadowing(item)))
     }
 
     selection.estimatedTokens = selectionCost(data, selection, budgetProfile.styleSampleMaxChars)
@@ -227,11 +274,11 @@ export class ContextBudgetManager {
 
     while (selection.estimatedTokens > budgetProfile.maxTokens) {
       const low = byId(data.foreshadowings, selection.selectedForeshadowingIds)
-        .filter((item) => item.weight === 'low' || item.weight === 'medium')
-        .sort((a, b) => WEIGHT_PRIORITY[a.weight] - WEIGHT_PRIORITY[b.weight])[0]
+        .filter((item) => !forcedForeshadowingIds.has(item.id))
+        .sort((a, b) => foreshadowingPriority(a) - foreshadowingPriority(b))[0]
       if (!low) break
       removeOne(selection, 'selectedForeshadowingIds', low.id)
-      omit(selection, 'foreshadowing', low.id, '超出预算，省略低/中权重伏笔。', itemCost(stringifyForeshadowing(low)))
+      omit(selection, 'foreshadowing', low.id, 'token 预算不足，低于本章推进优先级。', itemCost(stringifyForeshadowing(low)))
       recalc()
     }
 

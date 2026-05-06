@@ -5,7 +5,11 @@ export type ContextBudgetMode = PromptMode | 'custom'
 export type ApiProvider = 'openai' | 'compatible' | 'local'
 export type ForeshadowingStatus = 'unresolved' | 'partial' | 'resolved' | 'abandoned'
 export type ForeshadowingWeight = 'low' | 'medium' | 'high' | 'payoff'
+export type ForeshadowingTreatmentMode = 'hidden' | 'hint' | 'advance' | 'mislead' | 'pause' | 'payoff'
 export type PipelineMode = 'conservative' | 'standard' | 'aggressive'
+export type PromptContextSnapshotSource = 'manual' | 'auto' | 'pipeline'
+export type PipelineContextSource = 'auto' | 'prompt_snapshot'
+export type ContinuitySource = 'saved_bridge' | 'auto_from_previous_ending' | 'manual'
 export type ChapterGenerationJobStatus = 'idle' | 'running' | 'paused' | 'completed' | 'failed'
 export type ChapterGenerationStepType =
   | 'context_budget_selection'
@@ -24,6 +28,50 @@ export type MemoryUpdateCandidateType = 'character' | 'foreshadowing' | 'chapter
 export type MemoryUpdateCandidateStatus = 'pending' | 'accepted' | 'rejected'
 export type ConsistencySeverity = 'low' | 'medium' | 'high'
 export type RevisionCandidateStatus = 'pending' | 'accepted' | 'rejected'
+export type RevisionSessionStatus = 'active' | 'completed' | 'abandoned'
+export type RevisionRequestType =
+  | 'polish_style'
+  | 'reduce_ai_tone'
+  | 'strengthen_conflict'
+  | 'improve_dialogue'
+  | 'compress_pacing'
+  | 'enhance_emotion'
+  | 'fix_ooc'
+  | 'fix_continuity'
+  | 'fix_worldbuilding'
+  | 'fix_character_knowledge'
+  | 'fix_foreshadowing'
+  | 'fix_plot_logic'
+  | 'improve_continuity'
+  | 'reduce_redundancy'
+  | 'compress_description'
+  | 'remove_repeated_explanation'
+  | 'strengthen_chapter_transition'
+  | 'rewrite_section'
+  | 'custom'
+export type RevisionScope = 'full' | 'local'
+export type RevisionVersionStatus = 'pending' | 'accepted' | 'rejected'
+export type ConsistencyIssueType =
+  | 'timeline_conflict'
+  | 'worldbuilding_conflict'
+  | 'character_knowledge_leak'
+  | 'character_motivation_gap'
+  | 'character_ooc'
+  | 'foreshadowing_misuse'
+  | 'foreshadowing_leak'
+  | 'geography_or_physics_conflict'
+  | 'previous_chapter_contradiction'
+  | 'continuity_gap'
+  | 'other'
+export type ConsistencyIssueStatus = 'open' | 'ignored' | 'converted_to_revision' | 'resolved'
+
+export interface RevisionGenerationRequest {
+  type: RevisionRequestType
+  instruction: string
+  revisionScope: RevisionScope
+  fullChapterText: string
+  targetRange?: string
+}
 
 export interface Project {
   id: ID
@@ -109,6 +157,7 @@ export interface Foreshadowing {
   description: string
   status: ForeshadowingStatus
   weight: ForeshadowingWeight
+  treatmentMode: ForeshadowingTreatmentMode
   expectedPayoff: string
   payoffMethod: string
   relatedCharacterIds: ID[]
@@ -182,6 +231,9 @@ export interface PromptConfig {
   task: ChapterTask
   selectedCharacterIds: ID[]
   selectedForeshadowingIds: ID[]
+  foreshadowingTreatmentOverrides?: Record<ID, ForeshadowingTreatmentMode>
+  continuityInstructions?: string
+  useContinuityBridge?: boolean
 }
 
 export interface PromptVersion {
@@ -195,6 +247,39 @@ export interface PromptVersion {
   moduleSelection: PromptModuleSelection
   task: ChapterTask
   createdAt: string
+}
+
+export interface PromptContextSnapshot {
+  id: ID
+  projectId: ID
+  targetChapterOrder: number
+  mode: ContextBudgetMode
+  budgetProfileId: ID | null
+  budgetProfile: ContextBudgetProfile
+  contextSelectionResult: ContextSelectionResult
+  selectedCharacterIds: ID[]
+  selectedForeshadowingIds: ID[]
+  foreshadowingTreatmentOverrides: Record<ID, ForeshadowingTreatmentMode>
+  chapterTask: ChapterTask
+  finalPrompt: string
+  estimatedTokens: number
+  source: PromptContextSnapshotSource
+  note: string
+  createdAt: string
+  updatedAt: string
+}
+
+export interface BuildPromptResult {
+  finalPrompt: string
+  estimatedTokens: number
+  contextSelectionResult: ContextSelectionResult | null
+  selectedCharacterIds: ID[]
+  selectedForeshadowingIds: ID[]
+  foreshadowingTreatmentOverrides: Record<ID, ForeshadowingTreatmentMode>
+  chapterTask: ChapterTask
+  continuityBridge: ChapterContinuityBridge | null
+  continuitySource: ContinuitySource | null
+  warnings: string[]
 }
 
 export interface AppSettings {
@@ -257,6 +342,27 @@ export interface AIResult<T> {
   finishReason?: string
 }
 
+export interface ChapterContinuityBridgeSuggestion {
+  lastSceneLocation: string
+  lastPhysicalState: string
+  lastEmotionalState: string
+  lastUnresolvedAction: string
+  lastDialogueOrThought: string
+  immediateNextBeat: string
+  mustContinueFrom: string
+  mustNotReset: string
+  openMicroTensions: string
+}
+
+export interface ChapterContinuityBridge extends ChapterContinuityBridgeSuggestion {
+  id: ID
+  projectId: ID
+  fromChapterId: ID
+  toChapterOrder: number
+  createdAt: string
+  updatedAt: string
+}
+
 export interface ChapterReviewDraft {
   summary: string
   newInformation: string
@@ -265,6 +371,7 @@ export interface ChapterReviewDraft {
   resolvedForeshadowing: string
   endingHook: string
   riskWarnings: string
+  continuityBridgeSuggestion: ChapterContinuityBridgeSuggestion
 }
 
 export interface CharacterStateSuggestion {
@@ -282,6 +389,7 @@ export interface ForeshadowingCandidate {
   description: string
   firstChapterOrder: number | null
   suggestedWeight: ForeshadowingWeight
+  recommendedTreatmentMode?: ForeshadowingTreatmentMode
   expectedPayoff: string
   relatedCharacterIds: ID[]
   notes: string
@@ -290,6 +398,7 @@ export interface ForeshadowingCandidate {
 export interface ForeshadowingStatusChangeSuggestion {
   foreshadowingId: ID
   suggestedStatus: ForeshadowingStatus
+  recommendedTreatmentMode?: ForeshadowingTreatmentMode
   evidenceText: string
   notes: string
   confidence: number
@@ -323,6 +432,11 @@ export interface ChapterPlan {
   endingHook: string
   readerEmotionTarget: string
   estimatedWordCount: string
+  openingContinuationBeat: string
+  carriedPhysicalState: string
+  carriedEmotionalState: string
+  unresolvedMicroTensions: string
+  forbiddenResets: string
 }
 
 export interface ChapterDraftResult {
@@ -331,11 +445,20 @@ export interface ChapterDraftResult {
 }
 
 export interface ConsistencyReviewIssue {
-  category: 'timeline' | 'setting' | 'character_ooc' | 'foreshadowing' | 'pacing' | 'reader_emotion'
+  id: ID
+  type: ConsistencyIssueType
+  category?: 'timeline' | 'setting' | 'character_ooc' | 'foreshadowing' | 'pacing' | 'reader_emotion'
   severity: ConsistencySeverity
+  title: string
   description: string
   evidence: string
-  suggestion: string
+  relatedChapterIds: ID[]
+  relatedCharacterIds: ID[]
+  relatedForeshadowingIds: ID[]
+  suggestedFix: string
+  revisionInstruction: string
+  status: ConsistencyIssueStatus
+  suggestion?: string
 }
 
 export interface ConsistencyReviewData {
@@ -354,6 +477,8 @@ export interface ChapterGenerationJob {
   id: ID
   projectId: ID
   targetChapterOrder: number
+  promptContextSnapshotId?: ID | null
+  contextSource: PipelineContextSource
   status: ChapterGenerationJobStatus
   currentStep: ChapterGenerationStepType | null
   createdAt: string
@@ -406,7 +531,9 @@ export interface ConsistencyReviewReport {
   projectId: ID
   jobId: ID
   chapterId: ID | null
-  issues: string
+  promptContextSnapshotId?: ID | null
+  issues: ConsistencyReviewIssue[]
+  legacyIssuesText?: string
   suggestions: string
   severitySummary: ConsistencySeverity
   createdAt: string
@@ -416,11 +543,28 @@ export interface QualityGateDimensionScores {
   plotCoherence: number
   characterConsistency: number
   foreshadowingControl: number
+  chapterContinuity: number
+  redundancyControl: number
   styleMatch: number
   pacing: number
   emotionalPayoff: number
   originality: number
   promptCompliance: number
+}
+
+export interface RedundancyReport {
+  id: ID
+  projectId: ID
+  chapterId: ID | null
+  draftId: ID | null
+  repeatedPhrases: string[]
+  repeatedSceneDescriptions: string[]
+  repeatedExplanations: string[]
+  overusedIntensifiers: string[]
+  redundantParagraphs: string[]
+  compressionSuggestions: string[]
+  overallRedundancyScore: number
+  createdAt: string
 }
 
 export interface QualityGateIssue {
@@ -429,6 +573,7 @@ export interface QualityGateIssue {
   description: string
   evidence: string
   suggestedFix: string
+  linkedConsistencyIssueId?: ID
 }
 
 export interface QualityGateReport {
@@ -437,6 +582,7 @@ export interface QualityGateReport {
   jobId: ID
   chapterId: ID | null
   draftId: ID | null
+  promptContextSnapshotId?: ID | null
   overallScore: number
   pass: boolean
   dimensions: QualityGateDimensionScores
@@ -444,6 +590,37 @@ export interface QualityGateReport {
   requiredFixes: string[]
   optionalSuggestions: string[]
   createdAt: string
+}
+
+export interface GenerationRunTrace {
+  id: ID
+  projectId: ID
+  jobId: ID
+  targetChapterOrder: number
+  promptContextSnapshotId: ID | null
+  contextSource: PipelineContextSource
+  selectedChapterIds: ID[]
+  selectedStageSummaryIds: ID[]
+  selectedCharacterIds: ID[]
+  selectedForeshadowingIds: ID[]
+  foreshadowingTreatmentModes: Record<ID, ForeshadowingTreatmentMode>
+  foreshadowingTreatmentOverrides: Record<ID, ForeshadowingTreatmentMode>
+  omittedContextItems: OmittedContextItem[]
+  contextWarnings: string[]
+  finalPromptTokenEstimate: number
+  generatedDraftId: ID | null
+  consistencyReviewReportId: ID | null
+  qualityGateReportId: ID | null
+  revisionSessionIds: ID[]
+  acceptedRevisionVersionId: ID | null
+  acceptedMemoryCandidateIds: ID[]
+  rejectedMemoryCandidateIds: ID[]
+  continuityBridgeId: ID | null
+  continuitySource: ContinuitySource | null
+  redundancyReportId: ID | null
+  continuityWarnings: string[]
+  createdAt: string
+  updatedAt: string
 }
 
 export interface RevisionCandidate {
@@ -460,6 +637,57 @@ export interface RevisionCandidate {
   updatedAt: string
 }
 
+export interface RevisionSession {
+  id: ID
+  projectId: ID
+  chapterId: ID
+  sourceDraftId: ID | null
+  status: RevisionSessionStatus
+  createdAt: string
+  updatedAt: string
+}
+
+export interface RevisionRequest {
+  id: ID
+  sessionId: ID
+  type: RevisionRequestType
+  targetRange: string
+  instruction: string
+  createdAt: string
+}
+
+export interface RevisionResult {
+  revisedText: string
+  changedSummary: string
+  risks: string
+  preservedFacts: string
+}
+
+export interface RevisionVersion {
+  id: ID
+  sessionId: ID
+  requestId: ID
+  title: string
+  body: string
+  changedSummary: string
+  risks: string
+  preservedFacts: string
+  status: RevisionVersionStatus
+  createdAt: string
+  updatedAt: string
+}
+
+export interface ChapterVersion {
+  id: ID
+  projectId: ID
+  chapterId: ID
+  source: string
+  title: string
+  body: string
+  note: string
+  createdAt: string
+}
+
 export interface AppData {
   schemaVersion: number
   projects: Project[]
@@ -471,6 +699,8 @@ export interface AppData {
   timelineEvents: TimelineEvent[]
   stageSummaries: StageSummary[]
   promptVersions: PromptVersion[]
+  promptContextSnapshots: PromptContextSnapshot[]
+  chapterContinuityBridges: ChapterContinuityBridge[]
   chapterGenerationJobs: ChapterGenerationJob[]
   chapterGenerationSteps: ChapterGenerationStep[]
   generatedChapterDrafts: GeneratedChapterDraft[]
@@ -478,7 +708,13 @@ export interface AppData {
   consistencyReviewReports: ConsistencyReviewReport[]
   contextBudgetProfiles: ContextBudgetProfile[]
   qualityGateReports: QualityGateReport[]
+  generationRunTraces: GenerationRunTrace[]
+  redundancyReports: RedundancyReport[]
   revisionCandidates: RevisionCandidate[]
+  revisionSessions: RevisionSession[]
+  revisionRequests: RevisionRequest[]
+  revisionVersions: RevisionVersion[]
+  chapterVersions: ChapterVersion[]
   settings: AppSettings
 }
 
@@ -491,6 +727,7 @@ export interface PromptBuildInput {
   foreshadowings: Foreshadowing[]
   timelineEvents: TimelineEvent[]
   stageSummaries: StageSummary[]
+  chapterContinuityBridges?: ChapterContinuityBridge[]
   budgetProfile?: ContextBudgetProfile
   config: PromptConfig
 }

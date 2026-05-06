@@ -10,6 +10,8 @@ export function projectData(data: AppData, projectId: ID) {
     timelineEvents: data.timelineEvents.filter((item) => item.projectId === projectId),
     stageSummaries: data.stageSummaries.filter((item) => item.projectId === projectId),
     promptVersions: data.promptVersions.filter((item) => item.projectId === projectId),
+    promptContextSnapshots: data.promptContextSnapshots.filter((item) => item.projectId === projectId),
+    chapterContinuityBridges: data.chapterContinuityBridges.filter((item) => item.projectId === projectId),
     chapterGenerationJobs: data.chapterGenerationJobs.filter((item) => item.projectId === projectId),
     chapterGenerationSteps: data.chapterGenerationSteps,
     generatedChapterDrafts: data.generatedChapterDrafts.filter((item) => item.projectId === projectId),
@@ -17,6 +19,12 @@ export function projectData(data: AppData, projectId: ID) {
     consistencyReviewReports: data.consistencyReviewReports.filter((item) => item.projectId === projectId),
     contextBudgetProfiles: data.contextBudgetProfiles.filter((item) => item.projectId === projectId),
     qualityGateReports: data.qualityGateReports.filter((item) => item.projectId === projectId),
-    revisionCandidates: data.revisionCandidates.filter((item) => item.projectId === projectId)
+    generationRunTraces: data.generationRunTraces.filter((item) => item.projectId === projectId),
+    redundancyReports: data.redundancyReports.filter((item) => item.projectId === projectId),
+    revisionCandidates: data.revisionCandidates.filter((item) => item.projectId === projectId),
+    revisionSessions: data.revisionSessions.filter((item) => item.projectId === projectId),
+    revisionRequests: data.revisionRequests,
+    revisionVersions: data.revisionVersions,
+    chapterVersions: data.chapterVersions.filter((item) => item.projectId === projectId)
   }
 }

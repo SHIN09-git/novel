@@ -69,7 +69,8 @@ export function TextArea({
   rows = 5,
   hint,
   placeholder,
-  onBlur
+  onBlur,
+  className
 }: {
   label: string
   value: string
@@ -78,10 +79,12 @@ export function TextArea({
   hint?: string
   placeholder?: string
   onBlur?: () => void
+  className?: string
 }) {
   return (
     <Field label={label} hint={hint}>
       <textarea
+        className={className}
         rows={rows}
         value={value}
         placeholder={placeholder}

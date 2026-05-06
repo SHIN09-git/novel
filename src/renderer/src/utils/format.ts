@@ -1,4 +1,5 @@
-import type { ForeshadowingStatus, ForeshadowingWeight, ID, PromptMode } from '../../../shared/types'
+import type { ForeshadowingStatus, ForeshadowingTreatmentMode, ForeshadowingWeight, ID, PromptMode } from '../../../shared/types'
+import { treatmentLabel } from '../../../shared/foreshadowingTreatment'
 
 export function newId(): ID {
   return globalThis.crypto?.randomUUID?.() ?? `${Date.now()}-${Math.random().toString(16).slice(2)}`
@@ -33,6 +34,10 @@ export function weightLabel(weight: ForeshadowingWeight): string {
     high: '高',
     payoff: '回收'
   }[weight]
+}
+
+export function treatmentModeLabel(mode: ForeshadowingTreatmentMode): string {
+  return treatmentLabel(mode)
 }
 
 export function modeLabel(mode: PromptMode): string {

@@ -1,12 +1,13 @@
 export class TokenEstimator {
-  static estimate(text: string): number {
-    if (!text.trim()) return 0
+  static estimate(text: string | null | undefined): number {
+    const safeText = text ?? ''
+    if (!safeText.trim()) return 0
 
     let cjk = 0
     let ascii = 0
     let other = 0
 
-    for (const char of text) {
+    for (const char of safeText) {
       if (/[\u4e00-\u9fff]/.test(char)) {
         cjk += 1
       } else if (/[\x00-\x7F]/.test(char)) {
