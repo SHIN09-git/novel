@@ -1,0 +1,185 @@
+﻿:root {
+  color-scheme: light;
+  --color-bg: #f6f5ef;
+  --color-surface: #fffefa;
+  --color-surface-elevated: #ffffff;
+  --color-surface-soft: #eef5f2;
+  --color-border: #deded6;
+  --color-text-primary: #1f2522;
+  --color-text-secondary: #58625e;
+  --color-text-muted: #858b86;
+  --color-accent: #28766f;
+  --color-accent-strong: #1f5f59;
+  --color-accent-soft: #dfeeea;
+  --color-warning: #c98122;
+  --color-warning-soft: #fff4df;
+  --color-success: #2f7d56;
+  --color-success-soft: #e3f2e8;
+  --color-danger: #b65353;
+  --color-danger-soft: #f9e7e5;
+  --color-info: #476f8f;
+  --color-info-soft: #e6eef5;
+  --sidebar: #17211f;
+  --sidebar-soft: #21302d;
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-6: 24px;
+  --space-8: 32px;
+  --space-10: 40px;
+  --radius-sm: 6px;
+  --radius-md: 8px;
+  --radius-lg: 12px;
+  --shadow-card: 0 16px 44px rgba(31, 37, 34, 0.08);
+  --shadow-soft: 0 8px 22px rgba(31, 37, 34, 0.06);
+  --bg: var(--color-bg);
+  --surface: var(--color-surface);
+  --surface-strong: var(--color-surface-soft);
+  --ink: var(--color-text-primary);
+  --muted: var(--color-text-secondary);
+  --line: var(--color-border);
+  --accent: var(--color-accent);
+  --accent-strong: var(--color-accent-strong);
+  --teal: var(--color-accent);
+  --danger: var(--color-danger);
+  --shadow: var(--shadow-card);
+  --radius: var(--radius-md);
+  font-family:
+    Inter, "Microsoft YaHei UI", "Microsoft YaHei", system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+}
+
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --color-bg: #141817;
+  --color-surface: #1d2320;
+  --color-surface-elevated: #242b28;
+  --color-surface-soft: #27302d;
+  --color-border: #39433f;
+  --color-text-primary: #f3f2ec;
+  --color-text-secondary: #b6bcb4;
+  --color-text-muted: #899089;
+  --color-accent: #72c4b7;
+  --color-accent-strong: #93d7cc;
+  --color-accent-soft: #203a37;
+  --color-warning: #e0a24f;
+  --color-warning-soft: #372b1f;
+  --color-success: #80c790;
+  --color-success-soft: #20362a;
+  --color-danger: #e18882;
+  --color-danger-soft: #3b2526;
+  --color-info: #8cb5d4;
+  --color-info-soft: #21313f;
+  --sidebar: #141713;
+  --sidebar-soft: #20251f;
+  --shadow-card: 0 16px 44px rgba(0, 0, 0, 0.24);
+  --shadow-soft: 0 8px 22px rgba(0, 0, 0, 0.18);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root[data-theme="system"] {
+    color-scheme: dark;
+    --color-bg: #141817;
+    --color-surface: #1d2320;
+    --color-surface-elevated: #242b28;
+    --color-surface-soft: #27302d;
+    --color-border: #39433f;
+    --color-text-primary: #f3f2ec;
+    --color-text-secondary: #b6bcb4;
+    --color-text-muted: #899089;
+    --color-accent: #72c4b7;
+    --color-accent-strong: #93d7cc;
+    --color-accent-soft: #203a37;
+    --color-warning: #e0a24f;
+    --color-warning-soft: #372b1f;
+    --color-success: #80c790;
+    --color-success-soft: #20362a;
+    --color-danger: #e18882;
+    --color-danger-soft: #3b2526;
+    --color-info: #8cb5d4;
+    --color-info-soft: #21313f;
+    --sidebar: #141713;
+    --sidebar-soft: #20251f;
+    --shadow-card: 0 16px 44px rgba(0, 0, 0, 0.24);
+    --shadow-soft: 0 8px 22px rgba(0, 0, 0, 0.18);
+  }
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  background:
+    radial-gradient(circle at top right, rgba(40, 118, 111, 0.08), transparent 34rem),
+    linear-gradient(180deg, #faf9f4 0%, var(--bg) 58%);
+  color: var(--ink);
+  min-width: 1024px;
+}
+
+button,
+input,
+textarea,
+select {
+  font: inherit;
+}
+
+button {
+  border: 0;
+  cursor: pointer;
+}
+
+input,
+textarea,
+select {
+  width: 100%;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--color-surface-elevated);
+  color: var(--ink);
+  padding: 11px 12px;
+  outline: none;
+  transition:
+    border-color 140ms ease,
+    box-shadow 140ms ease,
+    background 140ms ease;
+}
+
+textarea {
+  resize: vertical;
+  line-height: 1.65;
+}
+
+input:focus,
+textarea:focus,
+select:focus {
+  border-color: var(--teal);
+  box-shadow: 0 0 0 3px rgba(40, 118, 111, 0.13);
+}
+
+table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+th,
+td {
+  border-bottom: 1px solid var(--line);
+  padding: 12px 10px;
+  text-align: left;
+  vertical-align: top;
+}
+
+th {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 700;
+  background: rgba(247, 246, 241, 0.72);
+}
+
+tr {
+  cursor: pointer;
+}
+
+tr:hover,

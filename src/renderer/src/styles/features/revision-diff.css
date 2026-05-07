@@ -1,0 +1,76 @@
+﻿.revision-view .revision-diff {
+  display: grid;
+  gap: var(--space-3);
+  min-height: 62vh;
+}
+
+.revision-view .revision-diff-stats {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+.revision-view .revision-diff-stats span {
+  padding: 5px 10px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--surface-strong);
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.revision-view .revision-diff-body {
+  display: grid;
+  gap: var(--space-2);
+}
+
+.revision-view .revision-diff-segment {
+  padding: var(--space-3);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--surface);
+}
+
+.revision-view .revision-diff-segment pre {
+  margin: 0;
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-family: inherit;
+  line-height: 1.8;
+}
+
+.revision-view .revision-diff-segment strong {
+  display: inline-block;
+  margin-bottom: 6px;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.revision-view .revision-diff-equal {
+  opacity: 0.68;
+  background: var(--surface-strong);
+}
+
+.revision-view .revision-diff-insert {
+  border-color: rgba(40, 118, 111, 0.35);
+  background: var(--color-success-soft);
+}
+
+.revision-view .revision-diff-delete {
+  border-color: rgba(182, 83, 83, 0.32);
+  background: var(--color-danger-soft);
+}
+
+.revision-view .revision-diff-replace {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: var(--space-3);
+  border-color: rgba(201, 129, 34, 0.34);
+  background: var(--color-warning-soft);
+}
+
+.revision-view .revision-message {
+  margin-top: var(--space-4);
+}
+
+

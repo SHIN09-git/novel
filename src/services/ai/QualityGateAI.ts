@@ -27,6 +27,7 @@ import type {
 import type { QualityGateEvaluation } from '../QualityGateService'
 import { REVIEW_SYSTEM_PROMPT } from './AIPromptTemplates'
 import { ensureQualityGateEvaluation, ensureRevisionCandidate } from './AIResponseNormalizer'
+import { validateQualityGateSchema, validateRevisionCandidateSchema } from './AISchemaValidator'
 
 export class QualityGateAI {
   constructor(private readonly client: AIClient) {}
@@ -86,7 +87,7 @@ export class QualityGateAI {
       `Context:\n${context}`
     ].join('\n')
 
-    return this.client.requestJson(REVIEW_SYSTEM_PROMPT, userPrompt, ensureQualityGateEvaluation, fallback)
+    return this.client.requestJson(REVIEW_SYSTEM_PROMPT, userPrompt, ensureQualityGateEvaluation, fallback, undefined, validateQualityGateSchema)
   }
 
 
@@ -113,7 +114,7 @@ export class QualityGateAI {
       `Context:\n${context}`
     ].join('\n')
 
-    return this.client.requestJson(REVIEW_SYSTEM_PROMPT, userPrompt, ensureRevisionCandidate, fallback)
+    return this.client.requestJson(REVIEW_SYSTEM_PROMPT, userPrompt, ensureRevisionCandidate, fallback, undefined, validateRevisionCandidateSchema)
   }
 
 }

@@ -2,16 +2,25 @@ import { clipboard, dialog, ipcMain, shell } from 'electron'
 import { copyFile, mkdir, readFile, stat, writeFile } from 'node:fs/promises'
 import { dirname, extname, join, resolve } from 'node:path'
 import { safeParseJson } from '../../services/AIJsonParser'
-import { normalizeAppData } from '../../shared/defaults'
+import { normalizeAppData, sanitizeAppDataForPersistence } from '../../shared/defaults'
 import { describeNetworkError as describeSafeNetworkError, getUserFriendlyError, redactSensitiveText } from '../../shared/errorUtils'
 import { IPC_CHANNELS } from '../../shared/ipc/ipcChannels'
 import type {
   ChatCompletionRequest,
+  ConfirmMigrationMergeRequest,
+  ConfirmMigrationMergeResult,
+  CredentialDeleteApiKeyResult,
+  CredentialHasApiKeyResult,
+  CredentialMigrateLegacyApiKeyResult,
+  CredentialSetApiKeyRequest,
+  CredentialSetApiKeyResult,
   ExportDataResult,
   GetStoragePathResult,
   ImportDataResult,
   MigrateStoragePathRequest,
   MigrateStoragePathResult,
+  MigrationMergePreviewRequest,
+  MigrationMergePreviewResult,
   OpenStorageFolderResult,
   ResetStoragePathRequest,
   SaveFileResult,
@@ -21,8 +30,14 @@ import type {
   StorageGetResult,
   StorageSaveResult
 } from '../../shared/ipc/ipcTypes'
-import type { AppData, AppSettings } from '../../shared/types'
+import type { AppData } from '../../shared/types'
 import { AppConfigService } from '../AppConfigService'
+import {
+  backupFileForOverwrite,
+  confirmMigrationMerge,
+  createMigrationMergePreview
+} from '../DataMergeService'
+import { SecureCredentialService } from '../SecureCredentialService'
 import { JsonStorageService } from '../../storage/JsonStorageService'
 import { safeIpcHandler } from './safeIpcHandler'
 
@@ -30,12 +45,13 @@ const DATA_FILE_NAME = 'novel-director-data.json'
 
 interface IpcHandlerContext {
   appConfig: AppConfigService
+  credentialService: SecureCredentialService
   getStorage: () => JsonStorageService
   setStorage: (storage: JsonStorageService) => void
 }
 
-function sanitizeAiErrorText(text: string, settings?: AppSettings): string {
-  return redactSensitiveText(text, [settings?.apiKey]).slice(0, 800)
+function sanitizeAiErrorText(text: string, apiKey?: string): string {
+  return redactSensitiveText(text, [apiKey]).slice(0, 800)
 }
 
 async function pathExists(path: string): Promise<boolean> {
@@ -85,6 +101,47 @@ async function saveTextFile(request: SaveTextFileRequest | SaveMarkdownFileReque
   return { canceled: false, filePath: result.filePath }
 }
 
+async function secureAndSanitizeAppData(
+  context: IpcHandlerContext,
+  data: AppData
+): Promise<{ data: AppData; migratedLegacyApiKey: boolean; credentialWarning?: string }> {
+  const normalized = normalizeAppData(data)
+  const legacyApiKey = normalized.settings.apiKey.trim()
+  let hasApiKey = normalized.settings.hasApiKey
+  let migratedLegacyApiKey = false
+  let credentialWarning = ''
+
+  if (legacyApiKey) {
+    try {
+      await context.credentialService.migrateLegacyApiKey(legacyApiKey)
+      hasApiKey = true
+      migratedLegacyApiKey = true
+    } catch (error) {
+      hasApiKey = false
+      credentialWarning = `旧 API Key 迁移到安全存储失败，已从 AppData 中移除：${getUserFriendlyError(error)}`
+    }
+  } else {
+    try {
+      hasApiKey = await context.credentialService.hasApiKey()
+    } catch (error) {
+      credentialWarning = `读取 API Key 安全存储状态失败：${getUserFriendlyError(error)}`
+    }
+  }
+
+  return {
+    data: sanitizeAppDataForPersistence({
+      ...normalized,
+      settings: {
+        ...normalized.settings,
+        apiKey: '',
+        hasApiKey
+      }
+    }),
+    migratedLegacyApiKey,
+    credentialWarning
+  }
+}
+
 async function migrateStoragePath(
   context: IpcHandlerContext,
   rawTargetPath: string,
@@ -96,22 +153,28 @@ async function migrateStoragePath(
   const targetPath = await resolveDataStoragePath(rawTargetPath)
 
   try {
-    await storage.save(data)
+    const secured = await secureAndSanitizeAppData(context, data)
+    await storage.save(secured.data)
 
-    if (oldPath !== targetPath && (await pathExists(targetPath)) && !overwrite) {
+    const targetAlreadyExists = oldPath !== targetPath && (await pathExists(targetPath))
+    if (targetAlreadyExists && !overwrite) {
+      const mergePreview = await createMigrationMergePreview(oldPath, targetPath)
       return {
         ok: false,
         needsOverwrite: true,
+        needsMerge: true,
         storagePath: oldPath,
         targetPath,
-        error: '目标路径已存在数据文件。MVP 当前只支持覆盖或取消。'
+        mergePreview,
+        error: '目标路径已存在数据文件。请选择合并已有数据、覆盖目标数据或取消迁移。'
       }
     }
 
     await mkdir(dirname(targetPath), { recursive: true })
     const backupPath = await backupExistingSourceData(oldPath)
+    const targetBackupPath = targetAlreadyExists ? await backupFileForOverwrite(targetPath) : null
     const nextStorage = new JsonStorageService(targetPath)
-    await nextStorage.save(normalizeAppData(data))
+    await nextStorage.save(secured.data)
     await nextStorage.load()
     await context.appConfig.setStoragePath(targetPath)
     context.setStorage(nextStorage)
@@ -119,7 +182,8 @@ async function migrateStoragePath(
     return {
       ok: true,
       storagePath: targetPath,
-      backupPath: backupPath ?? undefined
+      backupPath: backupPath ?? undefined,
+      targetBackupPath: targetBackupPath ?? undefined
     }
   } catch (error) {
     return {
@@ -135,10 +199,15 @@ export function registerIpcHandlers(context: IpcHandlerContext): void {
     IPC_CHANNELS.STORAGE_GET,
     safeIpcHandler(async (): Promise<StorageGetResult> => {
       const storage = context.getStorage()
-      const data = await storage.load()
+      const loaded = await storage.load()
+      const secured = await secureAndSanitizeAppData(context, loaded)
+      if (secured.migratedLegacyApiKey || loaded.settings.apiKey || loaded.settings.hasApiKey !== secured.data.settings.hasApiKey) {
+        await storage.save(secured.data)
+      }
       return {
-        data,
-        storagePath: storage.getStoragePath()
+        data: secured.data,
+        storagePath: storage.getStoragePath(),
+        credentialWarning: secured.credentialWarning
       }
     })
   )
@@ -147,10 +216,12 @@ export function registerIpcHandlers(context: IpcHandlerContext): void {
     IPC_CHANNELS.STORAGE_SAVE,
     safeIpcHandler(async (_event, data: AppData): Promise<StorageSaveResult> => {
       const storage = context.getStorage()
-      await storage.save(data)
+      const secured = await secureAndSanitizeAppData(context, data)
+      await storage.save(secured.data)
       return {
         ok: true,
-        storagePath: storage.getStoragePath()
+        storagePath: storage.getStoragePath(),
+        credentialWarning: secured.credentialWarning
       }
     })
   )
@@ -165,7 +236,7 @@ export function registerIpcHandlers(context: IpcHandlerContext): void {
       })
 
       if (result.canceled || !result.filePath) return { canceled: true }
-      await writeFile(result.filePath, JSON.stringify(normalizeAppData(data), null, 2), 'utf-8')
+      await writeFile(result.filePath, JSON.stringify(sanitizeAppDataForPersistence(data), null, 2), 'utf-8')
       return { canceled: false, filePath: result.filePath }
     })
   )
@@ -185,12 +256,14 @@ export function registerIpcHandlers(context: IpcHandlerContext): void {
       const parsed = safeParseJson<Partial<AppData>>(raw, '导入数据文件')
       if (!parsed.ok) throw new Error(parsed.parseError)
       const imported = normalizeAppData(parsed.data)
-      await storage.save(imported)
+      const secured = await secureAndSanitizeAppData(context, imported)
+      await storage.save(secured.data)
       return {
         canceled: false,
         filePath: result.filePaths[0],
-        data: imported,
-        storagePath: storage.getStoragePath()
+        data: secured.data,
+        storagePath: storage.getStoragePath(),
+        credentialWarning: secured.credentialWarning
       }
     })
   )
@@ -225,6 +298,37 @@ export function registerIpcHandlers(context: IpcHandlerContext): void {
     safeIpcHandler(async (_event, request: MigrateStoragePathRequest): Promise<MigrateStoragePathResult> =>
       migrateStoragePath(context, request.storagePath, request.data, Boolean(request.overwrite))
     )
+  )
+
+  ipcMain.handle(
+    IPC_CHANNELS.APP_CREATE_MIGRATION_MERGE_PREVIEW,
+    safeIpcHandler(
+      async (_event, request: MigrationMergePreviewRequest): Promise<MigrationMergePreviewResult> => ({
+        ok: true,
+        preview: await createMigrationMergePreview(request.sourcePath, request.targetPath)
+      })
+    )
+  )
+
+  ipcMain.handle(
+    IPC_CHANNELS.APP_CONFIRM_MIGRATION_MERGE,
+    safeIpcHandler(async (_event, request: ConfirmMigrationMergeRequest): Promise<ConfirmMigrationMergeResult> => {
+      const sourcePath = await resolveDataStoragePath(request.sourcePath)
+      const targetPath = await resolveDataStoragePath(request.targetPath)
+      const result = await confirmMigrationMerge(sourcePath, targetPath)
+      const nextStorage = new JsonStorageService(targetPath)
+      await nextStorage.load()
+      await context.appConfig.setStoragePath(targetPath)
+      context.setStorage(nextStorage)
+      return {
+        ok: true,
+        storagePath: targetPath,
+        data: result.data,
+        preview: result.preview,
+        sourceBackupPath: result.sourceBackupPath,
+        targetBackupPath: result.targetBackupPath
+      }
+    })
   )
 
   ipcMain.handle(
@@ -274,10 +378,44 @@ export function registerIpcHandlers(context: IpcHandlerContext): void {
   )
 
   ipcMain.handle(
+    IPC_CHANNELS.CREDENTIALS_SET_API_KEY,
+    safeIpcHandler(async (_event, request: CredentialSetApiKeyRequest | string): Promise<CredentialSetApiKeyResult> => {
+      const apiKey = typeof request === 'string' ? request : request.apiKey
+      await context.credentialService.setApiKey(apiKey)
+      return { ok: true, hasApiKey: true }
+    })
+  )
+
+  ipcMain.handle(
+    IPC_CHANNELS.CREDENTIALS_HAS_API_KEY,
+    safeIpcHandler(async (): Promise<CredentialHasApiKeyResult> => ({
+      ok: true,
+      hasApiKey: await context.credentialService.hasApiKey()
+    }))
+  )
+
+  ipcMain.handle(
+    IPC_CHANNELS.CREDENTIALS_DELETE_API_KEY,
+    safeIpcHandler(async (): Promise<CredentialDeleteApiKeyResult> => {
+      await context.credentialService.deleteApiKey()
+      return { ok: true, hasApiKey: false }
+    })
+  )
+
+  ipcMain.handle(
+    IPC_CHANNELS.CREDENTIALS_MIGRATE_LEGACY_API_KEY,
+    safeIpcHandler(async (_event, apiKey: string): Promise<CredentialMigrateLegacyApiKeyResult> => ({
+      ok: true,
+      hasApiKey: await context.credentialService.migrateLegacyApiKey(typeof apiKey === 'string' ? apiKey : '')
+    }))
+  )
+
+  ipcMain.handle(
     IPC_CHANNELS.AI_CHAT_COMPLETION,
     safeIpcHandler(async (_event, request: ChatCompletionRequest) => {
       const settings = request.settings
-      if (settings.apiProvider !== 'local' && !settings.apiKey.trim()) {
+      const apiKey = settings.apiProvider === 'local' ? '' : await context.credentialService.getApiKey()
+      if (settings.apiProvider !== 'local' && !apiKey.trim()) {
         return { ok: false as const, error: '未配置 API Key。已跳过远程 AI 调用。' }
       }
 
@@ -289,8 +427,8 @@ export function registerIpcHandlers(context: IpcHandlerContext): void {
         const headers: Record<string, string> = {
           'Content-Type': 'application/json'
         }
-        if (settings.apiKey.trim()) {
-          headers.Authorization = `Bearer ${settings.apiKey.trim()}`
+        if (apiKey.trim()) {
+          headers.Authorization = `Bearer ${apiKey.trim()}`
         }
 
         const requestBody = {
@@ -326,7 +464,7 @@ export function registerIpcHandlers(context: IpcHandlerContext): void {
               return { ok: true as const, content, finishReason: choice?.finish_reason ?? choice?.finishReason }
             }
           }
-          return { ok: false as const, error: `AI 调用失败：HTTP ${response.status} ${sanitizeAiErrorText(errorText, settings)}` }
+          return { ok: false as const, error: `AI 调用失败：HTTP ${response.status} ${sanitizeAiErrorText(errorText, apiKey)}` }
         }
 
         const payload = (await response.json()) as {
@@ -337,7 +475,7 @@ export function registerIpcHandlers(context: IpcHandlerContext): void {
         if (!content) return { ok: false as const, error: 'AI 返回为空。' }
         return { ok: true as const, content, finishReason: choice?.finish_reason ?? choice?.finishReason }
       } catch (error) {
-        return { ok: false as const, error: `AI 网络请求失败：${sanitizeAiErrorText(describeSafeNetworkError(error), settings)}` }
+        return { ok: false as const, error: `AI 网络请求失败：${sanitizeAiErrorText(describeSafeNetworkError(error), apiKey)}` }
       }
     })
   )

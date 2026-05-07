@@ -33,11 +33,12 @@ import {
   recommendedForeshadowings,
   selectBudgetContext
 } from '../utils/promptContext'
+import type { SaveDataInput } from '../utils/saveDataState'
 
 interface ProjectProps {
   data: AppData
   project: Project
-  saveData: (next: AppData) => Promise<void>
+  saveData: (next: SaveDataInput) => Promise<void>
   onSendToPipeline?: (snapshotId: ID) => void
 }
 
@@ -257,7 +258,7 @@ export function PromptBuilderView({ data, project, saveData, onSendToPipeline }:
   }
 
   return (
-    <>
+    <div className="prompt-view">
       <Header title="Prompt 构建器" description="把上下文选择、预算、伏笔调度和章节衔接整理成可执行的写作 Prompt。" />
       <section className="prompt-layout prompt-workbench">
         <aside className="panel prompt-controls">
@@ -484,6 +485,6 @@ export function PromptBuilderView({ data, project, saveData, onSendToPipeline }:
           </section>
         </div>
       </section>
-    </>
+    </div>
   )
 }

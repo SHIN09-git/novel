@@ -1,0 +1,172 @@
+﻿.generation-view .stage-builder {
+  margin-bottom: 18px;
+}
+
+.generation-view .pipeline-start {
+  display: grid;
+  gap: 14px;
+  margin-bottom: 18px;
+}
+
+.generation-view .pipeline-command-panel {
+  grid-template-columns: 260px minmax(0, 1fr) auto;
+  align-items: end;
+}
+
+.generation-view .pipeline-command-panel h2 {
+  margin: 6px 0;
+}
+
+.generation-view .pipeline-command-panel p {
+  margin: 0;
+}
+
+.generation-view .reader-emotion-presets {
+  grid-column: 1 / -1;
+  display: grid;
+  gap: 10px;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--surface-strong);
+}
+
+.generation-view .reader-emotion-presets-header {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  align-items: baseline;
+}
+
+.generation-view .reader-emotion-presets-header strong {
+  color: var(--ink);
+  font-size: 13px;
+}
+
+.generation-view .reader-emotion-presets-header span {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.generation-view .reader-emotion-preset-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.generation-view .reader-emotion-chip {
+  border: 1px solid rgba(40, 118, 111, 0.22);
+  background: rgba(255, 255, 255, 0.68);
+  color: var(--ink);
+  border-radius: 999px;
+  padding: 7px 11px;
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.generation-view .reader-emotion-chip:hover,
+.generation-view .reader-emotion-chip.active {
+  border-color: rgba(40, 118, 111, 0.44);
+  background: var(--color-accent-soft);
+  color: var(--color-accent-strong);
+}
+
+.generation-view .reader-emotion-add {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 10px;
+  align-items: end;
+}
+
+.generation-view .pipeline-workbench {
+  grid-template-columns: 260px minmax(0, 1fr);
+}
+
+.generation-view .pipeline-workbench .editor-pane {
+  display: grid;
+  grid-template-columns: minmax(0, 0.95fr) minmax(360px, 1.05fr);
+  gap: var(--space-4);
+  align-items: start;
+}
+
+.generation-view .pipeline-stepper-panel {
+  grid-column: 1;
+  position: sticky;
+  top: 22px;
+}
+
+.generation-view .pipeline-workbench .editor-pane > .panel:not(.pipeline-stepper-panel):not(.draft-panel) {
+  grid-column: 2;
+}
+
+.generation-view .pipeline-workbench .draft-panel {
+  grid-column: 1 / -1;
+}
+
+.generation-view .pipeline-steps {
+  display: grid;
+  gap: 12px;
+}
+
+.generation-view .pipeline-step {
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: 14px;
+  display: grid;
+  gap: 10px;
+  background: var(--surface);
+}
+
+.generation-view .pipeline-step > div:first-child {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  align-items: center;
+}
+
+.generation-view .pipeline-step span {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+
+.generation-view .pipeline-step.running {
+  border-color: var(--teal);
+  background: rgba(46, 113, 108, 0.08);
+}
+
+.generation-view .pipeline-step.completed {
+  border-color: rgba(46, 113, 108, 0.32);
+}
+
+.generation-view .pipeline-step.failed {
+  border-color: rgba(169, 67, 67, 0.45);
+  background: rgba(169, 67, 67, 0.08);
+}
+
+.generation-view .pipeline-step pre,
+.generation-view .candidate-card pre {
+  margin: 0;
+  white-space: pre-wrap;
+  word-break: break-word;
+  max-height: 220px;
+  overflow: auto;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--surface);
+  padding: 10px;
+  color: var(--muted);
+}
+
+.generation-view .error-text {
+  color: var(--danger);
+  margin: 0;
+}
+
+.generation-view .summary-list {
+  display: grid;
+  gap: 18px;
+}
+

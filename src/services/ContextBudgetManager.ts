@@ -17,6 +17,12 @@ import {
   treatmentAllowsDefaultPrompt,
   treatmentOmitReason
 } from '../shared/foreshadowingTreatment'
+import {
+  compressChapterRecapsForBudget,
+  createDroppedChapterCompressionRecord,
+  detailedChapterRecapText,
+  replacementTextForCompressedChapter
+} from './ContextCompressionService'
 import { TokenEstimator } from './TokenEstimator'
 
 interface ProjectContextData {
@@ -54,16 +60,7 @@ function takeFirst<T>(items: T[], count: number): T[] {
 }
 
 function stringifyChapter(chapter: Chapter): string {
-  return [
-    chapter.title,
-    chapter.summary,
-    chapter.newInformation,
-    chapter.characterChanges,
-    chapter.newForeshadowing,
-    chapter.resolvedForeshadowing,
-    chapter.endingHook,
-    chapter.riskWarnings
-  ].join('\n')
+  return detailedChapterRecapText(chapter)
 }
 
 function stringifyStageSummary(summary: StageSummary): string {
@@ -128,6 +125,7 @@ function stringifyTimelineEvent(event: TimelineEvent): string {
 }
 
 function selectionCost(data: ProjectContextData, selection: ContextSelectionResult, styleSampleMaxChars: number): number {
+  const compressionByChapterId = new Map((selection.compressionRecords ?? []).map((record) => [record.originalChapterId, record]))
   const storyBibleText = data.bible
     ? [
         data.project.name,
@@ -151,7 +149,10 @@ function selectionCost(data: ProjectContextData, selection: ContextSelectionResu
 
   const selectedText = [
     storyBibleText,
-    ...byId(data.chapters, selection.selectedChapterIds).map(stringifyChapter),
+    ...byId(data.chapters, selection.selectedChapterIds).map((chapter) => {
+      const compression = compressionByChapterId.get(chapter.id)
+      return compression ? replacementTextForCompressedChapter(compression) : stringifyChapter(chapter)
+    }),
     ...byId(data.stageSummaries, selection.selectedStageSummaryIds).map(stringifyStageSummary),
     ...byId(data.characters, selection.selectedCharacterIds).map(stringifyCharacter),
     ...byId(data.foreshadowings, selection.selectedForeshadowingIds).map(stringifyForeshadowing),
@@ -224,7 +225,7 @@ export class ContextBudgetManager {
       .filter((event) => event.chapterOrder === null || event.chapterOrder < targetChapterOrder)
       .sort((a, b) => b.narrativeOrder - a.narrativeOrder), budgetProfile.includeTimelineEventsCount)
 
-    const selection: ContextSelectionResult = {
+    let selection: ContextSelectionResult = {
       selectedStoryBibleFields: [
         'project',
         'worldbuilding',
@@ -245,6 +246,7 @@ export class ContextBudgetManager {
       selectedTimelineEventIds: selectedTimelineEvents.map((event) => event.id),
       estimatedTokens: 0,
       omittedItems: [],
+      compressionRecords: [],
       warnings: []
     }
 
@@ -265,8 +267,20 @@ export class ContextBudgetManager {
       selection.estimatedTokens = selectionCost(data, selection, budgetProfile.styleSampleMaxChars)
     }
 
+    selection = compressChapterRecapsForBudget({
+      chapters: data.chapters,
+      stageSummaries: data.stageSummaries,
+      selection,
+      targetChapterOrder,
+      budgetProfile,
+      estimateSelectionTokens: (nextSelection) => selectionCost(data, nextSelection, budgetProfile.styleSampleMaxChars)
+    })
+    recalc()
+
     while (selection.estimatedTokens > budgetProfile.maxTokens && selection.selectedChapterIds.length > 1) {
       const oldest = byId(data.chapters, selection.selectedChapterIds).sort((a, b) => a.order - b.order)[0]
+      const dropRecord = createDroppedChapterCompressionRecord(oldest, '超出预算，旧章节详细回顾被裁掉。')
+      selection.compressionRecords = [dropRecord, ...selection.compressionRecords.filter((record) => record.originalChapterId !== oldest.id)]
       removeOne(selection, 'selectedChapterIds', oldest.id)
       omit(selection, 'chapter', oldest.id, '超出预算，优先省略较旧章节详细回顾。', itemCost(stringifyChapter(oldest)))
       recalc()
@@ -283,7 +297,9 @@ export class ContextBudgetManager {
     }
 
     while (selection.estimatedTokens > budgetProfile.maxTokens) {
-      const nonMain = byId(data.characters, selection.selectedCharacterIds).find((character) => !character.isMain)
+      const nonMain = byId(data.characters, selection.selectedCharacterIds).find(
+        (character) => !character.isMain && !forcedCharacterIds.has(character.id)
+      )
       if (!nonMain) break
       removeOne(selection, 'selectedCharacterIds', nonMain.id)
       omit(selection, 'character', nonMain.id, '超出预算，省略非主要角色。', itemCost(stringifyCharacter(nonMain)))

@@ -3,11 +3,17 @@ import { IPC_CHANNELS } from '../shared/ipc/ipcChannels'
 import type {
   ChatCompletionRequest,
   ChatCompletionResult,
+  ConfirmMigrationMergeResult,
+  CredentialDeleteApiKeyResult,
+  CredentialHasApiKeyResult,
+  CredentialMigrateLegacyApiKeyResult,
+  CredentialSetApiKeyResult,
   ExportDataResult,
   GetStoragePathResult,
   ImportDataResult,
   IpcFailure,
   MigrateStoragePathResult,
+  MigrationMergePreviewResult,
   OpenStorageFolderResult,
   SaveFileResult,
   SelectStoragePathResult,
@@ -53,6 +59,16 @@ const novelDirector = {
         data,
         overwrite
       }),
+    createMigrationMergePreview: (sourcePath: string, targetPath: string) =>
+      invokeOrThrow<MigrationMergePreviewResult>(IPC_CHANNELS.APP_CREATE_MIGRATION_MERGE_PREVIEW, {
+        sourcePath: assertText(sourcePath, 'sourcePath'),
+        targetPath: assertText(targetPath, 'targetPath')
+      }),
+    confirmMigrationMerge: (sourcePath: string, targetPath: string) =>
+      invokeOrThrow<ConfirmMigrationMergeResult>(IPC_CHANNELS.APP_CONFIRM_MIGRATION_MERGE, {
+        sourcePath: assertText(sourcePath, 'sourcePath'),
+        targetPath: assertText(targetPath, 'targetPath')
+      }),
     resetStoragePath: (data: AppData, overwrite = false) =>
       invokeOrThrow<MigrateStoragePathResult>(IPC_CHANNELS.APP_RESET_STORAGE_PATH, { data, overwrite }),
     openStorageFolder: (storagePath?: string) =>
@@ -77,6 +93,19 @@ const novelDirector = {
     writeText: (text: string) =>
       invokeOrThrow<{ ok: true }>(IPC_CHANNELS.CLIPBOARD_WRITE_TEXT, assertText(text, 'text'))
   },
+  credentials: {
+    setApiKey: (apiKey: string) =>
+      invokeOrThrow<CredentialSetApiKeyResult>(IPC_CHANNELS.CREDENTIALS_SET_API_KEY, {
+        apiKey: assertText(apiKey, 'apiKey')
+      }),
+    hasApiKey: () => invokeOrThrow<CredentialHasApiKeyResult>(IPC_CHANNELS.CREDENTIALS_HAS_API_KEY),
+    deleteApiKey: () => invokeOrThrow<CredentialDeleteApiKeyResult>(IPC_CHANNELS.CREDENTIALS_DELETE_API_KEY),
+    migrateLegacyApiKey: (apiKey: string) =>
+      invokeOrThrow<CredentialMigrateLegacyApiKeyResult>(
+        IPC_CHANNELS.CREDENTIALS_MIGRATE_LEGACY_API_KEY,
+        assertText(apiKey, 'apiKey')
+      )
+  },
   ai: {
     chatCompletion: (request: ChatCompletionRequest) =>
       ipcRenderer.invoke(IPC_CHANNELS.AI_CHAT_COMPLETION, request) as Promise<ChatCompletionResult>
@@ -91,11 +120,16 @@ const novelAPI = {
   getDataStoragePath: novelDirector.app.getStoragePath,
   selectDataStoragePath: novelDirector.app.selectStoragePath,
   migrateDataStoragePath: novelDirector.app.migrateStoragePath,
+  createMigrationMergePreview: novelDirector.app.createMigrationMergePreview,
+  confirmMigrationMerge: novelDirector.app.confirmMigrationMerge,
   resetDataStoragePath: novelDirector.app.resetStoragePath,
   openDataStorageFolder: novelDirector.app.openStorageFolder,
   saveTextFile: novelDirector.export.saveTextFile,
   saveMarkdownFile: novelDirector.export.saveMarkdownFile,
   chatCompletion: novelDirector.ai.chatCompletion,
+  setApiKey: novelDirector.credentials.setApiKey,
+  hasApiKey: novelDirector.credentials.hasApiKey,
+  deleteApiKey: novelDirector.credentials.deleteApiKey,
   writeClipboard: novelDirector.clipboard.writeText
 }
 

@@ -21,23 +21,27 @@ import type {
 import { AIService } from '../../../services/AIService'
 import { normalizeTreatmentMode } from '../../../shared/foreshadowingTreatment'
 import { ExportService } from '../../../services/ExportService'
-import { EmptyState, NumberInput, TextArea, TextInput, Toggle } from '../components/FormFields'
+import { EmptyState } from '../components/FormFields'
 import { Header } from '../components/Layout'
-import { ActionToolbar, SectionCard, StatusBadge } from '../components/UI'
 import { projectData } from '../utils/projectData'
-import { formatDate, newId, now, statusLabel, weightLabel } from '../utils/format'
+import { formatDate, newId, now } from '../utils/format'
+import type { SaveDataInput } from '../utils/saveDataState'
+import { ChapterAIDraftPanels } from './chapters/ChapterAIDraftPanels'
+import { ChapterEditorPanel } from './chapters/ChapterEditorPanel'
+import { ChapterListPanel } from './chapters/ChapterListPanel'
+import { ChapterReviewPanel } from './chapters/ChapterReviewPanel'
+import { ChapterVersionHistoryPanel } from './chapters/ChapterVersionHistoryPanel'
+import { reviewFields, type ReviewTextField } from './chapters/chapterViewTypes'
 
 interface ProjectProps {
   data: AppData
   project: Project
-  saveData: (next: AppData) => Promise<void>
+  saveData: (next: SaveDataInput) => Promise<void>
 }
 
 function updateProjectTimestamp(data: AppData, projectId: ID): Project[] {
   return data.projects.map((project) => (project.id === projectId ? { ...project, updatedAt: now() } : project))
 }
-
-type ReviewTextField = Exclude<keyof ChapterReviewDraft, 'continuityBridgeSuggestion'>
 
 const emptyBridgeSuggestion: ChapterContinuityBridgeSuggestion = {
   lastSceneLocation: '',
@@ -147,16 +151,25 @@ export function ChaptersView({ data, project, saveData }: ProjectProps) {
       createdAt: timestamp,
       updatedAt: timestamp
     }
-    await saveData({ ...data, projects: updateProjectTimestamp(data, project.id), chapters: [...data.chapters, chapter] })
+    await saveData((current) => {
+      const nextOrder = Math.max(0, ...current.chapters.filter((item) => item.projectId === project.id).map((item) => item.order)) + 1
+      return {
+        ...current,
+        projects: updateProjectTimestamp(current, project.id),
+        chapters: current.chapters.some((item) => item.id === chapter.id)
+          ? current.chapters
+          : [...current.chapters, { ...chapter, order: nextOrder, title: `第 ${nextOrder} 章` }]
+      }
+    })
     setSelectedId(chapter.id)
   }
 
   async function updateChapter(id: ID, patch: Partial<Chapter>) {
-    await saveData({
-      ...data,
-      projects: updateProjectTimestamp(data, project.id),
-      chapters: data.chapters.map((chapter) => (chapter.id === id ? { ...chapter, ...patch, updatedAt: now() } : chapter))
-    })
+    await saveData((current) => ({
+      ...current,
+      projects: updateProjectTimestamp(current, project.id),
+      chapters: current.chapters.map((chapter) => (chapter.id === id ? { ...chapter, ...patch, updatedAt: now() } : chapter))
+    }))
   }
 
   function updateBodyDebounced(id: ID, body: string) {
@@ -176,17 +189,19 @@ export function ChaptersView({ data, project, saveData }: ProjectProps) {
 
   async function deleteChapter(id: ID) {
     if (!confirm('确定删除这一章吗？')) return
-    const revisionSessionIds = new Set(data.revisionSessions.filter((session) => session.chapterId === id).map((session) => session.id))
-    await saveData({
-      ...data,
-      projects: updateProjectTimestamp(data, project.id),
-      chapters: data.chapters.filter((chapter) => chapter.id !== id),
-      chapterContinuityBridges: data.chapterContinuityBridges.filter((bridge) => bridge.fromChapterId !== id),
-      characterStateLogs: data.characterStateLogs.map((log) => (log.chapterId === id ? { ...log, chapterId: null } : log)),
-      revisionSessions: data.revisionSessions.filter((session) => session.chapterId !== id),
-      revisionRequests: data.revisionRequests.filter((request) => !revisionSessionIds.has(request.sessionId)),
-      revisionVersions: data.revisionVersions.filter((version) => !revisionSessionIds.has(version.sessionId)),
-      chapterVersions: data.chapterVersions.filter((version) => version.chapterId !== id)
+    await saveData((current) => {
+      const revisionSessionIds = new Set(current.revisionSessions.filter((session) => session.chapterId === id).map((session) => session.id))
+      return {
+        ...current,
+        projects: updateProjectTimestamp(current, project.id),
+        chapters: current.chapters.filter((chapter) => chapter.id !== id),
+        chapterContinuityBridges: current.chapterContinuityBridges.filter((bridge) => bridge.fromChapterId !== id),
+        characterStateLogs: current.characterStateLogs.map((log) => (log.chapterId === id ? { ...log, chapterId: null } : log)),
+        revisionSessions: current.revisionSessions.filter((session) => session.chapterId !== id),
+        revisionRequests: current.revisionRequests.filter((request) => !revisionSessionIds.has(request.sessionId)),
+        revisionVersions: current.revisionVersions.filter((version) => !revisionSessionIds.has(version.sessionId)),
+        chapterVersions: current.chapterVersions.filter((version) => version.chapterId !== id)
+      }
     })
     setSelectedId(null)
   }
@@ -205,23 +220,23 @@ export function ChaptersView({ data, project, saveData }: ProjectProps) {
       note: `恢复 ${formatDate(version.createdAt)} 版本前自动保存`,
       createdAt: timestamp
     }
-    await saveData({
-      ...data,
-      projects: updateProjectTimestamp(data, project.id),
-      chapters: data.chapters.map((chapter) =>
+    await saveData((current) => ({
+      ...current,
+      projects: updateProjectTimestamp(current, project.id),
+      chapters: current.chapters.map((chapter) =>
         chapter.id === selected.id ? { ...chapter, title: version.title, body: version.body, updatedAt: timestamp } : chapter
       ),
-      chapterVersions: [snapshot, ...data.chapterVersions]
-    })
+      chapterVersions: [snapshot, ...current.chapterVersions]
+    }))
     setBodyDraft(version.body)
   }
 
   async function deleteChapterVersion(version: ChapterVersion) {
     if (!confirm('确定删除这个章节历史版本吗？')) return
-    await saveData({
-      ...data,
-      chapterVersions: data.chapterVersions.filter((item) => item.id !== version.id)
-    })
+    await saveData((current) => ({
+      ...current,
+      chapterVersions: current.chapterVersions.filter((item) => item.id !== version.id)
+    }))
   }
 
   async function copyChapterVersion(version: ChapterVersion) {
@@ -282,13 +297,13 @@ export function ChaptersView({ data, project, saveData }: ProjectProps) {
       ...suggestion,
       updatedAt: timestamp
     }
-    await saveData({
-      ...data,
-      projects: updateProjectTimestamp(data, project.id),
+    await saveData((current) => ({
+      ...current,
+      projects: updateProjectTimestamp(current, project.id),
       chapterContinuityBridges: existing
-        ? data.chapterContinuityBridges.map((item) => (item.id === existing.id ? bridge : item))
-        : [bridge, ...data.chapterContinuityBridges]
-    })
+        ? current.chapterContinuityBridges.map((item) => (item.id === existing.id ? bridge : item))
+        : [bridge, ...current.chapterContinuityBridges]
+    }))
     setAiMessage('已保存下一章衔接状态。')
   }
 
@@ -310,10 +325,10 @@ export function ChaptersView({ data, project, saveData }: ProjectProps) {
       note: suggestion.changeSummary,
       createdAt: timestamp
     }
-    await saveData({
-      ...data,
-      projects: updateProjectTimestamp(data, project.id),
-      characters: data.characters.map((item) =>
+    await saveData((current) => ({
+      ...current,
+      projects: updateProjectTimestamp(current, project.id),
+      characters: current.characters.map((item) =>
         item.id === character.id
           ? {
               ...item,
@@ -325,8 +340,8 @@ export function ChaptersView({ data, project, saveData }: ProjectProps) {
             }
           : item
       ),
-      characterStateLogs: [...data.characterStateLogs, log]
-    })
+      characterStateLogs: [...current.characterStateLogs, log]
+    }))
     setCharacterSuggestions((items) => items.filter((item) => item !== suggestion))
   }
 
@@ -351,19 +366,19 @@ export function ChaptersView({ data, project, saveData }: ProjectProps) {
       createdAt: timestamp,
       updatedAt: timestamp
     }
-    await saveData({
-      ...data,
-      projects: updateProjectTimestamp(data, project.id),
-      foreshadowings: [...data.foreshadowings, item]
-    })
+    await saveData((current) => ({
+      ...current,
+      projects: updateProjectTimestamp(current, project.id),
+      foreshadowings: [...current.foreshadowings, item]
+    }))
   }
 
   async function applyStatusChange(change: ForeshadowingStatusChangeSuggestion) {
     if (!selected) return
-    await saveData({
-      ...data,
-      projects: updateProjectTimestamp(data, project.id),
-      foreshadowings: data.foreshadowings.map((item) =>
+    await saveData((current) => ({
+      ...current,
+      projects: updateProjectTimestamp(current, project.id),
+      foreshadowings: current.foreshadowings.map((item) =>
         item.id === change.foreshadowingId
           ? {
               ...item,
@@ -374,7 +389,7 @@ export function ChaptersView({ data, project, saveData }: ProjectProps) {
             }
           : item
       )
-    })
+    }))
   }
 
   function nextSuggestionsAsRiskText(suggestions: NextChapterSuggestions): string {
@@ -447,15 +462,6 @@ export function ChaptersView({ data, project, saveData }: ProjectProps) {
     }
   }
 
-  const reviewFields: Array<{ key: ReviewTextField; label: string }> = [
-    { key: 'summary', label: '本章剧情摘要' },
-    { key: 'newInformation', label: '本章新增信息' },
-    { key: 'characterChanges', label: '本章角色变化' },
-    { key: 'newForeshadowing', label: '本章新增伏笔' },
-    { key: 'resolvedForeshadowing', label: '本章已回收伏笔' },
-    { key: 'endingHook', label: '本章结尾钩子' },
-    { key: 'riskWarnings', label: '本章风险提醒' }
-  ]
   const selectedChapterVersions = selected
     ? [...scoped.chapterVersions].filter((version) => version.chapterId === selected.id).sort((a, b) => b.createdAt.localeCompare(a.createdAt))
     : []
@@ -471,7 +477,7 @@ export function ChaptersView({ data, project, saveData }: ProjectProps) {
       : '未开始'
 
   return (
-    <>
+    <div className="chapters-view">
       <Header
         title="章节创作台"
         description="左侧管理章节脉络，中间沉浸写作，右侧沉淀可进入长期记忆的复盘信息。"
@@ -484,333 +490,134 @@ export function ChaptersView({ data, project, saveData }: ProjectProps) {
         }
       />
       <section className="split-layout chapter-workbench">
-        <aside className="list-pane">
-          <div className="chapter-shelf-header">
-            <span>章节列表</span>
-            <strong>{chapters.length}</strong>
-          </div>
-          {chapters.map((chapter) => (
-            <button
-              key={chapter.id}
-              className={chapter.id === selected?.id ? 'list-item active' : 'list-item'}
-              onClick={() => {
-                void flushBody().then(() => setSelectedId(chapter.id))
-              }}
-            >
-              <strong>第 {chapter.order} 章</strong>
-              <span>{chapter.title || '未命名'}</span>
-              <small>
-                {(chapter.id === selected?.id ? bodyCharacterCount : chapter.body.replace(/\s/g, '').length).toLocaleString()} 字
-                {chapter.includedInStageSummary ? ' · 已进阶段摘要' : ''}
-              </small>
-            </button>
-          ))}
-        </aside>
+        <ChapterListPanel
+          chapters={chapters}
+          selectedChapterId={selected?.id ?? null}
+          activeBodyCharacterCount={bodyCharacterCount}
+          onSelectChapter={(chapter) => {
+            void flushBody().then(() => setSelectedId(chapter.id))
+          }}
+        />
         <div className="editor-pane">
           {!selected ? (
             <EmptyState title="暂无章节" description="创建章节后，可以在这里写正文并填写复盘字段。" />
           ) : (
             <>
-              <div className="panel chapter-editor-main">
-                <div className="chapter-editor-heading">
-                  <div>
-                    <span className="chapter-kicker">当前章节</span>
-                    <h2>第 {selected.order} 章 {selected.title || '未命名'}</h2>
-                  </div>
-                  <div className="chapter-meta-strip">
-                    <span>{chapterStatus}</span>
-                    <span>{bodyCharacterCount.toLocaleString()} 字</span>
-                    <span>{paragraphCount} 段</span>
-                    <span>复盘 {reviewFilledCount}/{reviewFields.length}</span>
-                  </div>
-                </div>
-                <div className="form-grid compact">
-                  <NumberInput label="章节序号" min={1} value={selected.order} onChange={(order) => updateChapter(selected.id, { order: order ?? selected.order })} />
-                  <TextInput label="章节标题" value={selected.title} onChange={(title) => updateChapter(selected.id, { title })} />
-                </div>
-                <TextArea
-                  label="正文稿纸"
-                  value={bodyDraft}
-                  rows={24}
-                  className="manuscript-textarea"
-                  onBlur={() => {
-                    void flushBody()
-                  }}
-                  onChange={(body) => updateBodyDebounced(selected.id, body)}
-                />
-                <div className="row-actions chapter-export-actions">
-                  <button className="ghost-button" onClick={() => copyChapterBody(false)}>复制正文</button>
-                  <button className="ghost-button" onClick={() => copyChapterBody(true)}>复制标题 + 正文</button>
-                  <button className="ghost-button" onClick={() => exportCurrentChapter('txt')}>导出 TXT</button>
-                  <button className="ghost-button" onClick={() => exportCurrentChapter('md')}>导出 Markdown</button>
-                  <button className="ghost-button" onClick={() => setShowVersionHistory((value) => !value)}>
-                    版本历史 {selectedChapterVersions.length ? `(${selectedChapterVersions.length})` : ''}
-                  </button>
-                </div>
-                <div className="row-actions chapter-ai-actions">
-                  <button className="ghost-button" onClick={() => applyReviewTemplate(selected)}>
-                    一键生成章节复盘模板
-                  </button>
-                  <button
-                    className="primary-button"
-                    disabled={loadingAction !== null}
-                    onClick={() =>
-                      runAIAction(
-                        'review',
-                        () => aiService.generateChapterReview(chapterText(), buildChapterContext()),
-                        setReviewDraft
-                      )
-                    }
-                  >
-                    生成章节复盘草稿
-                  </button>
-                  <button
-                    className="ghost-button"
-                    disabled={loadingAction !== null}
-                    onClick={() =>
-                      runAIAction(
-                        'characters',
-                        () => aiService.updateCharacterStates(chapterText(), scoped.characters, buildChapterContext()),
-                        setCharacterSuggestions
-                      )
-                    }
-                  >
-                    从正文提取角色变化
-                  </button>
-                  <button
-                    className="ghost-button"
-                    disabled={loadingAction !== null}
-                    onClick={() =>
-                      runAIAction(
-                        'foreshadowing',
-                        () => aiService.extractForeshadowing(chapterText(), scoped.foreshadowings, buildChapterContext(), scoped.characters),
-                        setForeshadowingDraft
-                      )
-                    }
-                  >
-                    从正文提取伏笔
-                  </button>
-                  <button
-                    className="ghost-button"
-                    disabled={loadingAction !== null}
-                    onClick={() =>
-                      runAIAction(
-                        'next',
-                        () => aiService.generateNextChapterSuggestions(selected, buildChapterContext()),
-                        setNextSuggestions
-                      )
-                    }
-                  >
-                    生成下一章风险提醒
-                  </button>
-                  <Toggle label="已进入阶段摘要" checked={selected.includedInStageSummary} onChange={(includedInStageSummary) => updateChapter(selected.id, { includedInStageSummary })} />
-                  <button className="danger-button" onClick={() => deleteChapter(selected.id)}>
-                    删除章节
-                  </button>
-                </div>
-                {loadingAction ? <p className="muted">正在生成草稿...</p> : null}
-                {aiMessage ? <div className="notice">{aiMessage}</div> : null}
-                {showVersionHistory ? (
-                  <div className="version-history-panel">
-                    <div className="panel-title-row">
-                      <h3>章节版本历史</h3>
-                      <span className="muted">{selectedChapterVersions.length} 个备份</span>
-                    </div>
-                    {selectedChapterVersions.length === 0 ? (
-                      <p className="muted">暂无历史版本。接受修订版本或恢复旧版本前，系统会自动保存快照。</p>
-                    ) : (
-                      <div className="version-history-list">
-                        {selectedChapterVersions.map((version) => (
-                          <article key={version.id} className="version-history-item">
-                            <div>
-                              <strong>{version.title || `第 ${selected.order} 章`}</strong>
-                              <p>{version.note || version.source} · {formatDate(version.createdAt)} · {version.body.replace(/\s/g, '').length.toLocaleString()} 字</p>
-                            </div>
-                            <div className="row-actions">
-                              <button className="ghost-button" onClick={() => copyChapterVersion(version)}>复制</button>
-                              <button className="primary-button" onClick={() => restoreChapterVersion(version)}>恢复</button>
-                              <button className="danger-button" onClick={() => deleteChapterVersion(version)}>删除</button>
-                            </div>
-                          </article>
-                        ))}
-                      </div>
-                    )}
-                  </div>
-                ) : null}
-              </div>
+              <ChapterEditorPanel
+                selected={selected}
+                bodyDraft={bodyDraft}
+                bodyCharacterCount={bodyCharacterCount}
+                paragraphCount={paragraphCount}
+                reviewFilledCount={reviewFilledCount}
+                reviewFieldCount={reviewFields.length}
+                chapterStatus={chapterStatus}
+                loadingAction={loadingAction}
+                aiMessage={aiMessage}
+                showVersionHistory={showVersionHistory}
+                versionCount={selectedChapterVersions.length}
+                versionHistory={
+                  <ChapterVersionHistoryPanel
+                    selected={selected}
+                    versions={selectedChapterVersions}
+                    onCopyVersion={copyChapterVersion}
+                    onRestoreVersion={restoreChapterVersion}
+                    onDeleteVersion={deleteChapterVersion}
+                  />
+                }
+                onUpdateChapter={(patch) => {
+                  void updateChapter(selected.id, patch)
+                }}
+                onBodyChange={(body) => updateBodyDebounced(selected.id, body)}
+                onBodyBlur={() => {
+                  void flushBody()
+                }}
+                onCopyBody={() => {
+                  void copyChapterBody(false)
+                }}
+                onCopyWithTitle={() => {
+                  void copyChapterBody(true)
+                }}
+                onExportTxt={() => {
+                  void exportCurrentChapter('txt')
+                }}
+                onExportMarkdown={() => {
+                  void exportCurrentChapter('md')
+                }}
+                onToggleVersionHistory={() => setShowVersionHistory((value) => !value)}
+                onApplyReviewTemplate={() => {
+                  void applyReviewTemplate(selected)
+                }}
+                onGenerateReview={() =>
+                  runAIAction('review', () => aiService.generateChapterReview(chapterText(), buildChapterContext()), setReviewDraft)
+                }
+                onExtractCharacters={() =>
+                  runAIAction(
+                    'characters',
+                    () => aiService.updateCharacterStates(chapterText(), scoped.characters, buildChapterContext()),
+                    setCharacterSuggestions
+                  )
+                }
+                onExtractForeshadowing={() =>
+                  runAIAction(
+                    'foreshadowing',
+                    () => aiService.extractForeshadowing(chapterText(), scoped.foreshadowings, buildChapterContext(), scoped.characters),
+                    setForeshadowingDraft
+                  )
+                }
+                onGenerateNextRisk={() =>
+                  runAIAction('next', () => aiService.generateNextChapterSuggestions(selected, buildChapterContext()), setNextSuggestions)
+                }
+                onDeleteChapter={() => {
+                  void deleteChapter(selected.id)
+                }}
+              />
 
-              {rawAIText ? (
-                <div className="panel ai-draft-panel">
-                  <h2>AI 原始返回</h2>
-                  <p className="muted">解析失败时保留原始文本，方便手动复制。</p>
-                  <textarea className="prompt-editor" value={rawAIText} readOnly />
-                </div>
-              ) : null}
+              <ChapterAIDraftPanels
+                selectedOrder={selected.order}
+                rawAIText={rawAIText}
+                reviewDraft={reviewDraft}
+                reviewFields={reviewFields}
+                characters={scoped.characters}
+                characterSuggestions={characterSuggestions}
+                foreshadowings={scoped.foreshadowings}
+                foreshadowingDraft={foreshadowingDraft}
+                nextSuggestions={nextSuggestions}
+                onSetReviewDraft={setReviewDraft}
+                onApplyAllReviewDraft={applyAllReviewDraft}
+                onApplyReviewField={applyReviewField}
+                onSaveContinuityBridge={(suggestion) => {
+                  void saveContinuityBridge(suggestion)
+                }}
+                onApplyCharacterSuggestion={(suggestion) => {
+                  void applyCharacterSuggestion(suggestion)
+                }}
+                onApplyForeshadowingCandidate={(candidate, status) => {
+                  void applyForeshadowingCandidate(candidate, status)
+                }}
+                onApplyStatusChange={(change) => {
+                  void applyStatusChange(change)
+                }}
+                onSetNextSuggestions={setNextSuggestions}
+                onApplyNextSuggestions={() => {
+                  void updateChapter(selected.id, { riskWarnings: nextSuggestions ? nextSuggestionsAsRiskText(nextSuggestions) : '' })
+                }}
+              />
 
-              {reviewDraft ? (
-                <div className="panel ai-draft-panel">
-                  <div className="panel-title-row">
-                    <h2>章节复盘草稿预览</h2>
-                    <button className="primary-button" onClick={applyAllReviewDraft}>
-                      应用到章节复盘
-                    </button>
-                  </div>
-                  <div className="form-grid">
-                    {reviewFields.map((field) => (
-                      <div key={field.key} className="draft-field">
-                        <TextArea
-                          label={field.label}
-                          value={reviewDraft[field.key]}
-                          onChange={(value) => setReviewDraft({ ...reviewDraft, [field.key]: value })}
-                        />
-                        <div className="row-actions">
-                          <button className="primary-button" onClick={() => applyReviewField(field.key)}>
-                            应用
-                          </button>
-                          <button className="ghost-button" onClick={() => setReviewDraft({ ...reviewDraft, [field.key]: '' })}>
-                            忽略
-                          </button>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                  <div className="panel continuity-mini-panel">
-                    <h3>下一章衔接建议</h3>
-                    <div className="form-grid">
-                      <TextArea label="结尾位置" value={reviewDraft.continuityBridgeSuggestion.lastSceneLocation} onChange={(lastSceneLocation) => setReviewDraft({ ...reviewDraft, continuityBridgeSuggestion: { ...reviewDraft.continuityBridgeSuggestion, lastSceneLocation } })} />
-                      <TextArea label="身体状态" value={reviewDraft.continuityBridgeSuggestion.lastPhysicalState} onChange={(lastPhysicalState) => setReviewDraft({ ...reviewDraft, continuityBridgeSuggestion: { ...reviewDraft.continuityBridgeSuggestion, lastPhysicalState } })} />
-                      <TextArea label="情绪状态" value={reviewDraft.continuityBridgeSuggestion.lastEmotionalState} onChange={(lastEmotionalState) => setReviewDraft({ ...reviewDraft, continuityBridgeSuggestion: { ...reviewDraft.continuityBridgeSuggestion, lastEmotionalState } })} />
-                      <TextArea label="未完成动作" value={reviewDraft.continuityBridgeSuggestion.lastUnresolvedAction} onChange={(lastUnresolvedAction) => setReviewDraft({ ...reviewDraft, continuityBridgeSuggestion: { ...reviewDraft.continuityBridgeSuggestion, lastUnresolvedAction } })} />
-                      <TextArea label="下一章必须接住" value={reviewDraft.continuityBridgeSuggestion.immediateNextBeat} onChange={(immediateNextBeat) => setReviewDraft({ ...reviewDraft, continuityBridgeSuggestion: { ...reviewDraft.continuityBridgeSuggestion, immediateNextBeat } })} />
-                      <TextArea label="禁止重置" value={reviewDraft.continuityBridgeSuggestion.mustNotReset} onChange={(mustNotReset) => setReviewDraft({ ...reviewDraft, continuityBridgeSuggestion: { ...reviewDraft.continuityBridgeSuggestion, mustNotReset } })} />
-                    </div>
-                    <button className="primary-button" onClick={() => saveContinuityBridge(reviewDraft.continuityBridgeSuggestion)}>
-                      保存为下一章衔接状态
-                    </button>
-                  </div>
-                </div>
-              ) : null}
-
-              {characterSuggestions.length > 0 ? (
-                <div className="panel ai-draft-panel">
-                  <h2>角色状态候选变更</h2>
-                  <div className="candidate-list">
-                    {characterSuggestions.map((suggestion) => {
-                      const character = scoped.characters.find((item) => item.id === suggestion.characterId)
-                      if (!character) return null
-                      return (
-                        <article key={`${suggestion.characterId}-${suggestion.changeSummary}`} className="candidate-card">
-                          <h3>{character.name}</h3>
-                          <p><strong>变化原因：</strong>{suggestion.changeSummary}</p>
-                          <p><strong>原情绪状态：</strong>{character.emotionalState || '待补充'}</p>
-                          <p><strong>建议情绪状态：</strong>{suggestion.newCurrentEmotionalState || '不变'}</p>
-                          <p><strong>原关系状态：</strong>{character.protagonistRelationship || '待补充'}</p>
-                          <p><strong>建议关系状态：</strong>{suggestion.newRelationshipWithProtagonist || '不变'}</p>
-                          <p><strong>建议行动倾向：</strong>{suggestion.newNextActionTendency || '不变'}</p>
-                          <p><strong>关联章节：</strong>第 {selected.order} 章 · 置信度 {Math.round(suggestion.confidence * 100)}%</p>
-                          <button className="primary-button" onClick={() => applyCharacterSuggestion(suggestion)}>
-                            应用到角色卡并记录日志
-                          </button>
-                        </article>
-                      )
-                    })}
-                  </div>
-                </div>
-              ) : null}
-
-              {foreshadowingDraft ? (
-                <div className="panel ai-draft-panel">
-                  <h2>伏笔提取候选</h2>
-                  <div className="candidate-list">
-                    {foreshadowingDraft.newForeshadowingCandidates.map((candidate) => (
-                      <article key={`${candidate.title}-${candidate.description}`} className="candidate-card">
-                        <h3>{candidate.title}</h3>
-                        <p>{candidate.description}</p>
-                        <p><strong>首次出现：</strong>第 {candidate.firstChapterOrder ?? selected.order} 章</p>
-                        <p><strong>建议权重：</strong>{weightLabel(candidate.suggestedWeight)}</p>
-                        <p><strong>预计回收：</strong>{candidate.expectedPayoff || '待补充'}</p>
-                        <p><strong>注意事项：</strong>{candidate.notes || '无'}</p>
-                        <button className="primary-button" onClick={() => applyForeshadowingCandidate(candidate)}>
-                          加入伏笔账本
-                        </button>
-                      </article>
-                    ))}
-                    {foreshadowingDraft.abandonedForeshadowingCandidates.map((candidate) => (
-                      <article key={`abandoned-${candidate.title}-${candidate.description}`} className="candidate-card">
-                        <h3>{candidate.title}（废弃候选）</h3>
-                        <p>{candidate.description}</p>
-                        <button className="ghost-button" onClick={() => applyForeshadowingCandidate(candidate, 'abandoned')}>
-                          加入为废弃伏笔
-                        </button>
-                      </article>
-                    ))}
-                    {foreshadowingDraft.statusChanges.map((change) => {
-                      const item = scoped.foreshadowings.find((foreshadowing) => foreshadowing.id === change.foreshadowingId)
-                      if (!item) return null
-                      return (
-                        <article key={`${change.foreshadowingId}-${change.suggestedStatus}`} className="candidate-card">
-                          <h3>{item.title}</h3>
-                          <p><strong>当前状态：</strong>{statusLabel(item.status)}</p>
-                          <p><strong>建议新状态：</strong>{statusLabel(change.suggestedStatus)}</p>
-                          <p><strong>证据文本：</strong>{change.evidenceText || '待补充'}</p>
-                          <p><strong>置信度：</strong>{Math.round(change.confidence * 100)}%</p>
-                          <button className="primary-button" onClick={() => applyStatusChange(change)}>
-                            应用状态变更
-                          </button>
-                        </article>
-                      )
-                    })}
-                  </div>
-                </div>
-              ) : null}
-
-              {nextSuggestions ? (
-                <div className="panel ai-draft-panel">
-                  <h2>下一章风险提醒草稿</h2>
-                  <div className="form-grid">
-                    <TextArea label="下一章目标" value={nextSuggestions.nextChapterGoal} onChange={(nextChapterGoal) => setNextSuggestions({ ...nextSuggestions, nextChapterGoal })} />
-                    <TextArea label="必须推进的冲突" value={nextSuggestions.conflictToPush} onChange={(conflictToPush) => setNextSuggestions({ ...nextSuggestions, conflictToPush })} />
-                    <TextArea label="必须保留的悬念" value={nextSuggestions.suspenseToKeep} onChange={(suspenseToKeep) => setNextSuggestions({ ...nextSuggestions, suspenseToKeep })} />
-                    <TextArea label="可轻推伏笔" value={nextSuggestions.foreshadowingToHint} onChange={(foreshadowingToHint) => setNextSuggestions({ ...nextSuggestions, foreshadowingToHint })} />
-                    <TextArea label="不要提前揭示" value={nextSuggestions.foreshadowingNotToReveal} onChange={(foreshadowingNotToReveal) => setNextSuggestions({ ...nextSuggestions, foreshadowingNotToReveal })} />
-                    <TextArea label="建议结尾钩子" value={nextSuggestions.suggestedEndingHook} onChange={(suggestedEndingHook) => setNextSuggestions({ ...nextSuggestions, suggestedEndingHook })} />
-                    <TextArea label="读者情绪目标" value={nextSuggestions.readerEmotionTarget} onChange={(readerEmotionTarget) => setNextSuggestions({ ...nextSuggestions, readerEmotionTarget })} />
-                  </div>
-                  <button className="primary-button" onClick={() => updateChapter(selected.id, { riskWarnings: nextSuggestionsAsRiskText(nextSuggestions) })}>
-                    应用到本章风险提醒
-                  </button>
-                </div>
-              ) : null}
-
-              <div className="panel chapter-review-panel">
-                <h2>本章复盘</h2>
-                <div className="form-grid">
-                  <TextArea label="本章剧情摘要" value={selected.summary} onChange={(summary) => updateChapter(selected.id, { summary })} />
-                  <TextArea label="本章新增信息" value={selected.newInformation} onChange={(newInformation) => updateChapter(selected.id, { newInformation })} />
-                  <TextArea label="本章角色变化" value={selected.characterChanges} onChange={(characterChanges) => updateChapter(selected.id, { characterChanges })} />
-                  <TextArea label="本章新增伏笔" value={selected.newForeshadowing} onChange={(newForeshadowing) => updateChapter(selected.id, { newForeshadowing })} />
-                  <TextArea label="本章已回收伏笔" value={selected.resolvedForeshadowing} onChange={(resolvedForeshadowing) => updateChapter(selected.id, { resolvedForeshadowing })} />
-                  <TextArea label="本章结尾钩子" value={selected.endingHook} onChange={(endingHook) => updateChapter(selected.id, { endingHook })} />
-                  <TextArea label="本章风险提醒" value={selected.riskWarnings} onChange={(riskWarnings) => updateChapter(selected.id, { riskWarnings })} />
-                </div>
-                <div className="panel continuity-mini-panel">
-                  <h3>下一章衔接状态</h3>
-                  <p className="muted">保存后，Prompt 构建器和生产流水线生成第 {selected.order + 1} 章时会优先使用这组状态。</p>
-                  <div className="form-grid">
-                    <TextArea label="结尾位置" value={selectedBridge?.lastSceneLocation ?? ''} onChange={(value) => updateContinuityBridgeField('lastSceneLocation', value)} />
-                    <TextArea label="身体状态" value={selectedBridge?.lastPhysicalState ?? ''} onChange={(value) => updateContinuityBridgeField('lastPhysicalState', value)} />
-                    <TextArea label="情绪状态" value={selectedBridge?.lastEmotionalState ?? ''} onChange={(value) => updateContinuityBridgeField('lastEmotionalState', value)} />
-                    <TextArea label="未完成动作" value={selectedBridge?.lastUnresolvedAction ?? ''} onChange={(value) => updateContinuityBridgeField('lastUnresolvedAction', value)} />
-                    <TextArea label="下一章必须接住" value={selectedBridge?.immediateNextBeat ?? ''} onChange={(value) => updateContinuityBridgeField('immediateNextBeat', value)} />
-                    <TextArea label="禁止重置" value={selectedBridge?.mustNotReset ?? ''} onChange={(value) => updateContinuityBridgeField('mustNotReset', value)} />
-                    <TextArea label="开放小张力" value={selectedBridge?.openMicroTensions ?? ''} onChange={(value) => updateContinuityBridgeField('openMicroTensions', value)} />
-                  </div>
-                </div>
-              </div>
+              <ChapterReviewPanel
+                selected={selected}
+                selectedBridge={selectedBridge}
+                reviewFields={reviewFields}
+                onUpdateChapter={(patch) => {
+                  void updateChapter(selected.id, patch)
+                }}
+                onUpdateContinuityBridgeField={(field, value) => {
+                  void updateContinuityBridgeField(field, value)
+                }}
+              />
             </>
           )}
         </div>
       </section>
-    </>
+    </div>
   )
 }

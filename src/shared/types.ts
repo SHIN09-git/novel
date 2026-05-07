@@ -28,6 +28,7 @@ export type MemoryUpdateCandidateType = 'character' | 'foreshadowing' | 'chapter
 export type MemoryUpdateCandidateStatus = 'pending' | 'accepted' | 'rejected'
 export type ConsistencySeverity = 'low' | 'medium' | 'high'
 export type RevisionCandidateStatus = 'pending' | 'accepted' | 'rejected'
+export type RevisionCandidateContextSource = 'reused_current_job_context' | 'rebuilt_from_explicit_selection' | 'fallback_legacy'
 export type RevisionSessionStatus = 'active' | 'completed' | 'abandoned'
 export type RevisionRequestType =
   | 'polish_style'
@@ -64,6 +65,54 @@ export type ConsistencyIssueType =
   | 'continuity_gap'
   | 'other'
 export type ConsistencyIssueStatus = 'open' | 'ignored' | 'converted_to_revision' | 'resolved'
+export type DataMergeAction =
+  | 'keep_target'
+  | 'add_from_source'
+  | 'dedupe_same_id'
+  | 'rename_source_id'
+  | 'skip_source'
+  | 'conflict'
+export type DataMergeConflictResolution = 'keep_target' | 'import_source_as_copy' | 'skip_source' | 'unresolved'
+
+export interface DataFileSummary {
+  projectCount: number
+  chapterCount: number
+  characterCount: number
+  foreshadowingCount: number
+  memoryCandidateCount: number
+  promptVersionCount: number
+  pipelineJobCount: number
+  updatedAt?: string | null
+}
+
+export interface DataMergeOperation {
+  collection: string
+  action: DataMergeAction
+  entityId?: ID
+  entityTitle?: string
+  reason: string
+}
+
+export interface DataMergeConflict {
+  collection: string
+  entityId: ID
+  sourceTitle?: string
+  targetTitle?: string
+  reason: string
+  resolution: DataMergeConflictResolution
+}
+
+export interface DataMergePreview {
+  sourcePath: string
+  targetPath: string
+  sourceSummary: DataFileSummary
+  targetSummary: DataFileSummary
+  mergedSummary: DataFileSummary
+  operations: DataMergeOperation[]
+  conflicts: DataMergeConflict[]
+  warnings: string[]
+  canAutoMerge: boolean
+}
 
 export interface RevisionGenerationRequest {
   type: RevisionRequestType
@@ -279,12 +328,14 @@ export interface BuildPromptResult {
   chapterTask: ChapterTask
   continuityBridge: ChapterContinuityBridge | null
   continuitySource: ContinuitySource | null
+  compressionRecords: ContextCompressionRecord[]
   warnings: string[]
 }
 
 export interface AppSettings {
   apiProvider: ApiProvider
   apiKey: string
+  hasApiKey: boolean
   baseUrl: string
   modelName: string
   temperature: number
@@ -320,6 +371,34 @@ export interface OmittedContextItem {
   estimatedTokensSaved: number
 }
 
+export type ContextCompressionKind =
+  | 'chapter_recap_to_stage_summary'
+  | 'chapter_recap_to_one_line_summary'
+  | 'chapter_recap_to_summary_excerpt'
+  | 'chapter_recap_dropped'
+
+export type ContextCompressionReplacementKind =
+  | 'stage_summary'
+  | 'chapter_one_line_summary'
+  | 'summary_excerpt'
+  | 'dropped'
+
+export interface ContextCompressionRecord {
+  id: ID
+  kind: ContextCompressionKind
+  originalContextKind: 'chapter_recap'
+  originalChapterId: ID
+  originalChapterOrder: number
+  originalTitle?: string
+  originalTokenEstimate: number
+  replacementKind: ContextCompressionReplacementKind
+  replacementSourceId?: ID | null
+  replacementText?: string
+  replacementTokenEstimate: number
+  savedTokenEstimate: number
+  reason: string
+}
+
 export interface ContextSelectionResult {
   selectedStoryBibleFields: string[]
   selectedChapterIds: ID[]
@@ -329,6 +408,7 @@ export interface ContextSelectionResult {
   selectedTimelineEventIds: ID[]
   estimatedTokens: number
   omittedItems: OmittedContextItem[]
+  compressionRecords: ContextCompressionRecord[]
   warnings: string[]
 }
 
@@ -403,6 +483,82 @@ export interface ForeshadowingStatusChangeSuggestion {
   notes: string
   confidence: number
 }
+
+export interface MemoryPatchBase {
+  schemaVersion: number
+  kind: string
+  summary: string
+  sourceChapterOrder?: number | null
+  warnings?: string[]
+}
+
+export interface ChapterReviewMemoryPatch extends MemoryPatchBase {
+  kind: 'chapter_review_update'
+  targetChapterId: ID | null
+  targetChapterOrder: number | null
+  review: {
+    summary: string
+    newInformation: string
+    characterChanges: string
+    newForeshadowing: string
+    resolvedForeshadowing: string
+    endingHook: string
+    riskWarnings: string
+  }
+  continuityBridgeSuggestion: ChapterContinuityBridgeSuggestion | null
+}
+
+export interface CharacterStateMemoryPatch extends MemoryPatchBase {
+  kind: 'character_state_update'
+  characterId: ID
+  relatedChapterId: ID | null
+  relatedChapterOrder: number | null
+  changeSummary: string
+  newCurrentEmotionalState: string
+  newRelationshipWithProtagonist: string
+  newNextActionTendency: string
+}
+
+export interface ForeshadowingCreateMemoryPatch extends MemoryPatchBase {
+  kind: 'foreshadowing_create'
+  candidate: ForeshadowingCandidate
+}
+
+export interface ForeshadowingStatusMemoryPatch extends MemoryPatchBase {
+  kind: 'foreshadowing_status_update'
+  foreshadowingId: ID
+  suggestedStatus: ForeshadowingStatus
+  recommendedTreatmentMode?: ForeshadowingTreatmentMode
+  actualPayoffChapter?: number | null
+  evidenceText: string
+  notes: string
+}
+
+export interface StageSummaryMemoryPatch extends MemoryPatchBase {
+  kind: 'stage_summary_create'
+  stageSummary: Partial<StageSummary>
+}
+
+export interface TimelineEventMemoryPatch extends MemoryPatchBase {
+  kind: 'timeline_event_create'
+  event: Partial<TimelineEvent>
+}
+
+export interface LegacyRawMemoryPatch extends MemoryPatchBase {
+  kind: 'legacy_raw'
+  rawText: string
+  parsedValue?: unknown
+  parseError?: string
+}
+
+export type MemoryUpdatePatch =
+  | ChapterReviewMemoryPatch
+  | CharacterStateMemoryPatch
+  | ForeshadowingCreateMemoryPatch
+  | ForeshadowingStatusMemoryPatch
+  | StageSummaryMemoryPatch
+  | TimelineEventMemoryPatch
+  | LegacyRawMemoryPatch
 
 export interface ForeshadowingExtractionResult {
   newForeshadowingCandidates: ForeshadowingCandidate[]
@@ -518,7 +674,7 @@ export interface MemoryUpdateCandidate {
   jobId: ID
   type: MemoryUpdateCandidateType
   targetId: ID | null
-  proposedPatch: string
+  proposedPatch: MemoryUpdatePatch
   evidence: string
   confidence: number
   status: MemoryUpdateCandidateStatus
@@ -592,6 +748,16 @@ export interface QualityGateReport {
   createdAt: string
 }
 
+export interface ForcedContextBlock {
+  kind: 'continuity_bridge' | 'quality_gate_issue' | string
+  sourceId?: ID | null
+  sourceType?: string | null
+  sourceChapterId?: ID | null
+  sourceChapterOrder?: number | null
+  title: string
+  tokenEstimate: number
+}
+
 export interface GenerationRunTrace {
   id: ID
   projectId: ID
@@ -607,6 +773,9 @@ export interface GenerationRunTrace {
   foreshadowingTreatmentOverrides: Record<ID, ForeshadowingTreatmentMode>
   omittedContextItems: OmittedContextItem[]
   contextWarnings: string[]
+  contextTokenEstimate: number
+  forcedContextBlocks: ForcedContextBlock[]
+  compressionRecords: ContextCompressionRecord[]
   finalPromptTokenEstimate: number
   generatedDraftId: ID | null
   consistencyReviewReportId: ID | null
@@ -633,6 +802,8 @@ export interface RevisionCandidate {
   revisionInstruction: string
   revisedText: string
   status: RevisionCandidateStatus
+  contextSource?: RevisionCandidateContextSource
+  contextWarnings?: string[]
   createdAt: string
   updatedAt: string
 }
@@ -729,5 +900,6 @@ export interface PromptBuildInput {
   stageSummaries: StageSummary[]
   chapterContinuityBridges?: ChapterContinuityBridge[]
   budgetProfile?: ContextBudgetProfile
+  explicitContextSelection?: ContextSelectionResult
   config: PromptConfig
 }

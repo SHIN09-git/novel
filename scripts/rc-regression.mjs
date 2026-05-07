@@ -763,6 +763,18 @@ function makeRcData() {
         },
         omittedContextItems: contextSelectionResult.omittedItems,
         contextWarnings: [],
+        contextTokenEstimate: Math.max(0, estimateTokens(promptContent) - estimateTokens('上一章结尾衔接')),
+        forcedContextBlocks: [
+          {
+            kind: 'continuity_bridge',
+            sourceId: continuityBridgeId,
+            sourceType: 'saved_bridge',
+            sourceChapterId: chapters[2].id,
+            sourceChapterOrder: 3,
+            title: '上一章结尾衔接',
+            tokenEstimate: estimateTokens('上一章结尾衔接')
+          }
+        ],
         finalPromptTokenEstimate: estimateTokens(promptContent),
         generatedDraftId: draftId,
         consistencyReviewReportId: consistencyReportId,

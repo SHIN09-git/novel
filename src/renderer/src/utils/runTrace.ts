@@ -3,6 +3,7 @@ import type {
   ChapterGenerationJob,
   Foreshadowing,
   ForeshadowingTreatmentMode,
+  ForcedContextBlock,
   GenerationRunTrace,
   ID
 } from '../../../shared/types'
@@ -44,6 +45,9 @@ export function createEmptyGenerationRunTrace(job: ChapterGenerationJob): Genera
     foreshadowingTreatmentOverrides: {},
     omittedContextItems: [],
     contextWarnings: [],
+    contextTokenEstimate: 0,
+    forcedContextBlocks: [],
+    compressionRecords: [],
     finalPromptTokenEstimate: 0,
     generatedDraftId: null,
     consistencyReviewReportId: null,
@@ -90,6 +94,35 @@ export function upsertGenerationRunTraceByJobId(
 ): AppData {
   const job = data.chapterGenerationJobs.find((item) => item.id === jobId)
   return job ? upsertGenerationRunTrace(data, job, patch) : data
+}
+
+function forcedBlockKey(block: ForcedContextBlock): string {
+  return [block.kind, block.sourceId ?? '', block.sourceType ?? '', block.sourceChapterId ?? '', block.title].join('|')
+}
+
+export function uniqueForcedContextBlocks(blocks: ForcedContextBlock[]): ForcedContextBlock[] {
+  const seen = new Set<string>()
+  return blocks.filter((block) => {
+    const key = forcedBlockKey(block)
+    if (seen.has(key)) return false
+    seen.add(key)
+    return true
+  })
+}
+
+export function estimateForcedContextTokens(blocks: ForcedContextBlock[]): number {
+  return blocks.reduce((total, block) => total + Math.max(0, block.tokenEstimate || 0), 0)
+}
+
+export function appendGenerationRunTraceForcedContextBlocks(
+  data: AppData,
+  jobId: ID,
+  blocks: ForcedContextBlock[]
+): AppData {
+  if (!blocks.length) return data
+  const existing = data.generationRunTraces.find((trace) => trace.jobId === jobId)
+  const merged = uniqueForcedContextBlocks([...(existing?.forcedContextBlocks ?? []), ...blocks])
+  return upsertGenerationRunTraceByJobId(data, jobId, { forcedContextBlocks: merged })
 }
 
 export function appendGenerationRunTraceIds(

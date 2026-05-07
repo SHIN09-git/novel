@@ -26,6 +26,7 @@ import type {
 } from '../../shared/types'
 import { REVIEW_SYSTEM_PROMPT } from './AIPromptTemplates'
 import { ensureChapterDraft, ensureChapterPlan, ensureConsistencyReview, rawTextAsChapterDraft } from './AIResponseNormalizer'
+import { validateChapterDraftSchema, validateChapterPlanSchema, validateConsistencyReviewSchema } from './AISchemaValidator'
 
 export class GenerationPipelineAI {
   constructor(private readonly client: AIClient) {}
@@ -67,7 +68,7 @@ export class GenerationPipelineAI {
       `Context:\n${context}`
     ].join('\n')
 
-    const result = await this.client.requestJson(REVIEW_SYSTEM_PROMPT, userPrompt, ensureChapterPlan, fallback)
+    const result = await this.client.requestJson(REVIEW_SYSTEM_PROMPT, userPrompt, ensureChapterPlan, fallback, undefined, validateChapterPlanSchema)
     if (result.data) return result
 
     return {
@@ -138,7 +139,8 @@ export class GenerationPipelineAI {
       userPrompt,
       ensureChapterDraft,
       fallback,
-      (rawText) => rawTextAsChapterDraft(rawText, chapterPlan.chapterTitle || fallback.title)
+      (rawText) => rawTextAsChapterDraft(rawText, chapterPlan.chapterTitle || fallback.title),
+      validateChapterDraftSchema
     )
   }
 
@@ -173,7 +175,7 @@ export class GenerationPipelineAI {
       `Context:\n${context}`
     ].join('\n')
 
-    return this.client.requestJson(REVIEW_SYSTEM_PROMPT, userPrompt, ensureConsistencyReview, fallback)
+    return this.client.requestJson(REVIEW_SYSTEM_PROMPT, userPrompt, ensureConsistencyReview, fallback, undefined, validateConsistencyReviewSchema)
   }
 
 }

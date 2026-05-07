@@ -1,0 +1,7 @@
+﻿.generation-view .run-trace-panel {
+  scroll-margin-top: var(--space-4);
+}
+
+.generation-view .run-trace-panel .candidate-list.compact {
+  gap: var(--space-2);
+}

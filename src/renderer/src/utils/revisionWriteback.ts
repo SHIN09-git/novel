@@ -28,7 +28,7 @@ function acceptRevisionMetadata(data: AppData, version: RevisionVersion, timesta
       session.id === version.sessionId ? { ...session, status: 'completed', updatedAt: timestamp } : session
     ),
     revisionVersions: data.revisionVersions.map((item) =>
-      item.id === version.id ? { ...item, status: 'accepted', updatedAt: timestamp } : item
+      item.id === version.id ? { ...item, body: version.body, status: 'accepted', updatedAt: timestamp } : item
     )
   }
 }

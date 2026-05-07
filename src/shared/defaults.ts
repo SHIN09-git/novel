@@ -12,7 +12,14 @@ import type {
   ConsistencyReviewReport,
   ConsistencySeverity,
   Foreshadowing,
+  ForeshadowingCandidate,
+  ForeshadowingStatus,
+  ForeshadowingWeight,
+  ForcedContextBlock,
   GenerationRunTrace,
+  MemoryUpdateCandidate,
+  MemoryUpdateCandidateType,
+  MemoryUpdatePatch,
   QualityGateReport,
   RedundancyReport,
   PromptMode,
@@ -25,6 +32,7 @@ import { normalizeTreatmentMode } from './foreshadowingTreatment'
 export const DEFAULT_SETTINGS: AppSettings = {
   apiProvider: 'openai',
   apiKey: '',
+  hasApiKey: false,
   baseUrl: 'https://api.openai.com/v1',
   modelName: 'gpt-4.1',
   temperature: 0.8,
@@ -37,7 +45,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
 }
 
 export const EMPTY_APP_DATA: AppData = {
-  schemaVersion: 2,
+  schemaVersion: 3,
   projects: [],
   storyBibles: [],
   chapters: [],
@@ -157,6 +165,226 @@ function normalizeForeshadowing(value: Foreshadowing): Foreshadowing {
   }
 }
 
+function normalizeForeshadowingStatus(value: unknown): ForeshadowingStatus {
+  return value === 'unresolved' || value === 'partial' || value === 'resolved' || value === 'abandoned' ? value : 'unresolved'
+}
+
+function normalizeForeshadowingWeight(value: unknown): ForeshadowingWeight {
+  return value === 'low' || value === 'medium' || value === 'high' || value === 'payoff' ? value : 'medium'
+}
+
+function normalizeForeshadowingCandidate(value: unknown): ForeshadowingCandidate {
+  const candidate = objectOrEmpty(value)
+  const suggestedWeight = normalizeForeshadowingWeight(candidate.suggestedWeight)
+  return {
+    title: stringValue(candidate.title) || '未命名伏笔',
+    description: stringValue(candidate.description),
+    firstChapterOrder: typeof candidate.firstChapterOrder === 'number' ? candidate.firstChapterOrder : null,
+    suggestedWeight,
+    recommendedTreatmentMode: normalizeTreatmentMode(candidate.recommendedTreatmentMode, 'unresolved', suggestedWeight),
+    expectedPayoff: stringValue(candidate.expectedPayoff),
+    relatedCharacterIds: stringArrayValue(candidate.relatedCharacterIds),
+    notes: stringValue(candidate.notes)
+  }
+}
+
+function normalizeChapterReviewMemoryPatch(value: unknown): MemoryUpdatePatch {
+  const patch = objectOrEmpty(value)
+  const review = objectOrEmpty(patch.review || patch)
+  const continuityBridgeSuggestion = patch.continuityBridgeSuggestion
+    ? normalizeContinuityBridgeSuggestion(patch.continuityBridgeSuggestion)
+    : null
+  return {
+    schemaVersion: 1,
+    kind: 'chapter_review_update',
+    summary: stringValue(patch.summary) || stringValue(review.summary) || '章节复盘更新',
+    sourceChapterOrder:
+      typeof patch.sourceChapterOrder === 'number'
+        ? patch.sourceChapterOrder
+        : typeof patch.targetChapterOrder === 'number'
+          ? patch.targetChapterOrder
+          : null,
+    warnings: stringArrayValue(patch.warnings),
+    targetChapterId: stringValue(patch.targetChapterId) || null,
+    targetChapterOrder: typeof patch.targetChapterOrder === 'number' ? patch.targetChapterOrder : null,
+    review: {
+      summary: stringValue(review.summary),
+      newInformation: stringValue(review.newInformation),
+      characterChanges: stringValue(review.characterChanges),
+      newForeshadowing: stringValue(review.newForeshadowing),
+      resolvedForeshadowing: stringValue(review.resolvedForeshadowing),
+      endingHook: stringValue(review.endingHook),
+      riskWarnings: stringValue(review.riskWarnings)
+    },
+    continuityBridgeSuggestion
+  }
+}
+
+function normalizeCharacterStateMemoryPatch(value: unknown): MemoryUpdatePatch {
+  const patch = objectOrEmpty(value)
+  return {
+    schemaVersion: 1,
+    kind: 'character_state_update',
+    summary: stringValue(patch.summary) || stringValue(patch.changeSummary) || '角色状态更新',
+    sourceChapterOrder:
+      typeof patch.sourceChapterOrder === 'number'
+        ? patch.sourceChapterOrder
+        : typeof patch.relatedChapterOrder === 'number'
+          ? patch.relatedChapterOrder
+          : null,
+    warnings: stringArrayValue(patch.warnings),
+    characterId: stringValue(patch.characterId),
+    relatedChapterId: stringValue(patch.relatedChapterId) || null,
+    relatedChapterOrder: typeof patch.relatedChapterOrder === 'number' ? patch.relatedChapterOrder : null,
+    changeSummary: stringValue(patch.changeSummary),
+    newCurrentEmotionalState: stringValue(patch.newCurrentEmotionalState),
+    newRelationshipWithProtagonist: stringValue(patch.newRelationshipWithProtagonist),
+    newNextActionTendency: stringValue(patch.newNextActionTendency)
+  }
+}
+
+function normalizeForeshadowingCreateMemoryPatch(value: unknown): MemoryUpdatePatch {
+  const patch = objectOrEmpty(value)
+  const candidate = normalizeForeshadowingCandidate(patch.candidate || value)
+  return {
+    schemaVersion: 1,
+    kind: 'foreshadowing_create',
+    summary: stringValue(patch.summary) || candidate.title || '新增伏笔',
+    sourceChapterOrder:
+      typeof patch.sourceChapterOrder === 'number'
+        ? patch.sourceChapterOrder
+        : typeof candidate.firstChapterOrder === 'number'
+          ? candidate.firstChapterOrder
+          : null,
+    warnings: stringArrayValue(patch.warnings),
+    candidate
+  }
+}
+
+function normalizeForeshadowingStatusMemoryPatch(value: unknown): MemoryUpdatePatch {
+  const patch = objectOrEmpty(value)
+  const change = objectOrEmpty(patch.change || value)
+  const suggestedStatus = normalizeForeshadowingStatus(change.suggestedStatus)
+  return {
+    schemaVersion: 1,
+    kind: 'foreshadowing_status_update',
+    summary: stringValue(patch.summary) || stringValue(change.evidenceText) || '伏笔状态更新',
+    sourceChapterOrder: typeof patch.sourceChapterOrder === 'number' ? patch.sourceChapterOrder : null,
+    warnings: stringArrayValue(patch.warnings),
+    foreshadowingId: stringValue(change.foreshadowingId),
+    suggestedStatus,
+    recommendedTreatmentMode: change.recommendedTreatmentMode
+      ? normalizeTreatmentMode(change.recommendedTreatmentMode, suggestedStatus, 'medium')
+      : undefined,
+    actualPayoffChapter:
+      typeof change.actualPayoffChapter === 'number'
+        ? change.actualPayoffChapter
+        : typeof patch.actualPayoffChapter === 'number'
+          ? patch.actualPayoffChapter
+          : null,
+    evidenceText: stringValue(change.evidenceText),
+    notes: stringValue(change.notes)
+  }
+}
+
+function legacyRawPatch(rawText: string, parsedValue?: unknown, parseError?: string): MemoryUpdatePatch {
+  return {
+    schemaVersion: 1,
+    kind: 'legacy_raw',
+    summary: '旧版原始记忆候选',
+    sourceChapterOrder: null,
+    warnings: parseError ? ['旧数据解析失败，已保留原文。'] : ['旧数据无法自动识别，已保留原文。'],
+    rawText,
+    parsedValue,
+    parseError
+  }
+}
+
+export function parseLegacyMemoryUpdatePatch(value: string, candidateType: MemoryUpdateCandidateType): MemoryUpdatePatch {
+  try {
+    const parsed = JSON.parse(value)
+    return normalizeMemoryUpdatePatch(parsed, candidateType, value)
+  } catch (error) {
+    return legacyRawPatch(value, undefined, error instanceof Error ? error.message : String(error))
+  }
+}
+
+export function normalizeMemoryUpdatePatch(
+  value: unknown,
+  candidateType: MemoryUpdateCandidateType = 'chapter_review',
+  rawText = typeof value === 'string' ? value : JSON.stringify(value ?? '')
+): MemoryUpdatePatch {
+  if (typeof value === 'string') return parseLegacyMemoryUpdatePatch(value, candidateType)
+
+  const patch = objectOrEmpty(value)
+  if (!Object.keys(patch).length) return legacyRawPatch(rawText)
+
+  if (patch.kind === 'chapter_review_update') return normalizeChapterReviewMemoryPatch(patch)
+  if (patch.kind === 'character_state_update') return normalizeCharacterStateMemoryPatch(patch)
+  if (patch.kind === 'foreshadowing_create') return normalizeForeshadowingCreateMemoryPatch(patch)
+  if (patch.kind === 'foreshadowing_status_update') return normalizeForeshadowingStatusMemoryPatch(patch)
+  if (patch.kind === 'stage_summary_create') {
+    return {
+      schemaVersion: 1,
+      kind: 'stage_summary_create',
+      summary: stringValue(patch.summary) || '阶段摘要候选',
+      sourceChapterOrder: typeof patch.sourceChapterOrder === 'number' ? patch.sourceChapterOrder : null,
+      warnings: stringArrayValue(patch.warnings),
+      stageSummary: objectOrEmpty(patch.stageSummary)
+    }
+  }
+  if (patch.kind === 'timeline_event_create') {
+    return {
+      schemaVersion: 1,
+      kind: 'timeline_event_create',
+      summary: stringValue(patch.summary) || '时间线事件候选',
+      sourceChapterOrder: typeof patch.sourceChapterOrder === 'number' ? patch.sourceChapterOrder : null,
+      warnings: stringArrayValue(patch.warnings),
+      event: objectOrEmpty(patch.event)
+    }
+  }
+  if (patch.kind === 'legacy_raw') {
+    return legacyRawPatch(stringValue(patch.rawText) || rawText, patch.parsedValue, stringValue(patch.parseError) || undefined)
+  }
+
+  if (candidateType === 'chapter_review' && ('summary' in patch || 'newInformation' in patch || 'continuityBridgeSuggestion' in patch)) {
+    return normalizeChapterReviewMemoryPatch(patch)
+  }
+  if (candidateType === 'character' && ('characterId' in patch || 'changeSummary' in patch)) {
+    return normalizeCharacterStateMemoryPatch(patch)
+  }
+  if (candidateType === 'foreshadowing' && patch.kind === 'new') return normalizeForeshadowingCreateMemoryPatch(patch)
+  if (candidateType === 'foreshadowing' && patch.kind === 'status') return normalizeForeshadowingStatusMemoryPatch(patch)
+
+  return legacyRawPatch(rawText, value)
+}
+
+export function normalizeMemoryUpdateCandidate(value: MemoryUpdateCandidate | Record<string, unknown>): MemoryUpdateCandidate {
+  const candidate = objectOrEmpty(value)
+  const type: MemoryUpdateCandidateType =
+    candidate.type === 'character' ||
+    candidate.type === 'foreshadowing' ||
+    candidate.type === 'chapter_review' ||
+    candidate.type === 'stage_summary' ||
+    candidate.type === 'timeline_event'
+      ? candidate.type
+      : 'chapter_review'
+  return {
+    ...(value as MemoryUpdateCandidate),
+    id: stringValue(candidate.id),
+    projectId: stringValue(candidate.projectId),
+    jobId: stringValue(candidate.jobId),
+    type,
+    targetId: stringValue(candidate.targetId) || null,
+    proposedPatch: normalizeMemoryUpdatePatch(candidate.proposedPatch, type),
+    evidence: stringValue(candidate.evidence),
+    confidence: typeof candidate.confidence === 'number' ? candidate.confidence : 0,
+    status: candidate.status === 'accepted' || candidate.status === 'rejected' ? candidate.status : 'pending',
+    createdAt: stringValue(candidate.createdAt) || new Date().toISOString(),
+    updatedAt: stringValue(candidate.updatedAt) || stringValue(candidate.createdAt) || new Date().toISOString()
+  }
+}
+
 function normalizeContextSelectionResult(value: unknown): ContextSelectionResult {
   const selection = objectOrEmpty(value)
   return {
@@ -168,8 +396,53 @@ function normalizeContextSelectionResult(value: unknown): ContextSelectionResult
     selectedTimelineEventIds: stringArrayValue(selection.selectedTimelineEventIds),
     estimatedTokens: typeof selection.estimatedTokens === 'number' ? selection.estimatedTokens : 0,
     omittedItems: Array.isArray(selection.omittedItems) ? (selection.omittedItems as ContextSelectionResult['omittedItems']) : [],
+    compressionRecords: normalizeContextCompressionRecords(selection.compressionRecords),
     warnings: stringArrayValue(selection.warnings)
   }
+}
+
+function normalizeContextCompressionRecords(value: unknown): ContextSelectionResult['compressionRecords'] {
+  return arrayOrEmpty<Record<string, unknown>>(value).map((entry) => {
+    const record = objectOrEmpty(entry)
+    const replacementKind =
+      record.replacementKind === 'stage_summary' ||
+      record.replacementKind === 'chapter_one_line_summary' ||
+      record.replacementKind === 'summary_excerpt' ||
+      record.replacementKind === 'dropped'
+        ? record.replacementKind
+        : 'dropped'
+    const kind =
+      record.kind === 'chapter_recap_to_stage_summary' ||
+      record.kind === 'chapter_recap_to_one_line_summary' ||
+      record.kind === 'chapter_recap_to_summary_excerpt' ||
+      record.kind === 'chapter_recap_dropped'
+        ? record.kind
+        : 'chapter_recap_dropped'
+    const originalTokenEstimate = typeof record.originalTokenEstimate === 'number' && Number.isFinite(record.originalTokenEstimate)
+      ? Math.max(0, record.originalTokenEstimate)
+      : 0
+    const replacementTokenEstimate = typeof record.replacementTokenEstimate === 'number' && Number.isFinite(record.replacementTokenEstimate)
+      ? Math.max(0, record.replacementTokenEstimate)
+      : 0
+    return {
+      id: stringValue(record.id) || `compression-${stringValue(record.originalChapterId) || 'unknown'}`,
+      kind,
+      originalContextKind: 'chapter_recap',
+      originalChapterId: stringValue(record.originalChapterId),
+      originalChapterOrder: typeof record.originalChapterOrder === 'number' ? record.originalChapterOrder : 0,
+      originalTitle: stringValue(record.originalTitle) || undefined,
+      originalTokenEstimate,
+      replacementKind,
+      replacementSourceId: stringValue(record.replacementSourceId) || null,
+      replacementText: stringValue(record.replacementText),
+      replacementTokenEstimate,
+      savedTokenEstimate:
+        typeof record.savedTokenEstimate === 'number' && Number.isFinite(record.savedTokenEstimate)
+          ? Math.max(0, record.savedTokenEstimate)
+          : Math.max(0, originalTokenEstimate - replacementTokenEstimate),
+      reason: stringValue(record.reason) || 'Context compressed for token budget.'
+    }
+  })
 }
 
 function normalizeBudgetProfile(value: unknown, projectId = ''): ContextBudgetProfile {
@@ -429,6 +702,22 @@ function normalizeForeshadowingTreatmentMap(value: unknown): GenerationRunTrace[
   )
 }
 
+function normalizeForcedContextBlocks(value: unknown): ForcedContextBlock[] {
+  return arrayOrEmpty<Record<string, unknown>>(value).map((entry) => {
+    const block = objectOrEmpty(entry)
+    const sourceChapterOrder = typeof block.sourceChapterOrder === 'number' ? block.sourceChapterOrder : null
+    return {
+      kind: stringValue(block.kind) || 'unknown',
+      sourceId: stringValue(block.sourceId) || null,
+      sourceType: stringValue(block.sourceType) || null,
+      sourceChapterId: stringValue(block.sourceChapterId) || null,
+      sourceChapterOrder,
+      title: stringValue(block.title) || 'Forced context',
+      tokenEstimate: typeof block.tokenEstimate === 'number' && Number.isFinite(block.tokenEstimate) ? Math.max(0, block.tokenEstimate) : 0
+    }
+  })
+}
+
 function normalizeGenerationRunTrace(value: GenerationRunTrace | Record<string, unknown>): GenerationRunTrace {
   const trace = objectOrEmpty(value)
   const timestamp = new Date().toISOString()
@@ -452,6 +741,9 @@ function normalizeGenerationRunTrace(value: GenerationRunTrace | Record<string, 
     foreshadowingTreatmentOverrides: normalizeForeshadowingTreatmentMap(trace.foreshadowingTreatmentOverrides),
     omittedContextItems: Array.isArray(trace.omittedContextItems) ? (trace.omittedContextItems as GenerationRunTrace['omittedContextItems']) : [],
     contextWarnings: stringArrayValue(trace.contextWarnings),
+    contextTokenEstimate: typeof trace.contextTokenEstimate === 'number' ? trace.contextTokenEstimate : 0,
+    forcedContextBlocks: normalizeForcedContextBlocks(trace.forcedContextBlocks),
+    compressionRecords: normalizeContextCompressionRecords(trace.compressionRecords),
     finalPromptTokenEstimate: typeof trace.finalPromptTokenEstimate === 'number' ? trace.finalPromptTokenEstimate : 0,
     generatedDraftId: stringValue(trace.generatedDraftId) || null,
     consistencyReviewReportId: stringValue(trace.consistencyReviewReportId) || null,
@@ -472,6 +764,8 @@ function normalizeGenerationRunTrace(value: GenerationRunTrace | Record<string, 
 export function normalizeAppData(input: Partial<AppData>): AppData {
   const raw = recordOrEmpty(input)
   const rawSettings = recordOrEmpty(raw.settings)
+  const legacyApiKey = stringValue(rawSettings.apiKey)
+  const hasApiKey = typeof rawSettings.hasApiKey === 'boolean' ? rawSettings.hasApiKey : Boolean(legacyApiKey.trim())
 
   return {
     ...EMPTY_APP_DATA,
@@ -479,7 +773,9 @@ export function normalizeAppData(input: Partial<AppData>): AppData {
     schemaVersion: typeof raw.schemaVersion === 'number' ? raw.schemaVersion : EMPTY_APP_DATA.schemaVersion,
     settings: {
       ...DEFAULT_SETTINGS,
-      ...(rawSettings as Partial<AppSettings>)
+      ...(rawSettings as Partial<AppSettings>),
+      apiKey: legacyApiKey,
+      hasApiKey
     },
     projects: arrayOrEmpty(raw.projects),
     storyBibles: arrayOrEmpty(raw.storyBibles),
@@ -495,7 +791,7 @@ export function normalizeAppData(input: Partial<AppData>): AppData {
     chapterGenerationJobs: arrayOrEmpty<ChapterGenerationJob>(raw.chapterGenerationJobs).map(normalizeChapterGenerationJob),
     chapterGenerationSteps: arrayOrEmpty(raw.chapterGenerationSteps),
     generatedChapterDrafts: arrayOrEmpty(raw.generatedChapterDrafts),
-    memoryUpdateCandidates: arrayOrEmpty(raw.memoryUpdateCandidates),
+    memoryUpdateCandidates: arrayOrEmpty<MemoryUpdateCandidate>(raw.memoryUpdateCandidates).map(normalizeMemoryUpdateCandidate),
     consistencyReviewReports: arrayOrEmpty<ConsistencyReviewReport>(raw.consistencyReviewReports).map(normalizeConsistencyReviewReport),
     contextBudgetProfiles: arrayOrEmpty(raw.contextBudgetProfiles),
     qualityGateReports: arrayOrEmpty<QualityGateReport>(raw.qualityGateReports).map(normalizeQualityGateReport),
@@ -506,5 +802,16 @@ export function normalizeAppData(input: Partial<AppData>): AppData {
     revisionRequests: arrayOrEmpty(raw.revisionRequests),
     revisionVersions: arrayOrEmpty(raw.revisionVersions),
     chapterVersions: arrayOrEmpty(raw.chapterVersions)
+  }
+}
+
+export function sanitizeAppDataForPersistence(input: AppData): AppData {
+  const normalized = normalizeAppData(input)
+  return {
+    ...normalized,
+    settings: {
+      ...normalized.settings,
+      apiKey: ''
+    }
   }
 }

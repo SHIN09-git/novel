@@ -1,4 +1,4 @@
-import type { AppData, AppSettings } from '../types'
+import type { AppData, AppSettings, DataMergePreview } from '../types'
 
 export type IpcResult<T> = { ok: true; data: T } | IpcFailure
 
@@ -11,11 +11,13 @@ export interface IpcFailure {
 export interface StorageGetResult {
   data: AppData
   storagePath: string
+  credentialWarning?: string
 }
 
 export interface StorageSaveResult {
   ok: true
   storagePath: string
+  credentialWarning?: string
 }
 
 export interface ExportDataResult {
@@ -28,6 +30,7 @@ export interface ImportDataResult {
   filePath?: string
   data?: AppData
   storagePath?: string
+  credentialWarning?: string
 }
 
 export interface GetStoragePathResult {
@@ -49,9 +52,12 @@ export interface MigrateStoragePathRequest {
 export interface MigrateStoragePathResult {
   ok: boolean
   needsOverwrite?: boolean
+  needsMerge?: boolean
   storagePath: string
   targetPath?: string
   backupPath?: string
+  targetBackupPath?: string
+  mergePreview?: DataMergePreview
   error?: string
 }
 
@@ -68,6 +74,32 @@ export interface OpenStorageFolderRequest {
 
 export interface OpenStorageFolderResult {
   ok: boolean
+  error?: string
+}
+
+export interface MigrationMergePreviewRequest {
+  sourcePath: string
+  targetPath: string
+}
+
+export interface MigrationMergePreviewResult {
+  ok: boolean
+  preview?: DataMergePreview
+  error?: string
+}
+
+export interface ConfirmMigrationMergeRequest {
+  sourcePath: string
+  targetPath: string
+}
+
+export interface ConfirmMigrationMergeResult {
+  ok: boolean
+  storagePath: string
+  data?: AppData
+  preview?: DataMergePreview
+  sourceBackupPath?: string
+  targetBackupPath?: string
   error?: string
 }
 
@@ -90,6 +122,20 @@ export interface ClipboardWriteTextRequest {
 export interface ClipboardWriteTextResult {
   ok: true
 }
+
+export interface CredentialSetApiKeyRequest {
+  apiKey: string
+}
+
+export interface CredentialStateResult {
+  ok: true
+  hasApiKey: boolean
+}
+
+export type CredentialSetApiKeyResult = CredentialStateResult
+export type CredentialHasApiKeyResult = CredentialStateResult
+export type CredentialDeleteApiKeyResult = CredentialStateResult
+export type CredentialMigrateLegacyApiKeyResult = CredentialStateResult
 
 export interface ChatCompletionRequest {
   settings: AppSettings

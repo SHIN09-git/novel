@@ -2,6 +2,7 @@ import { AIClient } from './AIClient'
 import type { AIResult, Character, RevisionGenerationRequest, RevisionResult } from '../../shared/types'
 import { REVISION_SYSTEM_PROMPT, buildRevisionUserPrompt } from './AIPromptTemplates'
 import { ensureRevisionResult } from './AIResponseNormalizer'
+import { validateRevisionResultSchema } from './AISchemaValidator'
 
 function defaultRevisionInstruction(type: RevisionGenerationRequest['type']): string {
   const instructions: Partial<Record<RevisionGenerationRequest['type'], string>> = {
@@ -37,7 +38,7 @@ export class RevisionAI {
     }
     const userPrompt = buildRevisionUserPrompt(normalizedRequest, context)
 
-    return this.client.requestJson(REVISION_SYSTEM_PROMPT, userPrompt, ensureRevisionResult, fallback)
+    return this.client.requestJson(REVISION_SYSTEM_PROMPT, userPrompt, ensureRevisionResult, fallback, undefined, validateRevisionResultSchema)
   }
 
   async reduceAITone(chapterText: string, context: string): Promise<AIResult<RevisionResult>> {

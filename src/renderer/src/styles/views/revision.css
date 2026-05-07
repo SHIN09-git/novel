@@ -1,0 +1,172 @@
+﻿.chapters-view .version-history-panel {
+  margin-top: var(--space-4);
+  padding: var(--space-4);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--surface-strong);
+}
+
+.chapters-view .version-history-list {
+  display: grid;
+  gap: var(--space-3);
+}
+
+.chapters-view .version-history-item {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: var(--space-3);
+  align-items: center;
+  padding: var(--space-3);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--surface);
+}
+
+.chapters-view .version-history-item p {
+  margin: 4px 0 0;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.revision-view .revision-studio-layout {
+  display: grid;
+  grid-template-columns: 330px minmax(0, 1fr);
+  gap: var(--space-4);
+  align-items: start;
+}
+
+.revision-view .revision-sidebar {
+  position: sticky;
+  top: 22px;
+  display: grid;
+  gap: var(--space-4);
+}
+
+.revision-view .segmented-control {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px;
+  padding: 4px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--surface-strong);
+}
+
+.revision-view .segmented-control button {
+  border: 0;
+  box-shadow: none;
+  background: transparent;
+  color: var(--muted);
+}
+
+.revision-view .segmented-control button.active {
+  background: var(--surface);
+  color: var(--accent);
+  box-shadow: var(--shadow-soft);
+}
+
+.revision-view .quality-issue-list {
+  display: grid;
+  gap: var(--space-2);
+}
+
+.revision-view .quality-issue {
+  display: grid;
+  gap: 4px;
+  width: 100%;
+  text-align: left;
+  border-color: var(--line);
+  background: var(--surface-strong);
+  color: var(--ink);
+}
+
+.revision-view .quality-issue span {
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.revision-view .quality-issue.high {
+  border-color: rgba(182, 83, 83, 0.38);
+  background: var(--color-danger-soft);
+}
+
+.revision-view .quality-issue.medium {
+  border-color: rgba(201, 129, 34, 0.38);
+  background: var(--color-warning-soft);
+}
+
+.revision-view .revision-compare {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: var(--space-4);
+}
+
+.revision-view .revision-textarea {
+  min-height: 62vh;
+  resize: vertical;
+  border: 0;
+  border-radius: 0;
+  background:
+    linear-gradient(90deg, rgba(40, 118, 111, 0.05), transparent 34%),
+    var(--surface);
+  font-size: 16px;
+  line-height: 1.9;
+  padding: var(--space-6);
+}
+
+.revision-view .revision-textarea.original {
+  color: var(--color-text-secondary);
+}
+
+.revision-view .revision-textarea.revised {
+  color: var(--ink);
+}
+
+.revision-view .version-tabs {
+  display: flex;
+  gap: var(--space-2);
+  overflow-x: auto;
+  padding-bottom: var(--space-2);
+}
+
+.revision-view .version-tabs button {
+  display: grid;
+  gap: 2px;
+  min-width: 122px;
+  text-align: left;
+  border-color: var(--line);
+  background: var(--surface-strong);
+}
+
+.revision-view .version-tabs button.active {
+  border-color: rgba(40, 118, 111, 0.42);
+  background: var(--color-accent-soft);
+  color: var(--accent);
+}
+
+.revision-view .version-tabs small {
+  color: var(--muted);
+}
+
+.revision-view .revision-version-meta {
+  display: grid;
+  gap: var(--space-2);
+  margin: var(--space-3) 0;
+  padding: var(--space-3);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--surface-strong);
+}
+
+.revision-view .revision-version-meta p {
+  margin: 0;
+  color: var(--muted);
+  line-height: 1.55;
+}
+
+.revision-view .revision-view-switch {
+  margin-bottom: var(--space-3);
+}
+
+

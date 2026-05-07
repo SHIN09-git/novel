@@ -12,6 +12,12 @@ import type {
 } from '../../shared/types'
 import { REVIEW_SYSTEM_PROMPT } from './AIPromptTemplates'
 import { ensureChapterReview, ensureCharacterSuggestions, ensureForeshadowingExtraction, ensureNextSuggestions } from './AIResponseNormalizer'
+import {
+  validateChapterReviewSchema,
+  validateCharacterSuggestionsSchema,
+  validateForeshadowingExtractionSchema,
+  validateNextSuggestionsSchema
+} from './AISchemaValidator'
 
 export class ChapterReviewAI {
   constructor(private readonly client: AIClient) {}
@@ -47,7 +53,7 @@ export class ChapterReviewAI {
       `章节正文：\n${chapterText || '暂无正文'}`
     ].join('\n')
 
-    return this.client.requestJson(REVIEW_SYSTEM_PROMPT, userPrompt, ensureChapterReview, fallback)
+    return this.client.requestJson(REVIEW_SYSTEM_PROMPT, userPrompt, ensureChapterReview, fallback, undefined, validateChapterReviewSchema)
   }
 
   async generateStageSummary(chapters: Chapter[]): Promise<Omit<StageSummary, 'id' | 'projectId' | 'createdAt' | 'updatedAt'>> {
@@ -97,7 +103,14 @@ export class ChapterReviewAI {
       `章节正文：\n${chapterText || '暂无正文'}`
     ].join('\n')
 
-    return this.client.requestJson(REVIEW_SYSTEM_PROMPT, userPrompt, (value) => ensureCharacterSuggestions(value, characterIds), fallback)
+    return this.client.requestJson(
+      REVIEW_SYSTEM_PROMPT,
+      userPrompt,
+      (value) => ensureCharacterSuggestions(value, characterIds),
+      fallback,
+      undefined,
+      validateCharacterSuggestionsSchema
+    )
   }
 
   async extractForeshadowing(
@@ -141,7 +154,14 @@ export class ChapterReviewAI {
       `章节正文：\n${chapterText || '暂无正文'}`
     ].join('\n')
 
-    return this.client.requestJson(REVIEW_SYSTEM_PROMPT, userPrompt, (value) => ensureForeshadowingExtraction(value, foreshadowingIds, characterIds), fallback)
+    return this.client.requestJson(
+      REVIEW_SYSTEM_PROMPT,
+      userPrompt,
+      (value) => ensureForeshadowingExtraction(value, foreshadowingIds, characterIds),
+      fallback,
+      undefined,
+      validateForeshadowingExtractionSchema
+    )
   }
 
   async generateNextChapterSuggestions(chapter: Chapter, projectContext: string): Promise<AIResult<NextChapterSuggestions>> {
@@ -169,6 +189,6 @@ export class ChapterReviewAI {
       `风险提醒：${chapter.riskWarnings}`
     ].join('\n')
 
-    return this.client.requestJson(REVIEW_SYSTEM_PROMPT, userPrompt, ensureNextSuggestions, fallback)
+    return this.client.requestJson(REVIEW_SYSTEM_PROMPT, userPrompt, ensureNextSuggestions, fallback, undefined, validateNextSuggestionsSchema)
   }
 }

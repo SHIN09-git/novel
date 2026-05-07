@@ -1,0 +1,34 @@
+﻿.chapters-view .ai-draft-panel {
+  border-color: rgba(46, 113, 108, 0.28);
+}
+
+.chapters-view .draft-field {
+  display: grid;
+  gap: 8px;
+}
+
+.chapters-view .candidate-list,
+.generation-view .candidate-list {
+  display: grid;
+  gap: 12px;
+}
+
+.chapters-view .candidate-card,
+.generation-view .candidate-card {
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: 14px;
+  background: var(--surface-strong);
+  display: grid;
+  gap: 8px;
+}
+
+.chapters-view .candidate-card h3,
+.chapters-view .candidate-card p,
+.generation-view .candidate-card h3,
+.generation-view .candidate-card p {
+  margin: 0;
+}
+
+
+

@@ -44,6 +44,7 @@ function validateAppData(data) {
 
   pushCheck(checks, data && typeof data === 'object' && !Array.isArray(data), 'AppData 是对象')
   pushCheck(checks, data.settings && typeof data.settings === 'object', 'settings 存在')
+  pushCheck(checks, !data.settings?.apiKey, 'settings.apiKey 不持久化明文')
 
   for (const key of requiredArrays) {
     pushCheck(checks, Array.isArray(data[key]), `${key} 是数组`)

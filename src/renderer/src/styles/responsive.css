@@ -1,0 +1,47 @@
+﻿@media (max-width: 1180px) {
+  .metric-grid,
+  .budget-columns,
+  .workspace-grid,
+  .table-editor,
+  .prompt-layout,
+  .dashboard-hero,
+  .dashboard-grid,
+  .foreshadowing-summary,
+  .settings-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .prompt-controls,
+  .list-pane {
+    position: static;
+  }
+
+  .chapter-workbench,
+  .chapter-workbench .editor-pane,
+  .pipeline-workbench,
+  .pipeline-workbench .editor-pane,
+  .pipeline-command-panel,
+  .character-state-grid,
+  .revision-studio-layout,
+  .revision-compare,
+  .revision-diff-replace {
+    grid-template-columns: 1fr;
+  }
+
+  .chapter-review-panel,
+  .chapter-workbench .ai-draft-panel,
+  .pipeline-stepper-panel,
+  .pipeline-workbench .editor-pane > .panel:not(.pipeline-stepper-panel):not(.draft-panel),
+  .pipeline-workbench .draft-panel,
+  .local-data-section,
+  .revision-sidebar {
+    grid-column: 1;
+    grid-row: auto;
+    position: static;
+    max-height: none;
+  }
+
+  .version-history-item {
+    grid-template-columns: 1fr;
+  }
+}

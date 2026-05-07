@@ -7,6 +7,7 @@ import type {
   Foreshadowing,
   ID,
   ContextBudgetProfile,
+  ContextCompressionRecord,
   ContextSelectionResult,
   BuildPromptResult,
   PromptBuildInput,
@@ -65,6 +66,25 @@ function summarizeChapter(chapter: Chapter, includeBody: boolean): string {
   }
 
   return lines.join('\n')
+}
+
+function formatCompressedChapterRecap(chapter: Chapter, record: ContextCompressionRecord): string {
+  if (record.replacementKind === 'dropped') return ''
+  const replacementText = record.replacementText?.trim()
+  if (!replacementText) return ''
+  const sourceLabel = {
+    stage_summary: '阶段摘要',
+    chapter_one_line_summary: '章节一句话摘要',
+    summary_excerpt: '章节摘要摘录',
+    dropped: '已裁掉'
+  }[record.replacementKind]
+  return [
+    `### 第 ${chapter.order} 章：${chapter.title || '未命名'}（详细回顾已压缩）`,
+    `替换方式：${sourceLabel}`,
+    `压缩原因：${record.reason}`,
+    `节省估算：约 ${record.savedTokenEstimate} token`,
+    replacementText
+  ].join('\n')
 }
 
 function formatStageSummary(summary: StageSummary): string {
@@ -327,11 +347,17 @@ export class PromptBuilderService {
 
   static buildResult(input: PromptBuildInput): BuildPromptResult {
     let workingInput = input
-    const budgetSelection = input.budgetProfile ? PromptBuilderService.selectBudgetContext(input, input.budgetProfile) : null
+    const budgetSelection =
+      input.explicitContextSelection ?? (input.budgetProfile ? PromptBuilderService.selectBudgetContext(input, input.budgetProfile) : null)
+    const selectionIsExplicit = Boolean(input.explicitContextSelection)
 
     if (budgetSelection) {
-      const selectedCharacterIds = new Set([...budgetSelection.selectedCharacterIds, ...input.config.selectedCharacterIds])
-      const selectedForeshadowingIds = new Set([...budgetSelection.selectedForeshadowingIds, ...input.config.selectedForeshadowingIds])
+      const selectedCharacterIds = selectionIsExplicit
+        ? new Set(budgetSelection.selectedCharacterIds)
+        : new Set([...budgetSelection.selectedCharacterIds, ...input.config.selectedCharacterIds])
+      const selectedForeshadowingIds = selectionIsExplicit
+        ? new Set(budgetSelection.selectedForeshadowingIds)
+        : new Set([...budgetSelection.selectedForeshadowingIds, ...input.config.selectedForeshadowingIds])
       workingInput = {
         ...input,
         chapters: input.chapters.filter((chapter) => budgetSelection.selectedChapterIds.includes(chapter.id)),
@@ -360,11 +386,12 @@ export class PromptBuilderService {
           bridges: input.chapterContinuityBridges ?? [],
           targetChapterOrder: target
         })
-    const recentChapters = previousChapters.slice(config.mode === 'light' ? -2 : -3)
+    const recentChapters = selectionIsExplicit ? previousChapters : previousChapters.slice(config.mode === 'light' ? -2 : -3)
+    const compressionByChapterId = new Map((budgetSelection?.compressionRecords ?? []).map((record) => [record.originalChapterId, record]))
     const summaries = [...stageSummaries]
       .filter((summary) => summary.chapterEnd < target)
       .sort((a, b) => a.chapterStart - b.chapterStart)
-    const selectedSummaries = config.mode === 'full' ? summaries : summaries.slice(-2)
+    const selectedSummaries = selectionIsExplicit ? summaries : config.mode === 'full' ? summaries : summaries.slice(-2)
     const foreshadowingSelection = selectedForeshadowings(foreshadowings, target, config)
     const characterSelection = uniqueById(selectedCharacters(characters, foreshadowingSelection, config))
 
@@ -433,7 +460,13 @@ export class PromptBuilderService {
       section(
         'D. 最近 1-3 章详细回顾',
         config.modules.recentChapters,
-        recentChapters.map((chapter) => summarizeChapter(chapter, config.mode === 'full')).join('\n\n')
+        recentChapters
+          .map((chapter) => {
+            const compression = compressionByChapterId.get(chapter.id)
+            return compression ? formatCompressedChapterRecap(chapter, compression) : summarizeChapter(chapter, config.mode === 'full')
+          })
+          .filter(Boolean)
+          .join('\n\n')
       ),
       section(
         'E. 主要角色当前状态',
@@ -486,6 +519,7 @@ export class PromptBuilderService {
       chapterTask: config.task,
       continuityBridge: continuity.bridge,
       continuitySource: continuity.source,
+      compressionRecords: budgetSelection?.compressionRecords ?? [],
       warnings: [...(budgetSelection?.warnings ?? []), ...continuity.warnings]
     }
   }

@@ -3,6 +3,7 @@ import { shouldRecommendForeshadowing } from '../../../shared/foreshadowingTreat
 import type { AppData, Character, ContextBudgetMode, ContextBudgetProfile, ContextSelectionResult, Foreshadowing, ID, Project } from '../../../shared/types'
 import { ContextBudgetManager } from '../../../services/ContextBudgetManager'
 import { parseChapterNumbersFromText, PromptBuilderService } from '../../../services/PromptBuilderService'
+import { createPipelinePromptConfigFromSelection } from './contextSelectionConfig'
 import { newId, now } from './format'
 import { projectData } from './projectData'
 
@@ -77,8 +78,13 @@ export function buildPipelineContext(
   targetChapterOrder: number,
   emotion: string,
   wordCount: string,
-  budgetProfile?: ContextBudgetProfile
+  budgetProfile?: ContextBudgetProfile,
+  explicitSelection?: ContextSelectionResult
 ): string {
+  if (budgetProfile && explicitSelection) {
+    return buildPipelineContextFromSelection(project, data, targetChapterOrder, emotion, wordCount, budgetProfile, explicitSelection)
+  }
+
   const scoped = projectData(data, project.id)
   const autoForeshadowings = recommendedForeshadowings(scoped.foreshadowings, targetChapterOrder)
   const autoCharacters = recommendedCharacters(scoped.characters, autoForeshadowings)
@@ -112,5 +118,41 @@ export function buildPipelineContext(
       selectedForeshadowingIds: autoForeshadowings.map((item) => item.id)
     },
     budgetProfile
+  })
+}
+
+export function buildPipelineContextFromSelection(
+  project: Project,
+  data: AppData,
+  targetChapterOrder: number,
+  emotion: string,
+  wordCount: string,
+  budgetProfile: ContextBudgetProfile,
+  selection: ContextSelectionResult
+): string {
+  const scoped = projectData(data, project.id)
+  const config = createPipelinePromptConfigFromSelection({
+    projectId: project.id,
+    targetChapterOrder,
+    emotion,
+    wordCount,
+    projectStyle: project.style,
+    modules: defaultModulesForMode('standard'),
+    selection
+  })
+
+  return PromptBuilderService.build({
+    project,
+    bible: scoped.bible,
+    chapters: scoped.chapters,
+    characters: scoped.characters,
+    characterStateLogs: scoped.characterStateLogs,
+    foreshadowings: scoped.foreshadowings,
+    timelineEvents: scoped.timelineEvents,
+    stageSummaries: scoped.stageSummaries,
+    chapterContinuityBridges: scoped.chapterContinuityBridges,
+    config,
+    budgetProfile,
+    explicitContextSelection: selection
   })
 }

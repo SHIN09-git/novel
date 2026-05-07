@@ -1,7 +1,7 @@
 import { copyFile, mkdir, readFile, rename, stat, writeFile } from 'node:fs/promises'
 import { dirname } from 'node:path'
 import type { AppData } from '../shared/types'
-import { EMPTY_APP_DATA, normalizeAppData } from '../shared/defaults'
+import { EMPTY_APP_DATA, normalizeAppData, sanitizeAppDataForPersistence } from '../shared/defaults'
 
 export interface StorageService {
   load(): Promise<AppData>
@@ -44,7 +44,7 @@ export class JsonStorageService implements StorageService {
 
   async save(data: AppData): Promise<void> {
     await mkdir(dirname(this.storagePath), { recursive: true })
-    const normalized = normalizeAppData(data)
+    const normalized = sanitizeAppDataForPersistence(data)
     const tmpPath = `${this.storagePath}.tmp`
     const backupPath = `${this.storagePath}.bak`
 

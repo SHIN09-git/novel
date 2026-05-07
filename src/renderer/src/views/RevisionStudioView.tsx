@@ -18,11 +18,13 @@ import { projectData } from '../utils/projectData'
 import { upsertGenerationRunTraceByJobId } from '../utils/runTrace'
 import { LocalRevisionMergeError, looksLikeFullChapterRevision, mergeLocalRevisionSafely } from '../utils/revisionMerge'
 import { applyAcceptedRevisionWriteback, resolveDraftLinkedChapter } from '../utils/revisionWriteback'
+import type { SaveDataInput } from '../utils/saveDataState'
+import { RevisionDiffView } from './revision/RevisionDiffView'
 
 interface ProjectProps {
   data: AppData
   project: Project
-  saveData: (next: AppData) => Promise<void>
+  saveData: (next: SaveDataInput) => Promise<void>
   prefill?: { chapterId: ID | null; draftId: ID | null; requestId: ID } | null
   onPrefillConsumed?: () => void
 }
@@ -78,9 +80,37 @@ export function RevisionStudioView({ data, project, saveData, prefill, onPrefill
   const [targetRange, setTargetRange] = useState('')
   const [instruction, setInstruction] = useState('')
   const [selectedVersionId, setSelectedVersionId] = useState<ID | null>(null)
+  const [revisionViewMode, setRevisionViewMode] = useState<'original' | 'revised' | 'diff'>('diff')
+  const [editableVersionBody, setEditableVersionBody] = useState('')
   const [loading, setLoading] = useState(false)
   const [message, setMessage] = useState('')
   const aiService = useMemo(() => new AIService(data.settings), [data.settings])
+
+  const selectedDraft = drafts.find((draft) => draft.id === selectedDraftId) ?? drafts[0] ?? null
+  const linkedDraftChapter = sourceKind === 'draft' ? resolveDraftLinkedChapter(selectedDraft, chapters) : null
+  const selectedChapter =
+    sourceKind === 'draft'
+      ? linkedDraftChapter
+      : chapters.find((chapter) => chapter.id === selectedChapterId) ?? chapters[0] ?? null
+  const sourceTitle = sourceKind === 'draft' ? selectedDraft?.title ?? '' : selectedChapter?.title ?? ''
+  const sourceBody = sourceKind === 'draft' ? selectedDraft?.body ?? '' : selectedChapter?.body ?? ''
+  const sourceDraftId = sourceKind === 'draft' ? selectedDraft?.id ?? null : null
+  const activeSessions = scoped.revisionSessions.filter((session) =>
+    sourceDraftId ? session.sourceDraftId === sourceDraftId : session.chapterId === selectedChapter?.id && session.sourceDraftId === null
+  )
+  const sessionIds = new Set(activeSessions.map((session) => session.id))
+  const versions = scoped.revisionVersions
+    .filter((version) => sessionIds.has(version.sessionId))
+    .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))
+  const selectedVersion = versions.find((version) => version.id === selectedVersionId) ?? versions[0] ?? null
+  const selectedVersionForView = selectedVersion ? { ...selectedVersion, body: editableVersionBody } : null
+  const latestQualityReports = scoped.qualityGateReports
+    .filter((report) =>
+      sourceKind === 'draft'
+        ? report.draftId === selectedDraft?.id || (selectedChapter ? report.chapterId === selectedChapter.id : false)
+        : report.chapterId === selectedChapter?.id
+    )
+    .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
 
   useEffect(() => {
     if (!prefill) return
@@ -108,30 +138,9 @@ export function RevisionStudioView({ data, project, saveData, prefill, onPrefill
     if (!selectedDraftId && drafts[0]) setSelectedDraftId(drafts[0].id)
   }, [drafts, selectedDraftId])
 
-  const selectedDraft = drafts.find((draft) => draft.id === selectedDraftId) ?? drafts[0] ?? null
-  const linkedDraftChapter = sourceKind === 'draft' ? resolveDraftLinkedChapter(selectedDraft, chapters) : null
-  const selectedChapter =
-    sourceKind === 'draft'
-      ? linkedDraftChapter
-      : chapters.find((chapter) => chapter.id === selectedChapterId) ?? chapters[0] ?? null
-  const sourceTitle = sourceKind === 'draft' ? selectedDraft?.title ?? '' : selectedChapter?.title ?? ''
-  const sourceBody = sourceKind === 'draft' ? selectedDraft?.body ?? '' : selectedChapter?.body ?? ''
-  const sourceDraftId = sourceKind === 'draft' ? selectedDraft?.id ?? null : null
-  const activeSessions = scoped.revisionSessions.filter((session) =>
-    sourceDraftId ? session.sourceDraftId === sourceDraftId : session.chapterId === selectedChapter?.id && session.sourceDraftId === null
-  )
-  const sessionIds = new Set(activeSessions.map((session) => session.id))
-  const versions = scoped.revisionVersions
-    .filter((version) => sessionIds.has(version.sessionId))
-    .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))
-  const selectedVersion = versions.find((version) => version.id === selectedVersionId) ?? versions[0] ?? null
-  const latestQualityReports = scoped.qualityGateReports
-    .filter((report) =>
-      sourceKind === 'draft'
-        ? report.draftId === selectedDraft?.id || (selectedChapter ? report.chapterId === selectedChapter.id : false)
-        : report.chapterId === selectedChapter?.id
-    )
-    .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
+  useEffect(() => {
+    setEditableVersionBody(selectedVersion?.body ?? '')
+  }, [selectedVersion?.id, selectedVersion?.body])
 
   function buildRevisionContext(): string {
     const bible = scoped.bible
@@ -228,15 +237,16 @@ export function RevisionStudioView({ data, project, saveData, prefill, onPrefill
     setLoading(true)
     setMessage('')
     try {
-      const context = buildRevisionContext()
-      const requestPayload = {
-        type,
-        targetRange: isLocalRevision ? rawTarget.trim() : undefined,
-        instruction: finalInstruction,
-        revisionScope: isLocalRevision ? ('local' as const) : ('full' as const),
-        fullChapterText
-      }
-      const result = await aiService.generateRevision(requestPayload, context)
+      const result = await aiService.generateRevision(
+        {
+          type,
+          targetRange: isLocalRevision ? rawTarget.trim() : undefined,
+          instruction: finalInstruction,
+          revisionScope: isLocalRevision ? 'local' : 'full',
+          fullChapterText
+        },
+        buildRevisionContext()
+      )
       if (!result.data) {
         setMessage(result.error || '修订生成失败。')
         return
@@ -259,9 +269,7 @@ export function RevisionStudioView({ data, project, saveData, prefill, onPrefill
         instruction: finalInstruction,
         createdAt: timestamp
       }
-      const finalBody = isLocalRevision
-        ? mergeLocalRevisionSafely(fullChapterText, rawTarget, result.data.revisedText)
-        : result.data.revisedText
+      const finalBody = isLocalRevision ? mergeLocalRevisionSafely(fullChapterText, rawTarget, result.data.revisedText) : result.data.revisedText
       const version: RevisionVersion = {
         id: newId(),
         sessionId: session.id,
@@ -275,16 +283,19 @@ export function RevisionStudioView({ data, project, saveData, prefill, onPrefill
         createdAt: timestamp,
         updatedAt: timestamp
       }
-      const sessionExists = data.revisionSessions.some((item) => item.id === session.id)
-      await saveData({
-        ...data,
-        revisionSessions: sessionExists
-          ? data.revisionSessions.map((item) => (item.id === session.id ? { ...item, status: 'active', updatedAt: timestamp } : item))
-          : [session, ...data.revisionSessions],
-        revisionRequests: [request, ...data.revisionRequests],
-        revisionVersions: [version, ...data.revisionVersions]
+      await saveData((current) => {
+        const sessionExists = current.revisionSessions.some((item) => item.id === session.id)
+        return {
+          ...current,
+          revisionSessions: sessionExists
+            ? current.revisionSessions.map((item) => (item.id === session.id ? { ...item, status: 'active', updatedAt: timestamp } : item))
+            : [session, ...current.revisionSessions],
+          revisionRequests: [request, ...current.revisionRequests],
+          revisionVersions: [version, ...current.revisionVersions]
+        }
       })
       setSelectedVersionId(version.id)
+      setRevisionViewMode('diff')
       setMessage(result.error || (result.usedAI ? '修订版本已生成，接受前请对照检查。' : '未配置 API Key，已生成本地安全模板。'))
     } catch (error) {
       if (error instanceof LocalRevisionMergeError) {
@@ -314,35 +325,57 @@ export function RevisionStudioView({ data, project, saveData, prefill, onPrefill
           : '确定接受该修订版本并更新草稿吗？该草稿尚未关联章节，本次不会写入任何已有章节。'
     if (!confirm(confirmMessage)) return
     const timestamp = now()
-    const writebackSource =
-      sourceKind === 'draft' && selectedDraft
-        ? { kind: 'draft' as const, draft: selectedDraft, linkedChapter: linkedDraftChapter }
-        : { kind: 'chapter' as const, chapter: selectedChapter! }
-    const writeback = applyAcceptedRevisionWriteback(data, project.id, writebackSource, version, timestamp)
-    let nextData: AppData = writeback.data
-    const sourceSession = data.revisionSessions.find((session) => session.id === version.sessionId)
-    const sourceDraft = sourceSession?.sourceDraftId
-      ? data.generatedChapterDrafts.find((draft) => draft.id === sourceSession.sourceDraftId)
-      : null
-    if (sourceDraft?.jobId && sourceSession) {
-      const existingTrace = data.generationRunTraces.find((trace) => trace.jobId === sourceDraft.jobId)
-      nextData = upsertGenerationRunTraceByJobId(nextData, sourceDraft.jobId, {
-        revisionSessionIds: [...new Set([...(existingTrace?.revisionSessionIds ?? []), sourceSession.id])],
-        acceptedRevisionVersionId: version.id
-      })
-    }
-    await saveData(nextData)
-    setMessage(writeback.message)
+    let writebackMessage = ''
+    await saveData((current) => {
+      const currentScoped = projectData(current, project.id)
+      const currentDraft = selectedDraft ? currentScoped.generatedChapterDrafts.find((draft) => draft.id === selectedDraft.id) ?? selectedDraft : null
+      const currentLinkedDraftChapter = sourceKind === 'draft' ? resolveDraftLinkedChapter(currentDraft, currentScoped.chapters) : null
+      const currentChapter = selectedChapter ? currentScoped.chapters.find((chapter) => chapter.id === selectedChapter.id) ?? selectedChapter : null
+      if (sourceKind === 'chapter' && !currentChapter) {
+        writebackMessage = '章节已不存在，无法写回修订版本。'
+        return current
+      }
+      const currentWritebackSource =
+        sourceKind === 'draft' && currentDraft
+          ? { kind: 'draft' as const, draft: currentDraft, linkedChapter: currentLinkedDraftChapter }
+          : { kind: 'chapter' as const, chapter: currentChapter! }
+      const writeback = applyAcceptedRevisionWriteback(current, project.id, currentWritebackSource, version, timestamp)
+      writebackMessage = writeback.message
+      let nextData: AppData = writeback.data
+      const sourceSession = current.revisionSessions.find((session) => session.id === version.sessionId)
+      const sourceDraft = sourceSession?.sourceDraftId
+        ? current.generatedChapterDrafts.find((draft) => draft.id === sourceSession.sourceDraftId)
+        : null
+      if (sourceDraft?.jobId && sourceSession) {
+        const existingTrace = current.generationRunTraces.find((trace) => trace.jobId === sourceDraft.jobId)
+        nextData = upsertGenerationRunTraceByJobId(nextData, sourceDraft.jobId, {
+          revisionSessionIds: [...new Set([...(existingTrace?.revisionSessionIds ?? []), sourceSession.id])],
+          acceptedRevisionVersionId: version.id
+        })
+      }
+      return nextData
+    })
+    setMessage(writebackMessage)
+  }
+
+  async function persistEditedVersionBody() {
+    if (!selectedVersion || editableVersionBody === selectedVersion.body) return
+    await saveData((current) => ({
+      ...current,
+      revisionVersions: current.revisionVersions.map((item) =>
+        item.id === selectedVersion.id ? { ...item, body: editableVersionBody, updatedAt: now() } : item
+      )
+    }))
   }
 
   async function rejectVersion(version: RevisionVersion) {
     if (version.status !== 'pending') return
-    await saveData({
-      ...data,
-      revisionVersions: data.revisionVersions.map((item) =>
+    await saveData((current) => ({
+      ...current,
+      revisionVersions: current.revisionVersions.map((item) =>
         item.id === version.id ? { ...item, status: 'rejected', updatedAt: now() } : item
       )
-    })
+    }))
     setMessage('已拒绝该修订版本。')
   }
 
@@ -363,7 +396,7 @@ export function RevisionStudioView({ data, project, saveData, prefill, onPrefill
   }
 
   return (
-    <>
+    <div className="revision-view">
       <Header
         title="修订工作台"
         description="把普通草稿打磨成更有张力的章节。修订版本不会直接覆盖原文，接受前会保存旧正文快照。"
@@ -463,7 +496,7 @@ export function RevisionStudioView({ data, project, saveData, prefill, onPrefill
           </SectionCard>
           <SectionCard
             title="修订版本"
-            description={selectedVersion ? `${revisionTypeName(data.revisionRequests.find((request) => request.id === selectedVersion.requestId)?.type ?? revisionType)} · ${selectedVersion.status}` : '生成后在这里对照'}
+            description={selectedVersionForView ? `${revisionTypeName(data.revisionRequests.find((request) => request.id === selectedVersionForView.requestId)?.type ?? revisionType)} · ${selectedVersionForView.status}` : '生成后在这里对照'}
           >
             <div className="version-tabs">
               {versions.map((version) => (
@@ -473,21 +506,37 @@ export function RevisionStudioView({ data, project, saveData, prefill, onPrefill
                 </button>
               ))}
             </div>
-            {selectedVersion ? (
+            {selectedVersionForView ? (
               <>
-                <textarea className="revision-textarea revised" value={selectedVersion.body} readOnly />
+                <div className="segmented-control revision-view-switch">
+                  <button className={revisionViewMode === 'original' ? 'active' : ''} onClick={() => setRevisionViewMode('original')}>原文</button>
+                  <button className={revisionViewMode === 'revised' ? 'active' : ''} onClick={() => setRevisionViewMode('revised')}>修订后</button>
+                  <button className={revisionViewMode === 'diff' ? 'active' : ''} onClick={() => setRevisionViewMode('diff')}>差异对比</button>
+                </div>
+                {revisionViewMode === 'original' ? (
+                  <textarea className="revision-textarea original" value={sourceBody} readOnly />
+                ) : null}
+                {revisionViewMode === 'revised' ? (
+                  <textarea
+                    className="revision-textarea revised"
+                    value={editableVersionBody}
+                    onChange={(event) => setEditableVersionBody(event.target.value)}
+                    onBlur={() => void persistEditedVersionBody()}
+                  />
+                ) : null}
+                {revisionViewMode === 'diff' ? <RevisionDiffView originalText={sourceBody} revisedText={editableVersionBody} /> : null}
                 <div className="revision-version-meta">
-                  <p><strong>修改摘要：</strong>{selectedVersion.changedSummary || '暂无'}</p>
-                  <p><strong>风险提示：</strong>{selectedVersion.risks || '暂无'}</p>
-                  <p><strong>保留事实：</strong>{selectedVersion.preservedFacts || '暂无'}</p>
+                  <p><strong>修改摘要：</strong>{selectedVersionForView.changedSummary || '暂无'}</p>
+                  <p><strong>风险提示：</strong>{selectedVersionForView.risks || '暂无'}</p>
+                  <p><strong>保留事实：</strong>{selectedVersionForView.preservedFacts || '暂无'}</p>
                 </div>
                 <div className="row-actions">
-                  <button className="ghost-button" onClick={() => copyRevisionVersion(selectedVersion)}>复制版本</button>
-                  <button className="ghost-button" disabled={loading} onClick={() => generateRevisionFromCurrent({ sourceText: selectedVersion.body, instruction: `在该修订版本基础上继续修改：${instruction || selectedVersion.changedSummary}` })}>
+                  <button className="ghost-button" onClick={() => copyRevisionVersion(selectedVersionForView)}>复制版本</button>
+                  <button className="ghost-button" disabled={loading} onClick={() => generateRevisionFromCurrent({ sourceText: selectedVersionForView.body, instruction: `在该修订版本基础上继续修改：${instruction || selectedVersionForView.changedSummary}` })}>
                     继续修改
                   </button>
-                  <button className="primary-button" disabled={selectedVersion.status === 'accepted'} onClick={() => acceptVersion(selectedVersion)}>接受版本</button>
-                  <button className="danger-button" disabled={selectedVersion.status === 'rejected'} onClick={() => rejectVersion(selectedVersion)}>拒绝版本</button>
+                  <button className="primary-button" disabled={selectedVersionForView.status === 'accepted'} onClick={() => acceptVersion(selectedVersionForView)}>接受版本</button>
+                  <button className="danger-button" disabled={selectedVersionForView.status === 'rejected'} onClick={() => rejectVersion(selectedVersionForView)}>拒绝版本</button>
                 </div>
               </>
             ) : (
@@ -497,6 +546,6 @@ export function RevisionStudioView({ data, project, saveData, prefill, onPrefill
         </main>
       </section>
       {message ? <div className="notice revision-message">{message}</div> : null}
-    </>
+    </div>
   )
 }

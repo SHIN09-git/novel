@@ -9,7 +9,7 @@
     "build": "tsc --noEmit && electron-vite build",
     "smoke": "set NOVEL_DIRECTOR_SMOKE_TEST=1&& electron-vite preview",
     "rc:fixture": "node scripts/rc-regression.mjs",
-    "test": "npm run rc:fixture && node scripts/validate-app-data.mjs tmp/rc-regression/novel-director-data.json && node scripts/validate-ai-modules.mjs && node scripts/validate-revision-merge.mjs && node scripts/validate-revision-writeback.mjs && node scripts/validate-revision-contract.mjs",
+    "test": "npm run rc:fixture && node scripts/validate-app-data.mjs tmp/rc-regression/novel-director-data.json && node scripts/validate-ai-modules.mjs && node scripts/validate-ai-schema-validator.mjs && node scripts/validate-revision-merge.mjs && node scripts/validate-revision-writeback.mjs && node scripts/validate-revision-contract.mjs && node scripts/validate-revision-diff-view.mjs && node scripts/validate-p0-stability.mjs && node scripts/validate-context-budget-consistency.mjs && node scripts/validate-pipeline-context-trace-alignment.mjs && node scripts/validate-revision-candidate-context-source.mjs && node scripts/validate-secure-credentials.mjs && node scripts/validate-memory-patch-structure.mjs && node scripts/validate-storage-migration-merge.mjs && node scripts/validate-prompt-compression-replacement.mjs && node scripts/validate-app-view-rendering-and-styles.mjs && node scripts/validate-lazy-views-and-scoped-styles.mjs",
     "typecheck": "tsc --noEmit",
     "preview": "electron-vite preview"
   },
