@@ -27,7 +27,7 @@ export class AppConfigService {
 
   async resetStoragePath(): Promise<string> {
     const defaultPath = this.getDefaultStoragePath()
-    await this.writeConfig({ ...(await this.readConfig()), storagePath: defaultPath })
+    await this.writeConfig({ storagePath: defaultPath })
     return defaultPath
   }
 

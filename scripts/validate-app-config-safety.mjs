@@ -74,15 +74,28 @@ async function main() {
   )
 
   await writeFile(configPath, '{ broken json', 'utf-8')
-  const fallbackPath = await service.getStoragePath()
+  const capturedWarnings = []
+  const originalWarn = console.warn
+  console.warn = (...args) => {
+    capturedWarnings.push(args.map(String).join(' '))
+  }
+  let fallbackPath
+  try {
+    fallbackPath = await service.getStoragePath()
+  } finally {
+    console.warn = originalWarn
+  }
   const filesAfterCorruptLoad = await readdir(userDataDir)
   const corruptBackups = filesAfterCorruptLoad.filter((name) => name.startsWith('app-config.json.corrupt.') && name.endsWith('.json'))
   const corruptBackupText = corruptBackups.length ? await readFile(join(userDataDir, corruptBackups[0]), 'utf-8') : ''
   checks.push(
     assert(
-      fallbackPath === defaultStoragePath && corruptBackups.length === 1 && corruptBackupText === '{ broken json',
+      fallbackPath === defaultStoragePath &&
+        corruptBackups.length === 1 &&
+        corruptBackupText === '{ broken json' &&
+        capturedWarnings.some((warning) => warning.includes('Backed up corrupt config')),
       'corrupt app-config is backed up before falling back to defaults',
-      { fallbackPath, corruptBackups, corruptBackupText }
+      { fallbackPath, corruptBackups, corruptBackupText, capturedWarnings }
     )
   )
 
