@@ -1,4 +1,5 @@
 import type { ID, TimelineEvent } from '../../../shared/types'
+import { useConfirm } from '../components/ConfirmDialog'
 import { EmptyState, NumberInput, TextArea, Toggle } from '../components/FormFields'
 import { Header } from '../components/Layout'
 import { newId, now } from '../utils/format'
@@ -7,6 +8,7 @@ import type { ProjectProps } from './viewTypes'
 import { updateProjectTimestamp } from './viewTypes'
 
 export function TimelineView({ data, project, saveData }: ProjectProps) {
+  const confirmAction = useConfirm()
   const scoped = projectData(data, project.id)
   const events = [...scoped.timelineEvents].sort((a, b) => a.narrativeOrder - b.narrativeOrder)
 
@@ -25,24 +27,34 @@ export function TimelineView({ data, project, saveData }: ProjectProps) {
       createdAt: timestamp,
       updatedAt: timestamp
     }
-    await saveData({ ...data, projects: updateProjectTimestamp(data, project.id), timelineEvents: [...data.timelineEvents, event] })
+    await saveData((current) => ({
+      ...current,
+      projects: updateProjectTimestamp(current, project.id),
+      timelineEvents: [...current.timelineEvents, event]
+    }))
   }
 
   async function updateEvent(id: ID, patch: Partial<TimelineEvent>) {
-    await saveData({
-      ...data,
-      projects: updateProjectTimestamp(data, project.id),
-      timelineEvents: data.timelineEvents.map((event) => (event.id === id ? { ...event, ...patch, updatedAt: now() } : event))
-    })
+    await saveData((current) => ({
+      ...current,
+      projects: updateProjectTimestamp(current, project.id),
+      timelineEvents: current.timelineEvents.map((event) => (event.id === id ? { ...event, ...patch, updatedAt: now() } : event))
+    }))
   }
 
   async function deleteEvent(event: TimelineEvent) {
-    if (!confirm(`确定删除时间线事件「${event.title}」吗？`)) return
-    await saveData({
-      ...data,
-      projects: updateProjectTimestamp(data, project.id),
-      timelineEvents: data.timelineEvents.filter((item) => item.id !== event.id)
+    const confirmed = await confirmAction({
+      title: '删除时间线事件',
+      message: `确定删除时间线事件「${event.title}」吗？`,
+      confirmLabel: '删除事件',
+      tone: 'danger'
     })
+    if (!confirmed) return
+    await saveData((current) => ({
+      ...current,
+      projects: updateProjectTimestamp(current, project.id),
+      timelineEvents: current.timelineEvents.filter((item) => item.id !== event.id)
+    }))
   }
 
   return (

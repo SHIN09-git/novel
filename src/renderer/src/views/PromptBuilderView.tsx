@@ -22,6 +22,7 @@ import { ContextBudgetManager } from '../../../services/ContextBudgetManager'
 import { endingExcerpt, resolveContinuityBridge } from '../../../services/ContinuityService'
 import { PromptBuilderService } from '../../../services/PromptBuilderService'
 import { TokenEstimator } from '../../../services/TokenEstimator'
+import { useConfirm } from '../components/ConfirmDialog'
 import { NumberInput, SelectField, TextArea, TextInput, Toggle } from '../components/FormFields'
 import { Header } from '../components/Layout'
 import { StatCard, TokenBudgetMeter } from '../components/UI'
@@ -60,6 +61,7 @@ function safeModeLabel(mode: ContextBudgetMode): string {
 }
 
 export function PromptBuilderView({ data, project, saveData, onSendToPipeline }: ProjectProps) {
+  const confirmAction = useConfirm()
   const scoped = projectData(data, project.id)
   const nextChapter = Math.max(0, ...scoped.chapters.map((chapter) => chapter.order)) + 1
   const [targetChapterOrder, setTargetChapterOrder] = useState(nextChapter)
@@ -172,8 +174,8 @@ export function PromptBuilderView({ data, project, saveData, onSendToPipeline }:
 
   async function savePromptVersion() {
     if (!prompt.trim()) return
-    await saveData({
-      ...data,
+    await saveData((current) => ({
+      ...current,
       promptVersions: [
         {
           id: newId(),
@@ -187,9 +189,9 @@ export function PromptBuilderView({ data, project, saveData, onSendToPipeline }:
           task,
           createdAt: now()
         },
-        ...data.promptVersions
+        ...current.promptVersions
       ]
-    })
+    }))
   }
 
   async function saveContextSnapshot(source: PromptContextSnapshotSource = 'manual'): Promise<PromptContextSnapshot | null> {
@@ -216,13 +218,13 @@ export function PromptBuilderView({ data, project, saveData, onSendToPipeline }:
       createdAt: timestamp,
       updatedAt: timestamp
     }
-    await saveData({
-      ...data,
-      promptContextSnapshots: [snapshot, ...data.promptContextSnapshots],
-      contextBudgetProfiles: data.contextBudgetProfiles.some((profile) => profile.id === budgetProfile.id)
-        ? data.contextBudgetProfiles
-        : [budgetProfile, ...data.contextBudgetProfiles]
-    })
+    await saveData((current) => ({
+      ...current,
+      promptContextSnapshots: [snapshot, ...current.promptContextSnapshots],
+      contextBudgetProfiles: current.contextBudgetProfiles.some((profile) => profile.id === budgetProfile.id)
+        ? current.contextBudgetProfiles
+        : [budgetProfile, ...current.contextBudgetProfiles]
+    }))
     if (!prompt.trim()) setPrompt(finalPrompt)
     return snapshot
   }
@@ -233,13 +235,31 @@ export function PromptBuilderView({ data, project, saveData, onSendToPipeline }:
   }
 
   async function deleteContextSnapshot(id: ID) {
-    if (!confirm('确定删除这个上下文快照吗？依赖它的流水线任务会提示快照已丢失。')) return
-    await saveData({ ...data, promptContextSnapshots: data.promptContextSnapshots.filter((snapshot) => snapshot.id !== id) })
+    const confirmed = await confirmAction({
+      title: '删除上下文快照',
+      message: '确定删除这个上下文快照吗？依赖它的流水线任务会提示快照已丢失。',
+      confirmLabel: '删除快照',
+      tone: 'danger'
+    })
+    if (!confirmed) return
+    await saveData((current) => ({
+      ...current,
+      promptContextSnapshots: current.promptContextSnapshots.filter((snapshot) => snapshot.id !== id)
+    }))
   }
 
   async function deletePromptVersion(id: ID) {
-    if (!confirm('确定删除这个 Prompt 版本吗？')) return
-    await saveData({ ...data, promptVersions: data.promptVersions.filter((version) => version.id !== id) })
+    const confirmed = await confirmAction({
+      title: '删除 Prompt 版本',
+      message: '确定删除这个 Prompt 版本吗？',
+      confirmLabel: '删除版本',
+      tone: 'danger'
+    })
+    if (!confirmed) return
+    await saveData((current) => ({
+      ...current,
+      promptVersions: current.promptVersions.filter((version) => version.id !== id)
+    }))
   }
 
   function updateForeshadowingTreatmentOverride(id: ID, nextMode: ForeshadowingTreatmentMode) {
@@ -249,12 +269,12 @@ export function PromptBuilderView({ data, project, saveData, onSendToPipeline }:
   async function saveForeshadowingTreatmentMode(id: ID) {
     const nextMode = foreshadowingTreatmentOverrides[id]
     if (!nextMode) return
-    await saveData({
-      ...data,
-      foreshadowings: data.foreshadowings.map((item) =>
+    await saveData((current) => ({
+      ...current,
+      foreshadowings: current.foreshadowings.map((item) =>
         item.id === id && item.projectId === project.id ? { ...item, treatmentMode: nextMode, updatedAt: now() } : item
       )
-    })
+    }))
   }
 
   return (

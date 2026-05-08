@@ -170,3 +170,351 @@
   gap: 18px;
 }
 
+.generation-view .pipeline-shell {
+  display: grid;
+  gap: var(--space-4);
+}
+
+.generation-view .pipeline-top-status {
+  position: sticky;
+  top: 0;
+  z-index: 4;
+  border: 1px solid rgba(40, 118, 111, 0.16);
+  border-radius: var(--radius-lg);
+  background: rgba(252, 250, 245, 0.92);
+  box-shadow: var(--shadow-soft);
+  backdrop-filter: blur(14px);
+}
+
+.generation-view .pipeline-top-status-inner {
+  display: grid;
+  grid-template-columns: minmax(170px, 0.9fr) minmax(0, 2.6fr) auto;
+  gap: var(--space-4);
+  align-items: center;
+  padding: 14px 16px;
+}
+
+.generation-view .pipeline-top-status-main h2 {
+  margin: 4px 0 0;
+}
+
+.generation-view .pipeline-status-cluster {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(110px, 1fr));
+  gap: 10px;
+}
+
+.generation-view .pipeline-status-cluster > div {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+
+.generation-view .pipeline-status-cluster span,
+.generation-view .pipeline-card-title span,
+.generation-view .pipeline-job-item small {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.generation-view .pipeline-status-cluster strong,
+.generation-view .pipeline-status-cluster small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.generation-view .pipeline-console-grid {
+  display: grid;
+  grid-template-columns: minmax(260px, 310px) minmax(0, 1fr) minmax(280px, 340px);
+  gap: var(--space-4);
+  align-items: start;
+}
+
+.generation-view .pipeline-sidebar,
+.generation-view .pipeline-inspector {
+  display: grid;
+  gap: var(--space-4);
+}
+
+.generation-view .pipeline-main {
+  display: grid;
+  gap: var(--space-4);
+  min-width: 0;
+}
+
+.generation-view .pipeline-card {
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+  background: var(--surface);
+  box-shadow: var(--shadow-soft);
+  padding: 16px;
+}
+
+.generation-view .pipeline-card-title,
+.generation-view .pipeline-draft-header,
+.generation-view .pipeline-context-snapshot-header {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  align-items: flex-start;
+}
+
+.generation-view .pipeline-card-title h3,
+.generation-view .pipeline-card-title h4 {
+  margin: 0;
+}
+
+.generation-view .pipeline-config-stack,
+.generation-view .pipeline-job-items {
+  display: grid;
+  gap: 12px;
+}
+
+.generation-view .pipeline-sidebar .form-grid.compact {
+  grid-template-columns: 1fr;
+}
+
+.generation-view .pipeline-sidebar .reader-emotion-add {
+  grid-template-columns: 1fr;
+}
+
+.generation-view .pipeline-sidebar input,
+.generation-view .pipeline-sidebar select {
+  min-width: 0;
+  width: 100%;
+}
+
+.generation-view .pipeline-config-start {
+  width: 100%;
+}
+
+.generation-view .pipeline-job-item {
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--surface-strong);
+  color: var(--ink);
+  text-align: left;
+  padding: 11px 12px;
+  display: grid;
+  gap: 4px;
+  cursor: pointer;
+}
+
+.generation-view .pipeline-job-item.active {
+  border-color: rgba(40, 118, 111, 0.42);
+  background: var(--color-accent-soft);
+}
+
+.generation-view .pipeline-context-snapshot {
+  margin-top: 12px;
+  display: grid;
+  gap: 8px;
+  border: 1px solid rgba(40, 118, 111, 0.16);
+  border-radius: var(--radius);
+  background: var(--surface-strong);
+  padding: 12px;
+}
+
+.generation-view .pipeline-context-snapshot.warning,
+.generation-view .pipeline-risk-banner {
+  border-color: rgba(185, 111, 54, 0.36);
+  background: rgba(255, 246, 235, 0.86);
+}
+
+.generation-view .pipeline-context-snapshot.compact {
+  background: rgba(40, 118, 111, 0.06);
+}
+
+.generation-view .pipeline-mini-metrics {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.generation-view .pipeline-mini-metrics span {
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.66);
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 700;
+  padding: 5px 8px;
+}
+
+.generation-view .pipeline-action-bar {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  margin-top: 12px;
+}
+
+.generation-view .pipeline-step-rail {
+  display: grid;
+  gap: 12px;
+}
+
+.generation-view .pipeline-error-box {
+  border: 1px solid rgba(169, 67, 67, 0.35);
+  border-radius: var(--radius);
+  background: rgba(169, 67, 67, 0.08);
+  padding: 12px;
+}
+
+.generation-view .pipeline-current-artifact {
+  display: grid;
+  gap: 14px;
+}
+
+.generation-view .pipeline-artifact-tabs {
+  display: flex;
+  gap: 8px;
+  border-bottom: 1px solid var(--line);
+}
+
+.generation-view .pipeline-artifact-tabs button {
+  border: 0;
+  border-bottom: 2px solid transparent;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+  font-weight: 800;
+  padding: 8px 10px;
+}
+
+.generation-view .pipeline-artifact-tabs button.active {
+  border-color: var(--teal);
+  color: var(--ink);
+}
+
+.generation-view .pipeline-artifact-body pre,
+.generation-view .pipeline-step-output pre,
+.generation-view .pipeline-trace-summary pre,
+.generation-view .pipeline-diagnostics-summary pre {
+  margin: 0;
+  max-height: 320px;
+  overflow: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--surface-strong);
+  padding: 12px;
+  color: var(--muted);
+}
+
+.generation-view .pipeline-draft-preview {
+  display: grid;
+  gap: 14px;
+}
+
+.generation-view .pipeline-draft-body {
+  min-height: 430px;
+  line-height: 1.9;
+  font-size: 15px;
+}
+
+.generation-view .pipeline-draft-actions {
+  justify-content: flex-start;
+}
+
+.generation-view .pipeline-draft-empty,
+.generation-view .pipeline-empty-state {
+  display: grid;
+  gap: 8px;
+  min-height: 220px;
+  align-content: center;
+}
+
+.generation-view .pipeline-step-output-list {
+  display: grid;
+  gap: 10px;
+}
+
+.generation-view .pipeline-step-output {
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--surface-strong);
+  padding: 10px 12px;
+}
+
+.generation-view .pipeline-step-output.failed {
+  border-color: rgba(169, 67, 67, 0.4);
+  background: rgba(169, 67, 67, 0.06);
+}
+
+.generation-view .pipeline-step-output summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  cursor: pointer;
+}
+
+.generation-view .pipeline-risk-banner {
+  display: grid;
+  gap: 8px;
+  border: 1px solid rgba(185, 111, 54, 0.36);
+  border-radius: var(--radius-lg);
+  padding: 14px;
+}
+
+.generation-view .pipeline-risk-banner.calm {
+  border-color: rgba(40, 118, 111, 0.2);
+  background: rgba(40, 118, 111, 0.06);
+}
+
+.generation-view .pipeline-risk-banner ul {
+  margin: 0;
+  padding-left: 18px;
+}
+
+.generation-view .pipeline-diagnostics-summary,
+.generation-view .pipeline-memory-candidates,
+.generation-view .pipeline-trace-summary {
+  display: grid;
+  gap: 14px;
+}
+
+.generation-view .pipeline-quality-summary,
+.generation-view .pipeline-consistency-summary,
+.generation-view .pipeline-revision-candidates {
+  display: grid;
+  gap: 10px;
+}
+
+.generation-view .compact-list {
+  gap: 10px;
+}
+
+.generation-view .compact-metrics {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.generation-view .muted-card {
+  opacity: 0.72;
+}
+
+@media (max-width: 1500px) {
+  .generation-view .pipeline-console-grid {
+    grid-template-columns: minmax(250px, 310px) minmax(0, 1fr);
+  }
+
+  .generation-view .pipeline-inspector {
+    grid-column: 1 / -1;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 1100px) {
+  .generation-view .pipeline-top-status-inner,
+  .generation-view .pipeline-console-grid,
+  .generation-view .pipeline-inspector {
+    grid-template-columns: 1fr;
+  }
+
+  .generation-view .pipeline-status-cluster {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+

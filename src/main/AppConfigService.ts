@@ -1,4 +1,4 @@
-import { mkdir, readFile, writeFile } from 'node:fs/promises'
+import { copyFile, mkdir, readFile, rename, stat, writeFile } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
 
 interface AppConfig {
@@ -39,15 +39,47 @@ export class AppConfigService {
     try {
       return JSON.parse(await readFile(this.configPath, 'utf-8')) as AppConfig
     } catch (error) {
-      const code = typeof error === 'object' && error && 'code' in error ? String(error.code) : ''
+      const code = errorCode(error)
       if (code === 'ENOENT') return {}
-      console.warn(`Failed to read app config at ${this.configPath}. Falling back to defaults.`, error)
+
+      const backupPath = `${this.configPath}.corrupt.${Date.now()}.json`
+      try {
+        await copyFile(this.configPath, backupPath)
+        console.warn(`Failed to read app config at ${this.configPath}. Backed up corrupt config to ${backupPath}. Falling back to defaults. ${errorSummary(error)}`)
+      } catch (backupError) {
+        console.warn(
+          `Failed to read app config at ${this.configPath}, and could not create corrupt backup at ${backupPath}. Falling back to defaults. ${errorSummary(error)} Backup error: ${errorSummary(backupError)}`
+        )
+      }
       return {}
     }
   }
 
   private async writeConfig(config: AppConfig): Promise<void> {
     await mkdir(dirname(this.configPath), { recursive: true })
-    await writeFile(this.configPath, JSON.stringify(config, null, 2), 'utf-8')
+    const tmpPath = `${this.configPath}.tmp`
+    const backupPath = `${this.configPath}.bak`
+
+    await writeFile(tmpPath, JSON.stringify(config, null, 2), 'utf-8')
+
+    try {
+      await stat(this.configPath)
+      await copyFile(this.configPath, backupPath)
+    } catch (error) {
+      const code = errorCode(error)
+      if (code !== 'ENOENT') {
+        throw error
+      }
+    }
+
+    await rename(tmpPath, this.configPath)
   }
+}
+
+function errorCode(error: unknown): string {
+  return typeof error === 'object' && error && 'code' in error ? String((error as { code?: unknown }).code) : ''
+}
+
+function errorSummary(error: unknown): string {
+  return error instanceof Error ? error.message : String(error)
 }

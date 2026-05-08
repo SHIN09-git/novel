@@ -74,6 +74,46 @@ button:disabled {
   margin-top: 18px;
 }
 
+.confirm-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 200;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  background: rgba(20, 24, 22, 0.38);
+  backdrop-filter: blur(4px);
+}
+
+.confirm-dialog {
+  width: min(440px, 100%);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+  background: var(--color-surface-elevated);
+  box-shadow: 0 24px 80px rgba(31, 37, 34, 0.22);
+  padding: 22px;
+}
+
+.confirm-dialog.danger {
+  border-color: rgba(182, 83, 83, 0.34);
+}
+
+.confirm-dialog h2 {
+  margin: 0 0 10px;
+  font-size: 20px;
+}
+
+.confirm-dialog p {
+  margin: 0 0 18px;
+  color: var(--muted);
+  line-height: 1.7;
+  white-space: pre-wrap;
+}
+
+.confirm-dialog .row-actions {
+  justify-content: flex-end;
+}
+
 .panel h2,
 .panel h3 {
   margin: 0 0 14px;

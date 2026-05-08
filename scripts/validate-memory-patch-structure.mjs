@@ -47,6 +47,7 @@ async function main() {
   const runnerSource = await read('src/renderer/src/views/generation/usePipelineRunner.ts')
   const memorySource = await read('src/renderer/src/views/generation/useMemoryCandidates.ts')
   const uiSource = await read('src/renderer/src/views/GenerationPipelineView.tsx')
+  const memoryPanelSource = await read('src/renderer/src/components/pipeline/PipelineMemoryCandidatesPanel.tsx')
 
   checks.push(
     assert(
@@ -81,10 +82,14 @@ async function main() {
 
   checks.push(
     assert(
-      uiSource.includes('renderMemoryPatchDetails') &&
+      (uiSource.includes('renderMemoryPatchDetails') &&
         uiSource.includes("patch.kind === 'character_state_update'") &&
         uiSource.includes("patch.kind === 'foreshadowing_create'") &&
-        !uiSource.includes('candidate.proposedPatch.slice'),
+        !uiSource.includes('candidate.proposedPatch.slice')) ||
+        (memoryPanelSource.includes('renderMemoryPatchDetails') &&
+          memoryPanelSource.includes("patch.kind === 'character_state_update'") &&
+          memoryPanelSource.includes("patch.kind === 'foreshadowing_create'") &&
+          !memoryPanelSource.includes('candidate.proposedPatch.slice')),
       'GenerationPipelineView renders structured patch details instead of slicing raw JSON'
     )
   )

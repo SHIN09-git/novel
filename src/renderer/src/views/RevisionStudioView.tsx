@@ -10,6 +10,7 @@ import type {
   RevisionVersion
 } from '../../../shared/types'
 import { AIService } from '../../../services/AIService'
+import { useConfirm } from '../components/ConfirmDialog'
 import { EmptyState, Field, SelectField, TextArea } from '../components/FormFields'
 import { Header } from '../components/Layout'
 import { ActionToolbar, SectionCard } from '../components/UI'
@@ -70,6 +71,7 @@ function issueToRevisionType(issue: QualityGateIssue): RevisionRequestType {
 }
 
 export function RevisionStudioView({ data, project, saveData, prefill, onPrefillConsumed }: ProjectProps) {
+  const confirmAction = useConfirm()
   const scoped = projectData(data, project.id)
   const chapters = [...scoped.chapters].sort((a, b) => a.order - b.order)
   const drafts = [...scoped.generatedChapterDrafts].sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))
@@ -316,14 +318,27 @@ export function RevisionStudioView({ data, project, saveData, prefill, onPrefill
       return
     }
     const lowScoreReport = latestQualityReports.find((report) => !report.pass)
-    if (lowScoreReport && !confirm(`该章节最近质量门禁为 ${lowScoreReport.overallScore} 分且未通过，仍要接受修订版本吗？`)) return
+    if (lowScoreReport) {
+      const forced = await confirmAction({
+        title: '质量门禁未通过',
+        message: `该章节最近质量门禁为 ${lowScoreReport.overallScore} 分且未通过，仍要接受修订版本吗？`,
+        confirmLabel: '继续接受',
+        tone: 'danger'
+      })
+      if (!forced) return
+    }
     const confirmMessage =
       sourceKind === 'chapter'
         ? '确定接受该修订版本并写回章节正文吗？旧正文会先进入版本历史。'
         : linkedDraftChapter
           ? '确定接受该修订版本并同步更新草稿和关联章节吗？旧章节正文会先进入版本历史。'
           : '确定接受该修订版本并更新草稿吗？该草稿尚未关联章节，本次不会写入任何已有章节。'
-    if (!confirm(confirmMessage)) return
+    const confirmed = await confirmAction({
+      title: '接受修订版本',
+      message: confirmMessage,
+      confirmLabel: '接受修订'
+    })
+    if (!confirmed) return
     const timestamp = now()
     let writebackMessage = ''
     await saveData((current) => {

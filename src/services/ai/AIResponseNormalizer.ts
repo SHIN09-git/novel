@@ -42,6 +42,29 @@ export function asString(value: unknown): string {
   return typeof value === 'string' ? value : ''
 }
 
+export function asText(value: unknown): string {
+  if (typeof value === 'string') return value
+  if (typeof value === 'number' && Number.isFinite(value)) return String(value)
+  if (typeof value === 'boolean') return value ? 'true' : 'false'
+  if (Array.isArray(value)) {
+    return value
+      .map((item) => asText(item))
+      .map((item) => item.trim())
+      .filter(Boolean)
+      .join('\n')
+  }
+  if (typeof value === 'object' && value !== null) {
+    return Object.entries(value as Record<string, unknown>)
+      .map(([key, item]) => {
+        const text = asText(item).trim()
+        return text ? `${key}: ${text}` : ''
+      })
+      .filter(Boolean)
+      .join('\n')
+  }
+  return ''
+}
+
 export function asNumber(value: unknown, fallback = 0): number {
   return typeof value === 'number' && Number.isFinite(value) ? value : fallback
 }
@@ -74,23 +97,23 @@ export function ensureChapterReview(value: unknown): ChapterReviewDraft {
   const obj = asObject(value)
   const bridge = asObject(obj.continuityBridgeSuggestion)
   return {
-    summary: asString(obj.summary),
-    newInformation: asString(obj.newInformation),
-    characterChanges: asString(obj.characterChanges),
-    newForeshadowing: asString(obj.newForeshadowing),
-    resolvedForeshadowing: asString(obj.resolvedForeshadowing),
-    endingHook: asString(obj.endingHook),
-    riskWarnings: asString(obj.riskWarnings),
+    summary: asText(obj.summary),
+    newInformation: asText(obj.newInformation),
+    characterChanges: asText(obj.characterChanges),
+    newForeshadowing: asText(obj.newForeshadowing),
+    resolvedForeshadowing: asText(obj.resolvedForeshadowing),
+    endingHook: asText(obj.endingHook),
+    riskWarnings: asText(obj.riskWarnings),
     continuityBridgeSuggestion: {
-      lastSceneLocation: asString(bridge.lastSceneLocation),
-      lastPhysicalState: asString(bridge.lastPhysicalState),
-      lastEmotionalState: asString(bridge.lastEmotionalState),
-      lastUnresolvedAction: asString(bridge.lastUnresolvedAction),
-      lastDialogueOrThought: asString(bridge.lastDialogueOrThought),
-      immediateNextBeat: asString(bridge.immediateNextBeat),
-      mustContinueFrom: asString(bridge.mustContinueFrom),
-      mustNotReset: asString(bridge.mustNotReset),
-      openMicroTensions: asString(bridge.openMicroTensions)
+      lastSceneLocation: asText(bridge.lastSceneLocation),
+      lastPhysicalState: asText(bridge.lastPhysicalState),
+      lastEmotionalState: asText(bridge.lastEmotionalState),
+      lastUnresolvedAction: asText(bridge.lastUnresolvedAction),
+      lastDialogueOrThought: asText(bridge.lastDialogueOrThought),
+      immediateNextBeat: asText(bridge.immediateNextBeat),
+      mustContinueFrom: asText(bridge.mustContinueFrom),
+      mustNotReset: asText(bridge.mustNotReset),
+      openMicroTensions: asText(bridge.openMicroTensions)
     }
   }
 }
@@ -178,32 +201,32 @@ export function ensureNextSuggestions(value: unknown): NextChapterSuggestions {
   const obj = asObject(value)
   return {
     nextChapterGoal: asString(obj.nextChapterGoal),
-    conflictToPush: asString(obj.conflictToPush),
+    conflictToPush: asText(obj.conflictToPush),
     suspenseToKeep: asString(obj.suspenseToKeep),
     foreshadowingToHint: asString(obj.foreshadowingToHint),
-    foreshadowingNotToReveal: asString(obj.foreshadowingNotToReveal),
+    foreshadowingNotToReveal: asText(obj.foreshadowingNotToReveal),
     suggestedEndingHook: asString(obj.suggestedEndingHook),
-    readerEmotionTarget: asString(obj.readerEmotionTarget)
+    readerEmotionTarget: asText(obj.readerEmotionTarget)
   }
 }
 
 export function ensureChapterPlan(value: unknown): ChapterPlan {
   const obj = asObject(value)
   return {
-    chapterTitle: asString(obj.chapterTitle) || '未命名章节',
-    chapterGoal: asString(obj.chapterGoal),
-    conflictToPush: asString(obj.conflictToPush),
-    characterBeats: asString(obj.characterBeats),
-    foreshadowingToUse: asString(obj.foreshadowingToUse),
-    foreshadowingNotToReveal: asString(obj.foreshadowingNotToReveal),
-    endingHook: asString(obj.endingHook),
-    readerEmotionTarget: asString(obj.readerEmotionTarget),
-    estimatedWordCount: asString(obj.estimatedWordCount),
-    openingContinuationBeat: asString(obj.openingContinuationBeat),
-    carriedPhysicalState: asString(obj.carriedPhysicalState),
-    carriedEmotionalState: asString(obj.carriedEmotionalState),
-    unresolvedMicroTensions: asString(obj.unresolvedMicroTensions),
-    forbiddenResets: asString(obj.forbiddenResets)
+    chapterTitle: asText(obj.chapterTitle) || '未命名章节',
+    chapterGoal: asText(obj.chapterGoal),
+    conflictToPush: asText(obj.conflictToPush),
+    characterBeats: asText(obj.characterBeats),
+    foreshadowingToUse: asText(obj.foreshadowingToUse),
+    foreshadowingNotToReveal: asText(obj.foreshadowingNotToReveal),
+    endingHook: asText(obj.endingHook),
+    readerEmotionTarget: asText(obj.readerEmotionTarget),
+    estimatedWordCount: asText(obj.estimatedWordCount),
+    openingContinuationBeat: asText(obj.openingContinuationBeat),
+    carriedPhysicalState: asText(obj.carriedPhysicalState),
+    carriedEmotionalState: asText(obj.carriedEmotionalState),
+    unresolvedMicroTensions: asText(obj.unresolvedMicroTensions),
+    forbiddenResets: asText(obj.forbiddenResets)
   }
 }
 
@@ -386,8 +409,9 @@ export function ensureRevisionResult(value: unknown): RevisionResult {
   const obj = asObject(value)
   return {
     revisedText: asString(obj.revisedText),
-    changedSummary: asString(obj.changedSummary),
-    risks: asString(obj.risks),
-    preservedFacts: asString(obj.preservedFacts)
+    changedSummary: asText(obj.changedSummary),
+    risks: asText(obj.risks),
+    preservedFacts: asText(obj.preservedFacts)
   }
 }
+

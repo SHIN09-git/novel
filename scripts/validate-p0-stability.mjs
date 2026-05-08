@@ -48,6 +48,14 @@ async function main() {
     join(root, 'src', 'renderer', 'src', 'views', 'generation', 'usePipelineRunner.ts'),
     'utf-8'
   )
+  const pipelineTopStatusSource = await readFile(
+    join(root, 'src', 'renderer', 'src', 'components', 'pipeline', 'PipelineTopStatusBar.tsx'),
+    'utf-8'
+  )
+  const pipelineConfigPanelSource = await readFile(
+    join(root, 'src', 'renderer', 'src', 'components', 'pipeline', 'PipelineConfigPanel.tsx'),
+    'utf-8'
+  )
   const draftAcceptanceSource = await readFile(join(root, 'src', 'renderer', 'src', 'views', 'generation', 'useDraftAcceptance.ts'), 'utf-8')
 
   const events = []
@@ -171,7 +179,9 @@ async function main() {
     assert(
       pipelineRunnerSource.includes('tryAcquirePipelineRunLock') &&
         pipelineRunnerSource.includes('releasePipelineRunLock') &&
-        pipelineSource.includes('disabled={isPipelineRunning}') &&
+        (pipelineSource.includes('disabled={isPipelineRunning}') ||
+          pipelineTopStatusSource.includes('disabled={isRunning') ||
+          pipelineConfigPanelSource.includes('disabled={isRunning')) &&
         pipelineRunnerSource.includes('setPipelineMessage'),
       'GenerationPipelineView 使用运行锁并禁用开始按钮'
     )

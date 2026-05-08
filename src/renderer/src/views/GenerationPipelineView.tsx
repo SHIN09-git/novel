@@ -10,7 +10,6 @@ import type {
   GeneratedChapterDraft,
   GenerationRunTrace,
   ID,
-  MemoryUpdateCandidate,
   PipelineContextSource,
   PipelineMode,
   Project,
@@ -26,18 +25,26 @@ import type {
 import { AIService } from '../../../services/AIService'
 import { safeParseJson } from '../../../services/AIJsonParser'
 import { TokenEstimator } from '../../../services/TokenEstimator'
-import { EmptyState, NumberInput, SelectField, TextInput } from '../components/FormFields'
+import { useConfirm } from '../components/ConfirmDialog'
 import { Header } from '../components/Layout'
-import { ActionToolbar, StatusBadge, Stepper } from '../components/UI'
-import { formatDate, newId, now } from '../utils/format'
+import { PipelineConfigPanel } from '../components/pipeline/PipelineConfigPanel'
+import { PipelineCurrentArtifactPanel, type PipelineArtifactTab } from '../components/pipeline/PipelineCurrentArtifactPanel'
+import { PipelineDiagnosticsPanel } from '../components/pipeline/PipelineDiagnosticsPanel'
+import { PipelineEmptyState } from '../components/pipeline/PipelineEmptyState'
+import { PipelineJobList } from '../components/pipeline/PipelineJobList'
+import { PipelineLayout } from '../components/pipeline/PipelineLayout'
+import { PipelineMemoryCandidatesPanel } from '../components/pipeline/PipelineMemoryCandidatesPanel'
+import { PipelineRiskBanner } from '../components/pipeline/PipelineRiskBanner'
+import { PipelineStepRail } from '../components/pipeline/PipelineStepRail'
+import { PipelineTopStatusBar } from '../components/pipeline/PipelineTopStatusBar'
+import { PipelineTracePanel } from '../components/pipeline/PipelineTracePanel'
+import { newId, now } from '../utils/format'
 import { projectData } from '../utils/projectData'
 import { buildPipelineContextFromSelection, createContextBudgetProfile, selectBudgetContext } from '../utils/promptContext'
 import { addReaderEmotionPreset, loadReaderEmotionState, rememberReaderEmotionTarget } from '../utils/readerEmotionPresets'
 import { appendGenerationRunTraceForcedContextBlocks, appendGenerationRunTraceIds, upsertGenerationRunTraceByJobId } from '../utils/runTrace'
 import type { SaveDataInput } from '../utils/saveDataState'
-import { DraftPreviewPanel } from './generation/DraftPreviewPanel'
-import { PipelineStepsPanel } from './generation/PipelineStepsPanel'
-import { RunTracePanel, buildRunTraceSummary } from './generation/RunTracePanel'
+import { buildRunTraceSummary } from './generation/RunTracePanel'
 import { useDraftAcceptance } from './generation/useDraftAcceptance'
 import { useMemoryCandidates } from './generation/useMemoryCandidates'
 import { PIPELINE_STEP_LABELS, PIPELINE_STEP_ORDER, usePipelineRunner } from './generation/usePipelineRunner'
@@ -53,20 +60,6 @@ interface ProjectProps {
 
 function updateProjectTimestamp(data: AppData, projectId: ID): Project[] {
   return data.projects.map((project) => (project.id === projectId ? { ...project, updatedAt: now() } : project))
-}
-
-const CONSISTENCY_TYPE_LABELS: Record<ConsistencyReviewIssue['type'], string> = {
-  timeline_conflict: '时间线冲突',
-  worldbuilding_conflict: '设定冲突',
-  character_knowledge_leak: '角色知识越界',
-  character_motivation_gap: '动机断裂',
-  character_ooc: '角色 OOC',
-  foreshadowing_misuse: '伏笔误用',
-  foreshadowing_leak: '伏笔提前泄露',
-  geography_or_physics_conflict: '空间/物理冲突',
-  previous_chapter_contradiction: '前文矛盾',
-  continuity_gap: '连续性缺口',
-  other: '其他'
 }
 
 function consistencyIssueToRevisionType(issue: ConsistencyReviewIssue): RevisionRequestType {
@@ -103,69 +96,6 @@ function budgetSelectionFromStepOutput(output: string): { profile: ContextBudget
   }
 }
 
-function renderMemoryPatchDetails(candidate: MemoryUpdateCandidate, scoped: ReturnType<typeof projectData>) {
-  const patch = candidate.proposedPatch
-  if (patch.kind === 'chapter_review_update') {
-    return (
-      <div className="patch-details">
-        <p><strong>本章摘要：</strong>{patch.review.summary || '-'}</p>
-        <p><strong>新增信息：</strong>{patch.review.newInformation || '-'}</p>
-        <p><strong>角色变化：</strong>{patch.review.characterChanges || '-'}</p>
-        <p><strong>新增伏笔：</strong>{patch.review.newForeshadowing || '-'}</p>
-        <p><strong>已回收伏笔：</strong>{patch.review.resolvedForeshadowing || '-'}</p>
-        <p><strong>结尾钩子：</strong>{patch.review.endingHook || '-'}</p>
-        <p><strong>风险提醒：</strong>{patch.review.riskWarnings || '-'}</p>
-        {patch.continuityBridgeSuggestion ? <p><strong>下一章衔接：</strong>{patch.continuityBridgeSuggestion.immediateNextBeat || patch.continuityBridgeSuggestion.mustContinueFrom || '-'}</p> : null}
-      </div>
-    )
-  }
-  if (patch.kind === 'character_state_update') {
-    const character = scoped.characters.find((item) => item.id === patch.characterId)
-    return (
-      <div className="patch-details">
-        <p><strong>角色：</strong>{character?.name ?? patch.characterId}</p>
-        <p><strong>变化摘要：</strong>{patch.changeSummary || '-'}</p>
-        <p><strong>新情绪状态：</strong>{patch.newCurrentEmotionalState || '-'}</p>
-        <p><strong>与主角关系：</strong>{patch.newRelationshipWithProtagonist || '-'}</p>
-        <p><strong>下一步行动倾向：</strong>{patch.newNextActionTendency || '-'}</p>
-      </div>
-    )
-  }
-  if (patch.kind === 'foreshadowing_create') {
-    return (
-      <div className="patch-details">
-        <p><strong>标题：</strong>{patch.candidate.title || '-'}</p>
-        <p><strong>描述：</strong>{patch.candidate.description || '-'}</p>
-        <p><strong>权重：</strong>{patch.candidate.suggestedWeight}</p>
-        <p><strong>预期回收：</strong>{patch.candidate.expectedPayoff || '-'}</p>
-        <p><strong>相关角色：</strong>{patch.candidate.relatedCharacterIds.map((id) => scoped.characters.find((character) => character.id === id)?.name ?? id).join('、') || '-'}</p>
-        <p><strong>备注：</strong>{patch.candidate.notes || '-'}</p>
-      </div>
-    )
-  }
-  if (patch.kind === 'foreshadowing_status_update') {
-    const foreshadowing = scoped.foreshadowings.find((item) => item.id === patch.foreshadowingId)
-    return (
-      <div className="patch-details">
-        <p><strong>伏笔：</strong>{foreshadowing?.title ?? patch.foreshadowingId}</p>
-        <p><strong>建议状态：</strong>{patch.suggestedStatus}</p>
-        <p><strong>推荐处理方式：</strong>{patch.recommendedTreatmentMode || '-'}</p>
-        <p><strong>证据：</strong>{patch.evidenceText || '-'}</p>
-        <p><strong>备注：</strong>{patch.notes || '-'}</p>
-      </div>
-    )
-  }
-  if (patch.kind === 'legacy_raw') {
-    return (
-      <div className="patch-details">
-        {patch.parseError ? <p><strong>解析失败：</strong>{patch.parseError}</p> : null}
-        <pre>{patch.rawText.slice(0, 900)}</pre>
-      </div>
-    )
-  }
-  return <pre>{JSON.stringify(patch, null, 2).slice(0, 900)}</pre>
-}
-
 export function GenerationPipelineView({
   data,
   project,
@@ -174,6 +104,7 @@ export function GenerationPipelineView({
   initialSnapshotId,
   onInitialSnapshotConsumed
 }: ProjectProps) {
+  const confirmAction = useConfirm()
   const scoped = projectData(data, project.id)
   const nextChapter = Math.max(0, ...scoped.chapters.map((chapter) => chapter.order)) + 1
   const [targetChapterOrder, setTargetChapterOrder] = useState(nextChapter)
@@ -190,6 +121,7 @@ export function GenerationPipelineView({
   const [contextSource, setContextSource] = useState<PipelineContextSource>(initialSnapshotId ? 'prompt_snapshot' : 'auto')
   const [selectedSnapshotId, setSelectedSnapshotId] = useState<ID | null>(initialSnapshotId ?? null)
   const [selectedJobId, setSelectedJobId] = useState<ID | null>(scoped.chapterGenerationJobs[0]?.id ?? null)
+  const [activeArtifactTab, setActiveArtifactTab] = useState<PipelineArtifactTab>('steps')
   const aiService = useMemo(() => new AIService(data.settings), [data.settings])
 
   const snapshots = [...scoped.promptContextSnapshots].sort((a, b) => b.createdAt.localeCompare(a.createdAt))
@@ -256,19 +188,37 @@ export function GenerationPipelineView({
   const traceRedundancyReport = selectedTrace?.redundancyReportId
     ? scoped.redundancyReports.find((report) => report.id === selectedTrace.redundancyReportId) ?? null
     : null
+  const selectedStepsKey = selectedSteps.map((step) => `${step.id}:${step.status}:${step.output.length}`).join('|')
+
+  useEffect(() => {
+    if (latestDraft) {
+      setActiveArtifactTab('draft')
+      return
+    }
+    if (selectedSteps.some((step) => step.status === 'failed')) {
+      setActiveArtifactTab('steps')
+      return
+    }
+    if (selectedSteps.some((step) => step.type === 'generate_chapter_plan' && step.output.trim())) {
+      setActiveArtifactTab('plan')
+    }
+  }, [latestDraft?.id, selectedJob?.id, selectedStepsKey])
+
   const draftAcceptance = useDraftAcceptance({
     project,
     saveData,
     selectedJob,
     targetChapterOrder,
     chapters: scoped.chapters,
-    qualityGateReports: scoped.qualityGateReports
+    qualityGateReports: scoped.qualityGateReports,
+    confirmAction
   })
   const memoryCandidates = useMemoryCandidates({
     project,
     selectedJob,
     qualityGateReports: scoped.qualityGateReports,
-    saveData
+    saveData,
+    confirmAction
   })
 
   const {
@@ -508,371 +458,195 @@ export function GenerationPipelineView({
     setPipelineMessage('已复制生成追踪摘要。')
   }
 
+  function useAutoContext() {
+    setContextSource('auto')
+    setSelectedSnapshotId(null)
+  }
+
+  function handleSnapshotChange(value: ID | '') {
+    setSelectedSnapshotId(value || null)
+    const snapshot = snapshots.find((item) => item.id === value)
+    if (!snapshot) return
+    setTargetChapterOrder(snapshot.targetChapterOrder)
+    setBudgetMode(snapshot.mode)
+    setBudgetMaxTokens(snapshot.budgetProfile.maxTokens)
+    if (snapshot.chapterTask.targetWordCount) setEstimatedWordCount(snapshot.chapterTask.targetWordCount)
+    if (snapshot.chapterTask.readerEmotion) {
+      const nextEmotionState = rememberReaderEmotionTarget(project.id, snapshot.chapterTask.readerEmotion)
+      setReaderEmotionTarget(snapshot.chapterTask.readerEmotion)
+      setReaderEmotionPresets(nextEmotionState.presets)
+    }
+  }
+
+  function firstFailedStep() {
+    return selectedSteps.find((step) => step.status === 'failed') ?? null
+  }
+
+  function pendingMemoryCandidateCount() {
+    return selectedCandidates.filter((candidate) => candidate.status === 'pending').length
+  }
+
+  function primaryActionLabel() {
+    if (!selectedJob) return '开始生成'
+    if (selectedJob.status === 'running' || isPipelineRunning) return '流水线运行中'
+    if (selectedJob.status === 'failed' && firstFailedStep()) return '重试失败步骤'
+    if (latestQualityReport && !latestQualityReport.pass && latestDraft) return '生成修订候选'
+    if (latestQualityReport?.pass && latestDraft && latestDraft.status !== 'accepted') return '接受草稿'
+    if (latestDraft && !latestQualityReport) return '查看草稿'
+    if (latestDraft?.status === 'accepted' && pendingMemoryCandidateCount() > 0) return '处理记忆候选'
+    return selectedJob.status === 'completed' ? '查看结果' : '查看步骤'
+  }
+
+  function runPrimaryAction() {
+    if (!selectedJob) {
+      startPipeline()
+      return
+    }
+    const failed = firstFailedStep()
+    if (selectedJob.status === 'failed' && failed) {
+      retryStep(selectedJob, failed.type)
+      return
+    }
+    if (latestQualityReport && !latestQualityReport.pass && latestDraft) {
+      const issue = latestQualityReport.issues[0]
+      if (issue) {
+        void generateRevisionCandidate(issue, latestQualityReport, latestDraft)
+      } else {
+        setActiveArtifactTab('draft')
+      }
+      return
+    }
+    if (latestQualityReport?.pass && latestDraft && latestDraft.status !== 'accepted') {
+      draftAcceptance.acceptDraft(latestDraft)
+      return
+    }
+    if (latestDraft) {
+      setActiveArtifactTab('draft')
+      return
+    }
+    setActiveArtifactTab('steps')
+  }
+
+  function linkedConsistencyIssueTitle(issueId: string | undefined) {
+    if (!issueId) return null
+    return consistencyIssueById.get(issueId)?.title ?? null
+  }
+
   return (
     <div className="generation-view">
       <Header title="章节生产流水线" description="把上下文构建、任务书、正文草稿、复盘、记忆候选和一致性审稿串成可见流程。" />
-      <section className="panel pipeline-start pipeline-command-panel">
-        <div>
-          <span className="chapter-kicker">Generation Pipeline</span>
-          <h2>生成下一章</h2>
-          <p className="muted">每一步都会保存输出，长期记忆更新始终需要人工确认。</p>
-        </div>
-        <div className="form-grid compact">
-          <NumberInput label="目标章节编号" min={1} value={targetChapterOrder} onChange={(value) => setTargetChapterOrder(value ?? nextChapter)} />
-          <SelectField<PipelineMode>
-            label="生成模式"
-            value={pipelineMode}
-            onChange={setPipelineMode}
-            options={[
-              { value: 'conservative', label: '保守' },
-              { value: 'standard', label: '标准' },
-              { value: 'aggressive', label: '激进' }
-            ]}
+      <PipelineLayout
+        topBar={
+          <PipelineTopStatusBar
+            targetChapterOrder={selectedJob?.targetChapterOrder ?? targetChapterOrder}
+            job={selectedJob}
+            contextSource={contextSource}
+            snapshot={selectedSnapshot ?? selectedTraceSnapshot}
+            qualityReport={latestQualityReport}
+            draft={latestDraft}
+            isRunning={isPipelineRunning}
+            primaryActionLabel={primaryActionLabel()}
+            primaryActionDisabled={contextSource === 'prompt_snapshot' && !selectedSnapshot && !selectedJob}
+            onPrimaryAction={runPrimaryAction}
           />
-          <TextInput label="章节预计字数" value={estimatedWordCount} onChange={setEstimatedWordCount} />
-          <TextInput label="读者情绪目标" value={readerEmotionTarget} onChange={setReaderEmotionTarget} />
-          <div className="reader-emotion-presets">
-            <div className="reader-emotion-presets-header">
-              <strong>快捷情绪</strong>
-              <span>点击即可填入，也会记住你上次使用的目标。</span>
-            </div>
-            <div className="reader-emotion-preset-list">
-              {readerEmotionPresets.map((preset) => (
-                <button
-                  key={preset}
-                  type="button"
-                  className={preset === readerEmotionTarget ? 'reader-emotion-chip active' : 'reader-emotion-chip'}
-                  onClick={() => applyReaderEmotionPreset(preset)}
-                >
-                  {preset}
-                </button>
-              ))}
-            </div>
-            <div className="reader-emotion-add">
-              <TextInput
-                label="新增情绪预设"
-                value={newReaderEmotionPreset}
-                onChange={setNewReaderEmotionPreset}
-                placeholder="例如：克制、酸涩、余韵"
-              />
-              <button className="ghost-button" type="button" disabled={!newReaderEmotionPreset.trim()} onClick={addReaderEmotionPresetFromInput}>
-                添加并使用
-              </button>
-            </div>
-          </div>
-          <SelectField<ContextBudgetMode>
-            label="上下文预算模式"
-            value={budgetMode}
-            onChange={setBudgetMode}
-            options={[
-              { value: 'light', label: '轻量' },
-              { value: 'standard', label: '标准' },
-              { value: 'full', label: '完整' },
-              { value: 'custom', label: '自定义' }
-            ]}
-          />
-          <NumberInput
-            label="预算 token"
-            min={1000}
-            value={budgetMaxTokens}
-            onChange={(value) => setBudgetMaxTokens(value ?? data.settings.defaultTokenBudget)}
-          />
-          <SelectField<PipelineContextSource>
-            label="上下文来源"
-            value={contextSource}
-            onChange={(value) => setContextSource(value)}
-            options={[
-              { value: 'auto', label: '自动构建上下文' },
-              { value: 'prompt_snapshot', label: '使用 Prompt 构建器快照' }
-            ]}
-          />
-          {contextSource === 'prompt_snapshot' ? (
-            <SelectField<ID>
-              label="Prompt 上下文快照"
-              value={selectedSnapshotId ?? ''}
-              onChange={(value) => {
-                setSelectedSnapshotId(value || null)
-                const snapshot = snapshots.find((item) => item.id === value)
-                if (snapshot) {
-                  setTargetChapterOrder(snapshot.targetChapterOrder)
-                  setBudgetMode(snapshot.mode)
-                  setBudgetMaxTokens(snapshot.budgetProfile.maxTokens)
-                  if (snapshot.chapterTask.targetWordCount) setEstimatedWordCount(snapshot.chapterTask.targetWordCount)
-                  if (snapshot.chapterTask.readerEmotion) {
-                    const nextEmotionState = rememberReaderEmotionTarget(project.id, snapshot.chapterTask.readerEmotion)
-                    setReaderEmotionTarget(snapshot.chapterTask.readerEmotion)
-                    setReaderEmotionPresets(nextEmotionState.presets)
-                  }
-                }
-              }}
-              options={[
-                { value: '', label: '选择快照' },
-                ...snapshots.map((snapshot) => ({
-                  value: snapshot.id,
-                  label: `第 ${snapshot.targetChapterOrder} 章 · ${snapshot.estimatedTokens} token · ${formatDate(snapshot.createdAt)}`
-                }))
-              ]}
+        }
+        sidebar={
+          <>
+            <PipelineConfigPanel
+              targetChapterOrder={targetChapterOrder}
+              nextChapter={nextChapter}
+              pipelineMode={pipelineMode}
+              estimatedWordCount={estimatedWordCount}
+              readerEmotionTarget={readerEmotionTarget}
+              readerEmotionPresets={readerEmotionPresets}
+              newReaderEmotionPreset={newReaderEmotionPreset}
+              budgetMode={budgetMode}
+              budgetMaxTokens={budgetMaxTokens}
+              defaultTokenBudget={data.settings.defaultTokenBudget}
+              contextSource={contextSource}
+              snapshots={snapshots}
+              selectedSnapshot={selectedSnapshot}
+              selectedSnapshotId={selectedSnapshotId}
+              isRunning={isPipelineRunning}
+              onTargetChapterOrderChange={setTargetChapterOrder}
+              onPipelineModeChange={setPipelineMode}
+              onEstimatedWordCountChange={setEstimatedWordCount}
+              onReaderEmotionTargetChange={setReaderEmotionTarget}
+              onReaderEmotionPreset={applyReaderEmotionPreset}
+              onNewReaderEmotionPresetChange={setNewReaderEmotionPreset}
+              onAddReaderEmotionPreset={addReaderEmotionPresetFromInput}
+              onBudgetModeChange={setBudgetMode}
+              onBudgetMaxTokensChange={setBudgetMaxTokens}
+              onContextSourceChange={setContextSource}
+              onSnapshotChange={handleSnapshotChange}
+              onUseAutoContext={useAutoContext}
+              onStart={startPipeline}
             />
-          ) : null}
-        </div>
-        {contextSource === 'prompt_snapshot' ? (
-          <div className="notice">
-            {selectedSnapshot ? (
-              <>
-                使用快照：第 {selectedSnapshot.targetChapterOrder} 章 · {selectedSnapshot.mode} · 角色 {selectedSnapshot.selectedCharacterIds.length} · 伏笔 {selectedSnapshot.selectedForeshadowingIds.length}
-                {selectedSnapshot.targetChapterOrder !== targetChapterOrder ? `。注意：快照目标章节与当前目标章节不一致。` : ''}
-                {selectedSnapshot.note ? ` 备注：${selectedSnapshot.note}` : ''}
-              </>
-            ) : (
-              '请先选择一个上下文快照；也可以回到 Prompt 构建器生成并发送。'
-            )}
-            <div className="row-actions">
-              <button
-                className="ghost-button"
-                onClick={() => {
-                  setContextSource('auto')
-                  setSelectedSnapshotId(null)
-                }}
-              >
-                重新自动构建上下文
-              </button>
-            </div>
-            {selectedSnapshot ? (
-              <details className="snapshot-detail">
-                <summary>查看快照详情</summary>
-                <ul className="advice-list">
-                  <li>纳入章节：{selectedSnapshot.contextSelectionResult.selectedChapterIds.length}</li>
-                  <li>纳入阶段摘要：{selectedSnapshot.contextSelectionResult.selectedStageSummaryIds.length}</li>
-                  <li>纳入时间线事件：{selectedSnapshot.contextSelectionResult.selectedTimelineEventIds.length}</li>
-                  <li>省略项目：{selectedSnapshot.contextSelectionResult.omittedItems.length}</li>
-                </ul>
-                <pre>{selectedSnapshot.finalPrompt.slice(0, 1200)}</pre>
-              </details>
-            ) : null}
-          </div>
-        ) : null}
-        <ActionToolbar>
-          <button className="primary-button" disabled={isPipelineRunning} onClick={startPipeline}>
-            {isPipelineRunning ? '流水线正在运行' : '开始生成'}
-          </button>
-          {selectedJob ? <StatusBadge tone={selectedJob.status === 'failed' ? 'danger' : selectedJob.status === 'completed' ? 'success' : 'accent'}>{selectedJob.status}</StatusBadge> : null}
-        </ActionToolbar>
-        {pipelineMessage ? <div className="notice">{pipelineMessage}</div> : null}
-      </section>
-
-      <section className="split-layout pipeline-workbench">
-        <aside className="list-pane">
-          {jobs.length === 0 ? (
-            <EmptyState title="暂无流水线任务" description="选择目标章节后点击开始生成。" />
-          ) : (
-            jobs.map((job) => (
-              <button key={job.id} className={job.id === selectedJob?.id ? 'list-item active' : 'list-item'} onClick={() => setSelectedJobId(job.id)}>
-                <strong>第 {job.targetChapterOrder} 章</strong>
-                <span>{job.currentStep ? PIPELINE_STEP_LABELS[job.currentStep] : '未开始'}</span>
-                <small>{formatDate(job.createdAt)}</small>
-              </button>
-            ))
-          )}
-        </aside>
-        <div className="editor-pane">
-          {!selectedJob ? (
-            <EmptyState title="选择或创建流水线任务" description="每一步都会保存输出，失败后可重试或跳过。" />
+            <PipelineJobList jobs={jobs} selectedJobId={selectedJob?.id ?? null} labels={PIPELINE_STEP_LABELS} onSelectJob={setSelectedJobId} />
+          </>
+        }
+        main={
+          !selectedJob ? (
+            <PipelineEmptyState />
           ) : (
             <>
-              <div className="panel pipeline-stepper-panel">
-                <h2>流程状态</h2>
-                <Stepper steps={selectedSteps.map((step) => ({ id: step.id, type: step.type, status: step.status }))} labels={PIPELINE_STEP_LABELS} />
-              </div>
-              <RunTracePanel
-                trace={selectedTrace}
-                snapshot={selectedTraceSnapshot}
-                scoped={scoped}
-                consistencyReport={traceConsistencyReport}
-                qualityReport={traceQualityReport}
-                continuityBridge={traceContinuityBridge}
-                redundancyReport={traceRedundancyReport}
-                onCopy={copyRunTrace}
-              />
-
-              <PipelineStepsPanel job={selectedJob} steps={selectedSteps} labels={PIPELINE_STEP_LABELS} onRetry={retryStep} onSkip={skipStep} />
-
-              <DraftPreviewPanel
-                draft={latestDraft}
+              <PipelineCurrentArtifactPanel
+                activeTab={activeArtifactTab}
+                onActiveTabChange={setActiveArtifactTab}
                 job={selectedJob}
-                onAccept={draftAcceptance.acceptDraft}
-                onReject={draftAcceptance.rejectDraft}
+                draft={latestDraft}
+                steps={selectedSteps}
+                labels={PIPELINE_STEP_LABELS}
+                onAcceptDraft={draftAcceptance.acceptDraft}
+                onRejectDraft={draftAcceptance.rejectDraft}
                 onRetryDraft={(job) => retryStep(job, 'generate_chapter_draft')}
                 onCopyDraft={(draft) => {
-                  void window.novelDirector.clipboard.writeText(draft.body).then(() => setPipelineMessage('????????'))
+                  void window.novelDirector.clipboard.writeText(draft.body).then(() => setPipelineMessage('已复制草稿正文。'))
                 }}
+                onRetryStep={retryStep}
+                onSkipStep={skipStep}
               />
-
-              <div className="panel">
-                <h2>质量门禁报告</h2>
-                {latestQualityReport ? (
-                  <article className="candidate-card">
-                    <h3>
-                      总分 {latestQualityReport.overallScore} · {latestQualityReport.pass ? '通过' : '需人工审查'}
-                    </h3>
-                    <div className="metric-grid">
-                      {Object.entries(latestQualityReport.dimensions).map(([key, value]) => (
-                        <article key={key}>
-                          <span>{key}</span>
-                          <strong className={value < 70 ? 'over-budget' : ''}>{value}</strong>
-                        </article>
-                      ))}
-                    </div>
-                    {latestQualityReport.issues.length ? (
-                      <div className="candidate-list">
-                        {latestQualityReport.issues.map((issue, index) => (
-                          <article key={`${issue.type}-${index}`} className="candidate-card">
-                            <h3>{issue.severity} · {issue.type}</h3>
-                            {issue.linkedConsistencyIssueId && consistencyIssueById.has(issue.linkedConsistencyIssueId) ? (
-                              <>
-                                <p>该问题已在一致性审稿中记录：{consistencyIssueById.get(issue.linkedConsistencyIssueId)?.title}</p>
-                                <p className="muted">这里仅作为放行拦截依据，避免重复展开同一诊断。</p>
-                              </>
-                            ) : (
-                              <>
-                                <p>{issue.description}</p>
-                                <p className="muted">{issue.evidence}</p>
-                                <p>{issue.suggestedFix}</p>
-                              </>
-                            )}
-                            {latestDraft ? (
-                              <button className="ghost-button" onClick={() => generateRevisionCandidate(issue, latestQualityReport, latestDraft)}>
-                                生成修订候选
-                              </button>
-                            ) : null}
-                          </article>
-                        ))}
-                      </div>
-                    ) : (
-                      <p className="muted">没有发现高风险问题。</p>
-                    )}
-                    {latestQualityReport.requiredFixes.length ? (
-                      <ul className="advice-list">
-                        {latestQualityReport.requiredFixes.map((fix) => (
-                          <li key={fix}>必修：{fix}</li>
-                        ))}
-                      </ul>
-                    ) : null}
-                  </article>
-                ) : (
-                  <p className="muted">质量门禁会在一致性审稿后执行，低分草稿不会自动进入长期记忆。</p>
-                )}
-              </div>
-
-              <div className="panel">
-                <h2>修订候选</h2>
-                {selectedRevisionCandidates.length === 0 ? (
-                  <p className="muted">可从质量门禁问题中生成局部修订候选。</p>
-                ) : (
-                  <div className="candidate-list">
-                    {selectedRevisionCandidates.map((candidate) => (
-                      <article key={candidate.id} className="candidate-card">
-                        <h3>{candidate.status} · {candidate.targetIssue}</h3>
-                        <p>{candidate.revisionInstruction}</p>
-                        <pre>{candidate.revisedText || '暂无修订正文'}</pre>
-                        <div className="row-actions">
-                          <button className="primary-button" disabled={candidate.status !== 'pending'} onClick={() => acceptRevisionCandidate(candidate)}>
-                            应用到草稿
-                          </button>
-                          <button className="danger-button" disabled={candidate.status !== 'pending'} onClick={() => rejectRevisionCandidate(candidate)}>
-                            拒绝修订
-                          </button>
-                        </div>
-                      </article>
-                    ))}
-                  </div>
-                )}
-              </div>
-
-              <div className="panel">
-                <h2>记忆更新候选</h2>
-                {selectedCandidates.length === 0 ? (
-                  <p className="muted">章节复盘、角色和伏笔候选会在流水线后半段出现。</p>
-                ) : (
-                  <div className="candidate-list">
-                    {selectedCandidates.map((candidate) => (
-                      <article key={candidate.id} className="candidate-card">
-                        <h3>{candidate.type}</h3>
-                        <p>状态：{candidate.status} · 置信度 {Math.round(candidate.confidence * 100)}%</p>
-                        <p>{candidate.evidence || '暂无证据文本'}</p>
-                        {renderMemoryPatchDetails(candidate, scoped)}
-                        <div className="row-actions">
-                          <button className="primary-button" disabled={candidate.status !== 'pending'} onClick={() => memoryCandidates.applyCandidate(candidate)}>
-                            接受
-                          </button>
-                          <button className="danger-button" disabled={candidate.status !== 'pending'} onClick={() => memoryCandidates.rejectCandidate(candidate)}>
-                            拒绝
-                          </button>
-                        </div>
-                      </article>
-                    ))}
-                  </div>
-                )}
-              </div>
-
-              <div className="panel">
-                <h2>一致性审稿报告</h2>
-                {selectedReports.length === 0 ? (
-                  <p className="muted">审稿报告会在第 7 步完成后显示并自动保存。</p>
-                ) : (
-                  <div className="candidate-list">
-                    {selectedReports.map((report) => {
-                      const counts = {
-                        high: report.issues.filter((issue) => issue.severity === 'high').length,
-                        medium: report.issues.filter((issue) => issue.severity === 'medium').length,
-                        low: report.issues.filter((issue) => issue.severity === 'low').length
-                      }
-                      return (
-                        <article key={report.id} className="candidate-card">
-                          <h3>诊断报告 · {report.severitySummary}</h3>
-                          <p className="muted">
-                            high {counts.high} · medium {counts.medium} · low {counts.low} · {counts.high ? '建议先进入修订' : '可结合质量门禁判断是否修订'}
-                          </p>
-                          {report.legacyIssuesText ? <pre>{report.legacyIssuesText}</pre> : null}
-                          {report.issues.length === 0 ? (
-                            <p className="muted">没有发现结构化一致性问题。</p>
-                          ) : (
-                            <div className="candidate-list">
-                              {report.issues.map((issue) => (
-                                <article key={issue.id} className={`candidate-card ${issue.severity}`}>
-                                  <h3>
-                                    {issue.severity} · {CONSISTENCY_TYPE_LABELS[issue.type]} · {issue.status}
-                                  </h3>
-                                  <strong>{issue.title}</strong>
-                                  <p>{issue.description}</p>
-                                  <p className="muted">证据：{issue.evidence || '暂无'}</p>
-                                  <p>{issue.suggestedFix || issue.revisionInstruction || '暂无建议修复方式'}</p>
-                                  <div className="row-actions">
-                                    <button className="primary-button" onClick={() => startRevisionFromConsistencyIssue(report, issue)}>
-                                      生成修订
-                                    </button>
-                                    <button className="ghost-button" disabled={issue.status === 'ignored'} onClick={() => updateConsistencyIssueStatus(report, issue, 'ignored')}>
-                                      忽略
-                                    </button>
-                                    <button className="ghost-button" disabled={issue.status === 'resolved'} onClick={() => updateConsistencyIssueStatus(report, issue, 'resolved')}>
-                                      标记已解决
-                                    </button>
-                                  </div>
-                                </article>
-                              ))}
-                            </div>
-                          )}
-                          <p>{report.suggestions || '暂无建议'}</p>
-                          <small>已保存 · {formatDate(report.createdAt)}</small>
-                        </article>
-                      )
-                    })}
-                  </div>
-                )}
-              </div>
+              <PipelineMemoryCandidatesPanel candidates={selectedCandidates} scoped={scoped} onAccept={memoryCandidates.applyCandidate} onReject={memoryCandidates.rejectCandidate} />
             </>
-          )}
-        </div>
-      </section>
+          )
+        }
+        inspector={
+          <>
+            <PipelineRiskBanner
+              job={selectedJob}
+              draft={latestDraft}
+              qualityReport={latestQualityReport}
+              consistencyReports={selectedReports}
+              memoryCandidates={selectedCandidates}
+              snapshot={selectedSnapshot}
+              targetChapterOrder={targetChapterOrder}
+              pipelineMessage={pipelineMessage}
+            />
+            <PipelineStepRail job={selectedJob} steps={selectedSteps} labels={PIPELINE_STEP_LABELS} onRetry={retryStep} onSkip={skipStep} />
+            <PipelineDiagnosticsPanel
+              qualityReport={latestQualityReport}
+              consistencyReports={selectedReports}
+              revisionCandidates={selectedRevisionCandidates}
+              latestDraft={latestDraft}
+              linkedConsistencyIssueTitle={linkedConsistencyIssueTitle}
+              onGenerateRevisionCandidate={generateRevisionCandidate}
+              onAcceptRevisionCandidate={acceptRevisionCandidate}
+              onRejectRevisionCandidate={rejectRevisionCandidate}
+              onStartRevisionFromConsistencyIssue={startRevisionFromConsistencyIssue}
+              onUpdateConsistencyIssueStatus={updateConsistencyIssueStatus}
+            />
+            <PipelineTracePanel
+              trace={selectedTrace}
+              snapshot={selectedTraceSnapshot}
+              consistencyReport={traceConsistencyReport}
+              qualityReport={traceQualityReport}
+              continuityBridge={traceContinuityBridge}
+              redundancyReport={traceRedundancyReport}
+              onCopy={copyRunTrace}
+            />
+          </>
+        }
+      />
     </div>
   )
 }

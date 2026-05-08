@@ -35,6 +35,20 @@ function requireStringFields(obj: Record<string, unknown>, fields: string[], bas
   })
 }
 
+function isTextLike(value: unknown): boolean {
+  if (typeof value === 'string') return true
+  if (typeof value === 'number') return Number.isFinite(value)
+  if (typeof value === 'boolean') return true
+  if (Array.isArray(value)) return true
+  return typeof value === 'object' && value !== null
+}
+
+function requireTextLikeFields(obj: Record<string, unknown>, fields: string[], basePath = '$'): AISchemaIssue[] {
+  return fields.flatMap((field) => {
+    if (!(field in obj)) return [issue(`${basePath}.${field}`, '缺少必填字段。')]
+    return isTextLike(obj[field]) ? [] : [issue(`${basePath}.${field}`, '必须是可转换为文本的值。')]
+  })
+}
 function requireArrayFields(obj: Record<string, unknown>, fields: string[], basePath = '$'): AISchemaIssue[] {
   return fields.flatMap((field) => {
     if (!(field in obj)) return [issue(`${basePath}.${field}`, '缺少必填数组字段。')]
@@ -56,6 +70,43 @@ function requireBooleanField(obj: Record<string, unknown>, field: string, basePa
   return typeof obj[field] === 'boolean' ? [] : [issue(`${basePath}.${field}`, '必须是布尔值。')]
 }
 
+function requireOptionalArrayField(obj: Record<string, unknown>, field: string, basePath = '$'): AISchemaIssue[] {
+  if (!(field in obj) || obj[field] === undefined || obj[field] === null) return []
+  return Array.isArray(obj[field]) ? [] : [issue(`${basePath}.${field}`, '必须是数组。')]
+}
+
+function requireNullableStringField(obj: Record<string, unknown>, field: string, basePath = '$'): AISchemaIssue[] {
+  if (!(field in obj)) return [issue(`${basePath}.${field}`, '缺少必填字段。')]
+  return typeof obj[field] === 'string' || obj[field] === null ? [] : [issue(`${basePath}.${field}`, '必须是字符串或 null。')]
+}
+
+function requireNullableNumberField(obj: Record<string, unknown>, field: string, basePath = '$'): AISchemaIssue[] {
+  if (!(field in obj)) return [issue(`${basePath}.${field}`, '缺少必填字段。')]
+  return typeof obj[field] === 'number' || obj[field] === null ? [] : [issue(`${basePath}.${field}`, '必须是数字或 null。')]
+}
+
+function requireScoreFields(obj: Record<string, unknown>, fields: string[], basePath = '$'): AISchemaIssue[] {
+  return fields.flatMap((field) => {
+    if (!(field in obj)) return [issue(`${basePath}.${field}`, '缺少必填数字字段。')]
+    const value = obj[field]
+    return typeof value === 'number' && Number.isFinite(value) && value >= 0 && value <= 100
+      ? []
+      : [issue(`${basePath}.${field}`, '必须是 0-100 之间的数字。')]
+  })
+}
+
+function isValidSeverity(value: unknown): boolean {
+  return value === 'low' || value === 'medium' || value === 'high'
+}
+
+function isValidForeshadowingStatus(value: unknown): boolean {
+  return value === 'unresolved' || value === 'partial' || value === 'resolved' || value === 'abandoned'
+}
+
+function isValidTreatmentMode(value: unknown): boolean {
+  return value === undefined || value === 'hidden' || value === 'hint' || value === 'advance' || value === 'mislead' || value === 'pause' || value === 'payoff'
+}
+
 function validateObjectSchema(value: unknown, schemaName: string, validate: (obj: Record<string, unknown>) => AISchemaIssue[]): AISchemaValidationResult {
   const { obj, issues } = requireObject(value, schemaName)
   if (!obj) return result(schemaName, issues)
@@ -73,7 +124,7 @@ export function formatSchemaValidationError(validation: AISchemaValidationResult
 
 export const validateChapterReviewSchema: AISchemaValidator = (value) =>
   validateObjectSchema(value, '章节复盘', (obj) => {
-    const issues = requireStringFields(obj, [
+    const issues = requireTextLikeFields(obj, [
       'summary',
       'newInformation',
       'characterChanges',
@@ -87,7 +138,7 @@ export const validateChapterReviewSchema: AISchemaValidator = (value) =>
       issues.push(issue('$.continuityBridgeSuggestion', '缺少下一章衔接建议对象。'))
     } else {
       issues.push(
-        ...requireStringFields(
+        ...requireTextLikeFields(
           bridge,
           [
             'lastSceneLocation',
@@ -148,7 +199,7 @@ export const validateNextSuggestionsSchema: AISchemaValidator = (value) =>
 
 export const validateChapterPlanSchema: AISchemaValidator = (value) =>
   validateObjectSchema(value, '章节任务书', (obj) =>
-    requireStringFields(obj, [
+    requireTextLikeFields(obj, [
       'chapterTitle',
       'chapterGoal',
       'conflictToPush',
@@ -191,7 +242,7 @@ export const validateConsistencyReviewSchema: AISchemaValidator = (value) =>
 export const validateQualityGateSchema: AISchemaValidator = (value) =>
   validateObjectSchema(value, '质量门禁', (obj) => {
     const issues = [
-      ...requireNumberFields(obj, ['overallScore']),
+      ...requireScoreFields(obj, ['overallScore']),
       ...requireBooleanField(obj, 'pass'),
       ...requireArrayFields(obj, ['issues', 'requiredFixes', 'optionalSuggestions'])
     ]
@@ -200,7 +251,7 @@ export const validateQualityGateSchema: AISchemaValidator = (value) =>
       issues.push(issue('$.dimensions', '缺少维度分数字段。'))
     } else {
       issues.push(
-        ...requireNumberFields(
+        ...requireScoreFields(
           dimensions,
           [
             'plotCoherence',
@@ -218,6 +269,21 @@ export const validateQualityGateSchema: AISchemaValidator = (value) =>
         )
       )
     }
+    if (Array.isArray(obj.issues)) {
+      obj.issues.forEach((item, index) => {
+        const gateIssue = asRecord(item)
+        if (!gateIssue) {
+          issues.push(issue(`$.issues[${index}]`, '必须是对象。'))
+          return
+        }
+        issues.push(...requireStringFields(gateIssue, ['type', 'description', 'evidence', 'suggestedFix'], `$.issues[${index}]`))
+        if (!('severity' in gateIssue)) {
+          issues.push(issue(`$.issues[${index}].severity`, '缺少严重程度。'))
+        } else if (!isValidSeverity(gateIssue.severity)) {
+          issues.push(issue(`$.issues[${index}].severity`, '必须是 low / medium / high。'))
+        }
+      })
+    }
     return issues
   })
 
@@ -225,4 +291,74 @@ export const validateRevisionCandidateSchema: AISchemaValidator = (value) =>
   validateObjectSchema(value, '修订候选', (obj) => requireStringFields(obj, ['revisionInstruction', 'revisedText']))
 
 export const validateRevisionResultSchema: AISchemaValidator = (value) =>
-  validateObjectSchema(value, '修订结果', (obj) => requireStringFields(obj, ['revisedText', 'changedSummary', 'risks', 'preservedFacts']))
+  validateObjectSchema(value, '修订结果', (obj) => [
+    ...requireStringFields(obj, ['revisedText']),
+    ...requireTextLikeFields(obj, ['changedSummary', 'risks', 'preservedFacts'])
+  ])
+
+export const validateMemoryUpdatePatchSchema: AISchemaValidator = (value) =>
+  validateObjectSchema(value, '长期记忆候选补丁', (obj) => {
+    const issues = [
+      ...requireNumberFields(obj, ['schemaVersion']),
+      ...requireStringFields(obj, ['kind', 'summary']),
+      ...requireOptionalArrayField(obj, 'warnings')
+    ]
+    if (obj.sourceChapterOrder !== undefined && obj.sourceChapterOrder !== null && typeof obj.sourceChapterOrder !== 'number') {
+      issues.push(issue('$.sourceChapterOrder', '必须是数字或 null。'))
+    }
+
+    if (obj.kind === 'chapter_review_update') {
+      issues.push(...requireNullableStringField(obj, 'targetChapterId'))
+      issues.push(...requireNullableNumberField(obj, 'targetChapterOrder'))
+      const review = asRecord(obj.review)
+      if (!review) {
+        issues.push(issue('$.review', '缺少章节复盘对象。'))
+      } else {
+        issues.push(
+          ...requireStringFields(review, ['summary', 'newInformation', 'characterChanges', 'newForeshadowing', 'resolvedForeshadowing', 'endingHook', 'riskWarnings'], '$.review')
+        )
+      }
+      if (obj.continuityBridgeSuggestion !== null && obj.continuityBridgeSuggestion !== undefined && !asRecord(obj.continuityBridgeSuggestion)) {
+        issues.push(issue('$.continuityBridgeSuggestion', '必须是对象或 null。'))
+      }
+    } else if (obj.kind === 'character_state_update') {
+      issues.push(
+        ...requireStringFields(obj, ['characterId', 'changeSummary', 'newCurrentEmotionalState', 'newRelationshipWithProtagonist', 'newNextActionTendency']),
+        ...requireNullableStringField(obj, 'relatedChapterId'),
+        ...requireNullableNumberField(obj, 'relatedChapterOrder')
+      )
+    } else if (obj.kind === 'foreshadowing_create') {
+      const candidate = asRecord(obj.candidate)
+      if (!candidate) {
+        issues.push(issue('$.candidate', '缺少新增伏笔候选对象。'))
+      } else {
+        issues.push(...requireStringFields(candidate, ['title', 'description', 'expectedPayoff', 'notes'], '$.candidate'))
+        issues.push(...requireNullableNumberField(candidate, 'firstChapterOrder', '$.candidate'))
+        issues.push(...requireArrayFields(candidate, ['relatedCharacterIds'], '$.candidate'))
+        if (!('suggestedWeight' in candidate)) {
+          issues.push(issue('$.candidate.suggestedWeight', '缺少伏笔权重。'))
+        }
+      }
+    } else if (obj.kind === 'foreshadowing_status_update') {
+      issues.push(...requireStringFields(obj, ['foreshadowingId', 'evidenceText', 'notes']))
+      if (!('suggestedStatus' in obj) || !isValidForeshadowingStatus(obj.suggestedStatus)) {
+        issues.push(issue('$.suggestedStatus', '必须是 unresolved / partial / resolved / abandoned。'))
+      }
+      if (!isValidTreatmentMode(obj.recommendedTreatmentMode)) {
+        issues.push(issue('$.recommendedTreatmentMode', '必须是合法伏笔处理方式。'))
+      }
+      if (obj.actualPayoffChapter !== undefined && obj.actualPayoffChapter !== null && typeof obj.actualPayoffChapter !== 'number') {
+        issues.push(issue('$.actualPayoffChapter', '必须是数字或 null。'))
+      }
+    } else if (obj.kind === 'stage_summary_create') {
+      if (!asRecord(obj.stageSummary)) issues.push(issue('$.stageSummary', '缺少阶段摘要对象。'))
+    } else if (obj.kind === 'timeline_event_create') {
+      if (!asRecord(obj.event)) issues.push(issue('$.event', '缺少时间线事件对象。'))
+    } else if (obj.kind === 'legacy_raw') {
+      issues.push(...requireStringFields(obj, ['rawText']))
+    } else if ('kind' in obj) {
+      issues.push(issue('$.kind', '未知的记忆补丁类型。'))
+    }
+    return issues
+  })
+

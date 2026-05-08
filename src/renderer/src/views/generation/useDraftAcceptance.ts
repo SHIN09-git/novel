@@ -7,6 +7,7 @@ import type {
   Project,
   QualityGateReport
 } from '../../../../shared/types'
+import type { ConfirmFn } from '../../components/ConfirmDialog'
 import { createChapterVersionBeforeAcceptDraft } from '../../utils/draftAcceptance'
 import { newId, now } from '../../utils/format'
 import { projectData } from '../../utils/projectData'
@@ -19,6 +20,7 @@ interface UseDraftAcceptanceArgs {
   targetChapterOrder: number
   chapters: Chapter[]
   qualityGateReports: QualityGateReport[]
+  confirmAction: ConfirmFn
 }
 
 function updateProjectTimestamp(data: AppData, projectId: ID): Project[] {
@@ -31,15 +33,27 @@ export function useDraftAcceptance({
   selectedJob,
   targetChapterOrder,
   chapters,
-  qualityGateReports
+  qualityGateReports,
+  confirmAction
 }: UseDraftAcceptanceArgs) {
   async function acceptDraft(draft: GeneratedChapterDraft) {
     if (draft.status !== 'draft') return
     const report = qualityGateReports.find((item) => item.draftId === draft.id) ?? null
     if (report && !report.pass) {
-      const forced = confirm(`质量门禁未通过（${report.overallScore} 分）。确认仍要进入章节草稿吗？`)
+      const forced = await confirmAction({
+        title: '质量门禁未通过',
+        message: `质量门禁未通过（${report.overallScore} 分）。确认仍要进入章节草稿吗？`,
+        confirmLabel: '继续',
+        tone: 'danger'
+      })
       if (!forced) return
-      if (!confirm('再次确认：低分草稿可能导致后续复盘和记忆候选质量下降。是否强制接受？')) return
+      const doubleConfirmed = await confirmAction({
+        title: '再次确认',
+        message: '低分草稿可能导致后续复盘和记忆候选质量下降。是否强制接受？',
+        confirmLabel: '强制接受',
+        tone: 'danger'
+      })
+      if (!doubleConfirmed) return
     }
 
     const targetOrder = selectedJob?.targetChapterOrder ?? targetChapterOrder
@@ -48,7 +62,13 @@ export function useDraftAcceptance({
     const chapterId = existing?.id ?? newId()
 
     if (existing) {
-      if (!confirm(`第 ${existing.order} 章已存在，是否覆盖标题和正文？取消则保留草稿不写入章节。`)) return
+      const overwrite = await confirmAction({
+        title: '覆盖已有章节',
+        message: `第 ${existing.order} 章已存在，是否覆盖标题和正文？取消则保留草稿不写入章节。`,
+        confirmLabel: '覆盖章节',
+        tone: 'danger'
+      })
+      if (!overwrite) return
     }
 
     await saveData((current) => {

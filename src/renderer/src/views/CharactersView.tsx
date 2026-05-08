@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import type { Character, CharacterStateLog, ID } from '../../../shared/types'
+import { useConfirm } from '../components/ConfirmDialog'
 import { EmptyState, NumberInput, TextArea, TextInput, Toggle } from '../components/FormFields'
 import { Header } from '../components/Layout'
 import { StatusBadge } from '../components/UI'
@@ -9,6 +10,7 @@ import type { ProjectProps } from './viewTypes'
 import { updateProjectTimestamp } from './viewTypes'
 
 export function CharactersView({ data, project, saveData }: ProjectProps) {
+  const confirmAction = useConfirm()
   const scoped = projectData(data, project.id)
   const characters = [...scoped.characters].sort((a, b) => Number(b.isMain) - Number(a.isMain) || a.name.localeCompare(b.name))
   const chapters = [...scoped.chapters].sort((a, b) => a.order - b.order)
@@ -46,34 +48,44 @@ export function CharactersView({ data, project, saveData }: ProjectProps) {
       createdAt: timestamp,
       updatedAt: timestamp
     }
-    await saveData({ ...data, projects: updateProjectTimestamp(data, project.id), characters: [...data.characters, character] })
+    await saveData((current) => ({
+      ...current,
+      projects: updateProjectTimestamp(current, project.id),
+      characters: [...current.characters, character]
+    }))
     setSelectedId(character.id)
   }
 
   async function updateCharacter(id: ID, patch: Partial<Character>) {
-    await saveData({
-      ...data,
-      projects: updateProjectTimestamp(data, project.id),
-      characters: data.characters.map((character) => (character.id === id ? { ...character, ...patch, updatedAt: now() } : character))
-    })
+    await saveData((current) => ({
+      ...current,
+      projects: updateProjectTimestamp(current, project.id),
+      characters: current.characters.map((character) => (character.id === id ? { ...character, ...patch, updatedAt: now() } : character))
+    }))
   }
 
   async function deleteCharacter(character: Character) {
-    if (!confirm(`确定删除角色「${character.name}」吗？相关伏笔和时间线中的角色引用会被移除。`)) return
-    await saveData({
-      ...data,
-      projects: updateProjectTimestamp(data, project.id),
-      characters: data.characters.filter((item) => item.id !== character.id),
-      characterStateLogs: data.characterStateLogs.filter((log) => log.characterId !== character.id),
-      foreshadowings: data.foreshadowings.map((item) => ({
+    const confirmed = await confirmAction({
+      title: '删除角色',
+      message: `确定删除角色「${character.name}」吗？相关伏笔和时间线中的角色引用会被移除。`,
+      confirmLabel: '删除角色',
+      tone: 'danger'
+    })
+    if (!confirmed) return
+    await saveData((current) => ({
+      ...current,
+      projects: updateProjectTimestamp(current, project.id),
+      characters: current.characters.filter((item) => item.id !== character.id),
+      characterStateLogs: current.characterStateLogs.filter((log) => log.characterId !== character.id),
+      foreshadowings: current.foreshadowings.map((item) => ({
         ...item,
         relatedCharacterIds: item.relatedCharacterIds.filter((id) => id !== character.id)
       })),
-      timelineEvents: data.timelineEvents.map((event) => ({
+      timelineEvents: current.timelineEvents.map((event) => ({
         ...event,
         participantCharacterIds: event.participantCharacterIds.filter((id) => id !== character.id)
       }))
-    })
+    }))
     setSelectedId(null)
   }
 
@@ -89,18 +101,24 @@ export function CharactersView({ data, project, saveData }: ProjectProps) {
       note: logNote,
       createdAt: now()
     }
-    await saveData({
-      ...data,
-      projects: updateProjectTimestamp(data, project.id),
-      characterStateLogs: [...data.characterStateLogs, log],
-      characters: data.characters.map((item) => (item.id === character.id ? { ...item, lastChangedChapter: logChapter, updatedAt: now() } : item))
-    })
+    await saveData((current) => ({
+      ...current,
+      projects: updateProjectTimestamp(current, project.id),
+      characterStateLogs: [...current.characterStateLogs, log],
+      characters: current.characters.map((item) =>
+        item.id === character.id ? { ...item, lastChangedChapter: logChapter, updatedAt: now() } : item
+      )
+    }))
     setLogNote('')
   }
 
   return (
     <div className="characters-view">
-      <Header title="角色卡系统" description="角色卡记录当前戏剧状态，Prompt 默认只引入主要角色和当前相关角色。" actions={<button className="primary-button" onClick={addCharacter}>新增角色</button>} />
+      <Header
+        title="角色卡系统"
+        description="角色卡记录当前戏剧状态，Prompt 默认只引入主要角色和当前相关角色。"
+        actions={<button className="primary-button" onClick={addCharacter}>新增角色</button>}
+      />
       <section className="split-layout characters-workbench">
         <aside className="list-pane">
           <div className="chapter-shelf-header">

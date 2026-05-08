@@ -12,13 +12,15 @@ export function BibleView({ data, project, saveData }: ProjectProps) {
 
   async function updateBible(patch: Partial<StoryBible>) {
     const nextBible = { ...bible, ...patch, updatedAt: now() }
-    const exists = data.storyBibles.some((item) => item.projectId === project.id)
-    await saveData({
-      ...data,
-      projects: updateProjectTimestamp(data, project.id),
-      storyBibles: exists
-        ? data.storyBibles.map((item) => (item.projectId === project.id ? nextBible : item))
-        : [...data.storyBibles, nextBible]
+    await saveData((current) => {
+      const exists = current.storyBibles.some((item) => item.projectId === project.id)
+      return {
+        ...current,
+        projects: updateProjectTimestamp(current, project.id),
+        storyBibles: exists
+          ? current.storyBibles.map((item) => (item.projectId === project.id ? nextBible : item))
+          : [...current.storyBibles, nextBible]
+      }
     })
   }
 

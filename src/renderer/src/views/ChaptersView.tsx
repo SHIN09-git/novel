@@ -21,6 +21,7 @@ import type {
 import { AIService } from '../../../services/AIService'
 import { normalizeTreatmentMode } from '../../../shared/foreshadowingTreatment'
 import { ExportService } from '../../../services/ExportService'
+import { useConfirm } from '../components/ConfirmDialog'
 import { EmptyState } from '../components/FormFields'
 import { Header } from '../components/Layout'
 import { projectData } from '../utils/projectData'
@@ -56,6 +57,7 @@ const emptyBridgeSuggestion: ChapterContinuityBridgeSuggestion = {
 }
 
 export function ChaptersView({ data, project, saveData }: ProjectProps) {
+  const confirmAction = useConfirm()
   const scoped = projectData(data, project.id)
   const chapters = [...scoped.chapters].sort((a, b) => a.order - b.order)
   const [selectedId, setSelectedId] = useState<ID | null>(chapters[0]?.id ?? null)
@@ -188,7 +190,13 @@ export function ChaptersView({ data, project, saveData }: ProjectProps) {
   }
 
   async function deleteChapter(id: ID) {
-    if (!confirm('确定删除这一章吗？')) return
+    const confirmed = await confirmAction({
+      title: '删除章节',
+      message: '确定删除这一章吗？相关草稿、质量报告和修订记录会保留安全兜底，但章节正文会被移除。',
+      confirmLabel: '删除章节',
+      tone: 'danger'
+    })
+    if (!confirmed) return
     await saveData((current) => {
       const revisionSessionIds = new Set(current.revisionSessions.filter((session) => session.chapterId === id).map((session) => session.id))
       return {
@@ -208,7 +216,12 @@ export function ChaptersView({ data, project, saveData }: ProjectProps) {
 
   async function restoreChapterVersion(version: ChapterVersion) {
     if (!selected) return
-    if (!confirm('确定恢复这个历史版本吗？当前正文会先保存为一个新历史版本。')) return
+    const confirmed = await confirmAction({
+      title: '恢复历史版本',
+      message: '确定恢复这个历史版本吗？当前正文会先保存为一个新历史版本。',
+      confirmLabel: '恢复版本'
+    })
+    if (!confirmed) return
     const timestamp = now()
     const snapshot: ChapterVersion = {
       id: newId(),
@@ -232,7 +245,13 @@ export function ChaptersView({ data, project, saveData }: ProjectProps) {
   }
 
   async function deleteChapterVersion(version: ChapterVersion) {
-    if (!confirm('确定删除这个章节历史版本吗？')) return
+    const confirmed = await confirmAction({
+      title: '删除历史版本',
+      message: '确定删除这个章节历史版本吗？',
+      confirmLabel: '删除版本',
+      tone: 'danger'
+    })
+    if (!confirmed) return
     await saveData((current) => ({
       ...current,
       chapterVersions: current.chapterVersions.filter((item) => item.id !== version.id)

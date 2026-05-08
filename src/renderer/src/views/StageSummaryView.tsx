@@ -1,6 +1,7 @@
 import { useMemo, useState } from 'react'
 import type { ID, StageSummary } from '../../../shared/types'
 import { AIService } from '../../../services/AIService'
+import { useConfirm } from '../components/ConfirmDialog'
 import { EmptyState, NumberInput, TextArea } from '../components/FormFields'
 import { Header } from '../components/Layout'
 import { clampNumber, newId, now } from '../utils/format'
@@ -9,6 +10,7 @@ import type { ProjectProps } from './viewTypes'
 import { updateProjectTimestamp } from './viewTypes'
 
 export function StageSummaryView({ data, project, saveData }: ProjectProps) {
+  const confirmAction = useConfirm()
   const scoped = projectData(data, project.id)
   const chapters = [...scoped.chapters].sort((a, b) => a.order - b.order)
   const summaries = [...scoped.stageSummaries].sort((a, b) => a.chapterStart - b.chapterStart)
@@ -22,40 +24,48 @@ export function StageSummaryView({ data, project, saveData }: ProjectProps) {
     const draft = await aiService.generateStageSummary(selectedChapters)
     const timestamp = now()
     const summary: StageSummary = { ...draft, id: newId(), projectId: project.id, createdAt: timestamp, updatedAt: timestamp }
-    await saveData({
-      ...data,
-      projects: updateProjectTimestamp(data, project.id),
-      stageSummaries: [...data.stageSummaries, summary],
-      chapters: data.chapters.map((chapter) =>
+    await saveData((current) => ({
+      ...current,
+      projects: updateProjectTimestamp(current, project.id),
+      stageSummaries: [...current.stageSummaries, summary],
+      chapters: current.chapters.map((chapter) =>
         chapter.projectId === project.id && chapter.order >= chapterStart && chapter.order <= chapterEnd
           ? { ...chapter, includedInStageSummary: true, updatedAt: now() }
           : chapter
       )
-    })
+    }))
   }
 
   async function updateSummary(id: ID, patch: Partial<StageSummary>) {
-    await saveData({
-      ...data,
-      projects: updateProjectTimestamp(data, project.id),
-      stageSummaries: data.stageSummaries.map((summary) => (summary.id === id ? { ...summary, ...patch, updatedAt: now() } : summary))
-    })
+    await saveData((current) => ({
+      ...current,
+      projects: updateProjectTimestamp(current, project.id),
+      stageSummaries: current.stageSummaries.map((summary) => (summary.id === id ? { ...summary, ...patch, updatedAt: now() } : summary))
+    }))
   }
 
   async function deleteSummary(summary: StageSummary) {
-    if (!confirm(`确定删除第 ${summary.chapterStart}-${summary.chapterEnd} 章阶段摘要吗？`)) return
-    const remaining = data.stageSummaries.filter((item) => item.id !== summary.id)
-    await saveData({
-      ...data,
-      projects: updateProjectTimestamp(data, project.id),
-      stageSummaries: remaining,
-      chapters: data.chapters.map((chapter) => {
-        if (chapter.projectId !== project.id) return chapter
-        const stillCovered = remaining.some(
-          (item) => item.projectId === project.id && chapter.order >= item.chapterStart && chapter.order <= item.chapterEnd
-        )
-        return { ...chapter, includedInStageSummary: stillCovered, updatedAt: now() }
-      })
+    const confirmed = await confirmAction({
+      title: '删除阶段摘要',
+      message: `确定删除第 ${summary.chapterStart}-${summary.chapterEnd} 章阶段摘要吗？`,
+      confirmLabel: '删除摘要',
+      tone: 'danger'
+    })
+    if (!confirmed) return
+    await saveData((current) => {
+      const remaining = current.stageSummaries.filter((item) => item.id !== summary.id)
+      return {
+        ...current,
+        projects: updateProjectTimestamp(current, project.id),
+        stageSummaries: remaining,
+        chapters: current.chapters.map((chapter) => {
+          if (chapter.projectId !== project.id) return chapter
+          const stillCovered = remaining.some(
+            (item) => item.projectId === project.id && chapter.order >= item.chapterStart && chapter.order <= item.chapterEnd
+          )
+          return { ...chapter, includedInStageSummary: stillCovered, updatedAt: now() }
+        })
+      }
     })
   }
 

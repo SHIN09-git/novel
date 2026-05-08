@@ -40,7 +40,11 @@ export function DashboardView({ data, project, saveData }: ProjectProps) {
       createdAt: timestamp,
       updatedAt: timestamp
     }
-    await saveData({ ...data, projects: updateProjectTimestamp(data, project.id), chapters: [...data.chapters, chapter] })
+    await saveData((current) => ({
+      ...current,
+      projects: updateProjectTimestamp(current, project.id),
+      chapters: [...current.chapters, chapter]
+    }))
   }
 
   return (

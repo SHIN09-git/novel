@@ -9,6 +9,7 @@ import type {
 } from '../../../../shared/types'
 import { normalizeMemoryUpdatePatch } from '../../../../shared/defaults'
 import { normalizeTreatmentMode } from '../../../../shared/foreshadowingTreatment'
+import type { ConfirmFn } from '../../components/ConfirmDialog'
 import { newId, now } from '../../utils/format'
 import { projectData } from '../../utils/projectData'
 import { appendGenerationRunTraceIds } from '../../utils/runTrace'
@@ -19,6 +20,7 @@ interface UseMemoryCandidatesArgs {
   selectedJob: ChapterGenerationJob | null
   qualityGateReports: QualityGateReport[]
   saveData: (next: SaveDataInput) => Promise<void>
+  confirmAction: ConfirmFn
 }
 
 function updateProjectTimestamp(data: AppData, projectId: ID): Project[] {
@@ -44,7 +46,7 @@ function warnCannotApply(message: string) {
   if (typeof window !== 'undefined') window.alert(message)
 }
 
-export function useMemoryCandidates({ project, selectedJob, qualityGateReports, saveData }: UseMemoryCandidatesArgs) {
+export function useMemoryCandidates({ project, selectedJob, qualityGateReports, saveData, confirmAction }: UseMemoryCandidatesArgs) {
   async function applyCandidate(candidate: MemoryUpdateCandidate) {
     if (candidate.status !== 'pending') return
     const patch = resolveCandidatePatch(candidate)
@@ -59,7 +61,12 @@ export function useMemoryCandidates({ project, selectedJob, qualityGateReports, 
 
     const report = qualityGateReports.find((item) => item.jobId === candidate.jobId && !item.pass) ?? null
     if (report) {
-      const ok = confirm(`该流水线质量门禁未通过（${report.overallScore} 分）。确认仍要应用这条长期记忆更新吗？`)
+      const ok = await confirmAction({
+        title: '质量门禁未通过',
+        message: `该流水线质量门禁未通过（${report.overallScore} 分）。确认仍要应用这条长期记忆更新吗？`,
+        confirmLabel: '应用记忆更新',
+        tone: 'danger'
+      })
       if (!ok) return
     }
 

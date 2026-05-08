@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import type { AppData, AppSettings, DataMergePreview, PromptMode } from '../../../shared/types'
+import { useConfirm } from '../components/ConfirmDialog'
 import { Field, NumberInput, SelectField, TextInput, Toggle } from '../components/FormFields'
 import { Header } from '../components/Layout'
 import { deleteApiKey, getApiKeyState, saveApiKey } from '../settings/credentialApi'
@@ -19,6 +20,7 @@ export function SettingsView({
   setStatus: (message: string) => void
   replaceData: (next: AppData, storagePath?: string) => Promise<void>
 }) {
+  const confirmAction = useConfirm()
   const [pendingStoragePath, setPendingStoragePath] = useState(storagePath)
   const [defaultStoragePath, setDefaultStoragePath] = useState('')
   const [storageMessage, setStorageMessage] = useState('')
@@ -85,7 +87,13 @@ export function SettingsView({
   }
 
   async function clearApiKey() {
-    if (!confirm('确定删除已保存的 API Key 吗？删除后远程 AI 调用会不可用，直到重新保存。')) return
+    const confirmed = await confirmAction({
+      title: '删除 API Key',
+      message: '确定删除已保存的 API Key 吗？删除后远程 AI 调用会不可用，直到重新保存。',
+      confirmLabel: '删除密钥',
+      tone: 'danger'
+    })
+    if (!confirmed) return
     try {
       const hasApiKey = await deleteApiKey()
       setApiKeyInput('')
@@ -102,7 +110,13 @@ export function SettingsView({
   }
 
   async function importData() {
-    if (!confirm('导入会覆盖当前本地数据，确定继续吗？')) return
+    const confirmed = await confirmAction({
+      title: '导入数据',
+      message: '导入会覆盖当前本地数据，确定继续吗？',
+      confirmLabel: '继续导入',
+      tone: 'danger'
+    })
+    if (!confirmed) return
     const result = await window.novelDirector.data.import()
     if (!result.canceled && result.data) {
       await replaceData(result.data, result.storagePath)
@@ -192,7 +206,13 @@ export function SettingsView({
 
   async function confirmOverwriteMigration() {
     if (!mergeTargetPath) return
-    if (!confirm('这会覆盖目标位置已有数据文件。系统会先备份目标文件，但覆盖后目标文件内容会被当前数据替换。确定继续吗？')) return
+    const confirmed = await confirmAction({
+      title: '覆盖目标数据',
+      message: '这会覆盖目标位置已有数据文件。系统会先备份目标文件，但覆盖后目标文件内容会被当前数据替换。确定继续吗？',
+      confirmLabel: '覆盖目标数据',
+      tone: 'danger'
+    })
+    if (!confirmed) return
     await migrateStoragePath(mergeTargetPath, true)
   }
 

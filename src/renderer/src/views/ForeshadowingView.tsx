@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import type { Foreshadowing, ForeshadowingStatus, ForeshadowingTreatmentMode, ForeshadowingWeight, ID } from '../../../shared/types'
 import { FORESHADOWING_TREATMENT_OPTIONS, normalizeTreatmentMode, treatmentDescription } from '../../../shared/foreshadowingTreatment'
+import { useConfirm } from '../components/ConfirmDialog'
 import { EmptyState, NumberInput, SelectField, TextArea, TextInput, Toggle } from '../components/FormFields'
 import { Header } from '../components/Layout'
 import { StatCard, StatusBadge, WeightBadge } from '../components/UI'
@@ -11,6 +12,7 @@ import type { ProjectProps } from './viewTypes'
 import { updateProjectTimestamp } from './viewTypes'
 
 export function ForeshadowingView({ data, project, saveData }: ProjectProps) {
+  const confirmAction = useConfirm()
   const scoped = projectData(data, project.id)
   const [statusFilter, setStatusFilter] = useState<'all' | ForeshadowingStatus>('all')
   const [weightFilter, setWeightFilter] = useState<'all' | ForeshadowingWeight>('all')
@@ -45,25 +47,35 @@ export function ForeshadowingView({ data, project, saveData }: ProjectProps) {
       createdAt: timestamp,
       updatedAt: timestamp
     }
-    await saveData({ ...data, projects: updateProjectTimestamp(data, project.id), foreshadowings: [...data.foreshadowings, item] })
+    await saveData((current) => ({
+      ...current,
+      projects: updateProjectTimestamp(current, project.id),
+      foreshadowings: [...current.foreshadowings, item]
+    }))
     setSelectedId(item.id)
   }
 
   async function updateForeshadowing(id: ID, patch: Partial<Foreshadowing>) {
-    await saveData({
-      ...data,
-      projects: updateProjectTimestamp(data, project.id),
-      foreshadowings: data.foreshadowings.map((item) => (item.id === id ? { ...item, ...patch, updatedAt: now() } : item))
-    })
+    await saveData((current) => ({
+      ...current,
+      projects: updateProjectTimestamp(current, project.id),
+      foreshadowings: current.foreshadowings.map((item) => (item.id === id ? { ...item, ...patch, updatedAt: now() } : item))
+    }))
   }
 
   async function deleteForeshadowing(item: Foreshadowing) {
-    if (!confirm(`确定删除伏笔「${item.title}」吗？`)) return
-    await saveData({
-      ...data,
-      projects: updateProjectTimestamp(data, project.id),
-      foreshadowings: data.foreshadowings.filter((candidate) => candidate.id !== item.id)
+    const confirmed = await confirmAction({
+      title: '删除伏笔',
+      message: `确定删除伏笔「${item.title}」吗？`,
+      confirmLabel: '删除伏笔',
+      tone: 'danger'
     })
+    if (!confirmed) return
+    await saveData((current) => ({
+      ...current,
+      projects: updateProjectTimestamp(current, project.id),
+      foreshadowings: current.foreshadowings.filter((candidate) => candidate.id !== item.id)
+    }))
     setSelectedId(null)
   }
 
