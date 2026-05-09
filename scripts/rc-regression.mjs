@@ -2,6 +2,10 @@ import { copyFile, mkdir, readFile, rename, stat, writeFile } from 'node:fs/prom
 import { dirname, join } from 'node:path'
 import { randomUUID } from 'node:crypto'
 
+// All story, project, character, and plot text in this regression fixture is
+// synthetic demo data. Do not replace it with customer manuscripts or private
+// writing samples.
+
 const root = process.cwd()
 const outDir = join(root, 'tmp', 'rc-regression')
 const exportDir = join(outDir, 'exports')

@@ -1,175 +1,161 @@
 # Quickstart
 
-这个流程用于从零试用 Novel Director：创建一个小说项目，生成第一章草稿，再进入修订工作台打磨正文。
+This walkthrough creates a small synthetic fiction project, prepares context, generates a first draft, and revises it. All example names and story fragments are synthetic demo data. If you see `Fog City Test Draft` / `《雾城测试稿》` in fixtures or docs, it is a fictional public test project.
 
-## 1. 启动应用
+## 1. Start the App
 
 ```bash
 npm.cmd install
 npm.cmd run dev
 ```
 
-如果只是验证构建：
+Optional validation:
 
 ```bash
-npm.cmd test
 npm.cmd run typecheck
+npm.cmd test
 npm.cmd run build
 ```
 
-## 2. 创建项目
+## 2. Create a Project
 
-在首页点击“创建项目”，建议先填写这些字段：
+On the home screen, create a project.
 
-- 项目名：例如《雾城回响》
-- 类型/题材：悬疑、都市、奇幻、科幻等
-- 简介：一句话说明主线
-- 目标读者：例如喜欢强悬念、角色博弈、慢热成长的读者
-- 核心爽点/情绪体验：例如压抑真相逐步翻开、主角被迫做选择
-- 整体风格：例如冷峻、克制、电影感、少解释
+Suggested synthetic example:
 
-创建后进入项目工作台。
+- Name: `Fog City Echo`
+- Genre: urban mystery / weird rules / suspense
+- Target readers: long-form suspense readers who enjoy clue control and character tension
+- Core emotion: pressure, curiosity, delayed revelation
+- Style: restrained, cinematic, concrete details, low exposition
 
-## 3. 填写小说圣经
+## 3. Fill the Story Bible
 
-进入“小说圣经”，先填长期稳定信息，不要写章节流水账：
+Use the Story Bible for stable long-term facts, not chapter-by-chapter notes.
 
-- 世界观基础设定
-- 故事核心命题
-- 主角核心欲望
-- 主角核心恐惧
-- 主线冲突
-- 力量体系/规则体系
-- 禁用套路
-- 文风样例
-- 叙事基调
-- 重要不可违背设定
+Start with:
 
-这部分会作为长期上下文，但 Prompt 构建器会按预算截断长字段。
+- World baseline
+- Central premise
+- Protagonist desire and fear
+- Main conflict
+- Rule or power system
+- Forbidden tropes
+- Narrative tone
+- Non-negotiable canon
 
-## 4. 创建角色卡
+## 4. Create Characters
 
-进入“角色”，至少创建主角、关键同伴或对手。
+Create at least:
 
-角色卡不是百科，而是当前戏剧状态。建议优先填写：
+- Protagonist
+- Ally or love interest
+- Antagonist or institutional pressure
 
-- 角色定位
-- 表层目标
-- 深层欲望
-- 核心恐惧
-- 自我欺骗
-- 当前知道的信息
-- 当前不知道的信息
-- 与主角关系状态
-- 当前情绪状态
-- 下一阶段行为倾向
-- 禁止写法
-- 是否主要角色
+Focus on current dramatic state rather than encyclopedia biography. Fill the nine-card template where possible:
 
-## 5. 创建伏笔
+- Role function
+- Surface goal
+- Deep need
+- Core fear
+- Decision logic
+- Abilities and resources
+- Weakness and cost
+- Relationship tension
+- Future hooks
 
-进入“伏笔”，先添加 2 到 3 条即可：
+## 5. Add State Ledger Facts
 
-- 伏笔标题
-- 首次出现章节
-- 伏笔描述
-- 当前状态
-- 当前叙事权重
-- 当前处理方式 treatmentMode
-- 预计回收章节
-- 关联角色
-- 注意事项
+Add a few hard facts that can cause continuity bugs:
 
-第一章建议多使用“暗示”或“暂停”，少用“回收”。这能避免模型过早揭底。
+- Current location
+- Injury or physical condition
+- Important inventory
+- Known secrets
+- Money or resource amount
+- Ability limitation
 
-## 6. 准备第一章 Prompt
+These facts can be selected by the Context Need Planner and included in the prompt as hard constraints.
 
-进入“Prompt 构建器”：
+## 6. Add Foreshadowing
 
-1. 目标章节编号选择 1。
-2. 模式选择“标准”。
-3. 检查 token 预算。
-4. 手动选择本章需要出现的主要角色。
-5. 手动选择本章需要轻微暗示的伏笔。
-6. 填写章节任务书：
-   - 本章目标
-   - 必须推进的冲突
-   - 必须保留的悬念
-   - 允许回收/禁止回收的伏笔
-   - 结尾钩子
-   - 读者情绪目标
-   - 预计字数
-   - 文风要求
-7. 点击“生成 Prompt”。
+Create two or three foreshadowing entries first. Set a treatment mode:
 
-你可以直接复制 prompt 去外部模型，也可以点击“保存上下文快照”。
+- `hint`: light signal only
+- `advance`: can move forward but not reveal the truth
+- `mislead`: can create a false lead
+- `payoff`: can reveal or resolve
+- `pause`: keep frozen
+- `hidden`: do not mention unless forced
 
-## 7. 用生产流水线生成第一章
+For early chapters, prefer `hint` or `pause`. Avoid `payoff` unless the chapter is meant to resolve that clue.
 
-进入“生产流水线”：
+## 7. Build the First Prompt
 
-1. 目标章节编号选择 1。
-2. 上下文来源选择“自动构建上下文”，或选择刚保存的 Prompt 快照。
-3. 生成模式建议先用“保守”或“标准”。
-4. 设置预计字数，例如 2500 到 4000。
-5. 填写读者情绪目标，例如“紧张、好奇、轻微不安”。
-6. 点击“开始生成”。
+Open Prompt Builder:
 
-流水线会依次展示上下文、任务书、正文草稿、复盘、候选记忆、一致性审稿、质量门禁和 Run Trace。
+1. Choose target chapter `1`.
+2. Choose mode `standard`.
+3. Generate or edit the Context Need Plan.
+4. Review selected characters, state facts, foreshadowing, and omitted context.
+5. Fill the chapter task fields.
+6. Generate the final prompt.
+7. Save a Prompt Context Snapshot if you want the pipeline to use exactly this context.
 
-没有 API Key 时，流程不会崩溃，但 AI 生成会返回模板或错误提示。要真实生成正文，需要先在设置页配置 API。
+## 8. Generate a Draft
 
-## 8. 检查草稿
+Open Generation Pipeline:
 
-生成完成后，先看三块内容：
+1. Choose target chapter `1`.
+2. Choose automatic context or a saved Prompt Context Snapshot.
+3. Choose conservative or standard mode.
+4. Set expected word count and reader emotion.
+5. Start generation.
 
-- 一致性审稿：有没有时间线、设定、角色知识、伏笔泄露问题。
-- 质量门禁：是否通过，哪些维度低分。
-- Run Trace：本次实际用了哪些上下文，哪些伏笔被纳入或省略。
+The pipeline shows:
 
-如果草稿质量低，不要急着接受，先进入修订工作台。
+- context planning
+- context budget selection
+- prompt construction
+- chapter plan
+- draft
+- chapter review
+- memory candidates
+- consistency review
+- quality gate
+- run trace
 
-## 9. 修订第一章
+Without an API key, AI calls should fail gracefully or use local templates where implemented.
 
-进入“修订工作台”：
+## 9. Review Before Accepting
 
-1. 选择第一章草稿或已创建的第一章。
-2. 选择修订类型：
-   - 去 AI 味
-   - 加强冲突
-   - 优化对白
-   - 压缩节奏
-   - 加强章节衔接
-   - 减少冗余
-3. 点击“生成修订版本”。
-4. 对比原文和修订文。
-5. 满意后点击“接受版本”。
+Before accepting a draft:
 
-接受版本前，系统会保留旧正文版本。局部修订必须唯一匹配原文片段，否则不会保存。
+- Read the draft.
+- Check quality gate and consistency review.
+- Check novelty audit for unapproved new rules, characters, or lore.
+- Check Run Trace to confirm what context was actually used.
+- Do not accept long-term memory candidates unless they are correct.
 
-## 10. 完成第一章复盘
+## 10. Revise
 
-回到“章节”页，检查第一章：
+Open Revision Workbench:
 
-- 正文
-- 本章剧情摘要
-- 本章新增信息
-- 本章角色变化
-- 本章新增伏笔
-- 本章已回收伏笔
-- 本章结尾钩子
-- 本章风险提醒
-- 下一章衔接状态
+1. Select the chapter or draft.
+2. Choose a revision type such as reduce AI tone, strengthen conflict, improve continuity, or reduce redundancy.
+3. Generate a revision.
+4. Compare original, revised, and diff view.
+5. Accept only when satisfied.
 
-如果使用 AI 复盘，请先预览，再手动应用。不要让候选内容直接污染长期记忆。
+Accepting a revision saves the previous chapter body as a `ChapterVersion`.
 
-## 11. 导出或继续写作
+## 11. Export
 
-在“章节”页可以：
+In Chapters, you can:
 
-- 复制正文
-- 复制标题 + 正文
-- 导出当前章节 TXT / Markdown
-- 批量导出所有章节
+- Copy body.
+- Copy title plus body.
+- Export one chapter as TXT or Markdown.
+- Export all chapters as TXT or Markdown.
 
-继续第 2 章前，建议先保存第一章的“下一章衔接状态”，然后回到 Prompt 构建器准备第 2 章。
+Exports are written through Electron IPC, not direct renderer file-system access.

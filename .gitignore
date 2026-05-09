@@ -5,3 +5,27 @@ dist/
 tmp/
 *.log
 .DS_Store
+
+# Local configuration and secrets
+.env*
+!.env.example
+*.local
+
+# Generated launchers, packaged apps, and local release artifacts
+dist-launcher/
+release/
+releases/
+*.exe
+*.msi
+*.zip
+
+# Local QA/output artifacts
+ui-audit/screenshots/
+exports/
+local-exports/
+
+# Storage safety files and backups
+*.bak
+*.corrupt.*.json
+*.tmp
+novel-director-data*.json

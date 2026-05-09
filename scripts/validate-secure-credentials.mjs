@@ -4,7 +4,7 @@ import { join, resolve } from 'node:path'
 const root = resolve('.')
 const rcDataPath = join(root, 'tmp', 'rc-regression', 'novel-director-data.json')
 const migratedDataPath = join(root, 'tmp', 'rc-regression', 'migrated-storage', 'novel-director-data.json')
-const sentinelKey = 'sk-test-plain-text-key-should-never-appear'
+const sentinelKey = 'TEST_PLAINTEXT_KEY_SHOULD_NEVER_APPEAR'
 
 function assert(condition, message, details = {}) {
   return condition ? { ok: true, message } : { ok: false, message, details }

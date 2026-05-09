@@ -1,181 +1,124 @@
 # Novel Director
 
-Novel Director 是一个面向 AI 长篇小说创作的本地桌面工作台。它不是普通文本编辑器，也不是聊天壳子，而是帮助作者管理长篇上下文、章节生产、复盘、修订和长期记忆的“小说导演台”。
+Novel Director is an experimental, local-first desktop workbench for managing AI-assisted long-form fiction projects. It is designed for authors who need more than a text editor: project bibles, chapter continuity, character state, foreshadowing schedules, prompt context control, generation traces, quality gates, and revision workflows.
 
-当前版本适合真实创作试用：你可以创建项目，维护小说圣经、角色当前状态、伏笔账本、时间线、阶段摘要，用 Prompt 构建器控制上下文，再通过生产流水线生成章节草稿、做一致性审稿和质量门禁，最后进入修订工作台打磨正文。
+This repository is an early `0.1.0` preview. It is useful for local trials and development, but the data format and UX are still evolving.
 
-## 技术栈
+## Status
 
-- Electron
-- Vite
-- React
-- TypeScript
-- 本地 JSON 持久化
+- Experimental local-first desktop app.
+- Windows is the primary development target.
+- Data is stored locally as JSON.
+- AI features are optional and depend on the provider you configure.
+- No prebuilt binaries are tracked in this source repository.
 
-默认数据文件是 `novel-director-data.json`。设置页可以查看、迁移和恢复数据保存路径。代码保留了 Storage / Repository 分层，后续可切换到 SQLite。
+## Features
 
-## 安装与启动
+- Project management for long-form fiction.
+- Story bible for stable long-term canon.
+- Chapter editor with recap fields, continuity bridge, copy, and export.
+- Character cards, character state ledger, foreshadowing ledger, timeline, and stage summaries.
+- Prompt Builder with token budgeting, context snapshots, foreshadowing treatment modes, and priority-ordered prompt assembly.
+- Generation Pipeline for chapter plan, draft, review, memory candidates, consistency review, quality gate, and run trace.
+- Revision workbench with version history and diff view.
+- Local data path management with backup, migration, and merge preview.
+- Secure API key storage through Electron `safeStorage` when available.
+
+## Install
+
+```bash
+npm install
+```
+
+On Windows PowerShell, `npm.cmd` is often more reliable than `npm` if script execution policies block `npm.ps1`:
 
 ```bash
 npm.cmd install
+```
+
+## Run
+
+```bash
 npm.cmd run dev
 ```
 
-Windows PowerShell 可能拦截 `npm.ps1`，建议使用 `npm.cmd`。
-
-常用命令：
+## Validate
 
 ```bash
-npm.cmd test
 npm.cmd run typecheck
+npm.cmd test
 npm.cmd run build
-npm.cmd run rc:fixture
 ```
 
-`npm.cmd run rc:fixture` 会生成开发回归项目《雾城测试稿》，位置在 `tmp/rc-regression/novel-director-data.json`。
+## AI Provider Setup
 
-## 当前完整工作流
+Open Settings in the app and configure:
 
-1. 在首页创建小说项目，填写题材、简介、目标读者、核心爽点和整体风格。
-2. 在“小说圣经”填写长期稳定信息：世界观、核心命题、主线冲突、文风样例、不可违背设定。
-3. 在“角色”维护角色卡。角色卡强调“当前戏剧状态”，包括表层目标、深层欲望、当前知道/不知道的信息、与主角关系、情绪状态、下一阶段倾向。
-4. 在“伏笔”维护伏笔账本。每条伏笔有状态、权重、预计回收章节和 treatmentMode：隐藏、暗示、推进、误导、暂停、回收。
-5. 在“章节”写正文，填写章节复盘，并维护“下一章衔接状态”。
-6. 每 3 章左右在“阶段摘要”生成阶段摘要，用于替代旧章节细节，降低上下文负担。
-7. 在“Prompt 构建器”选择目标章节、上下文预算、角色、伏笔和章节任务书，生成 prompt。
-8. 可以保存 Prompt 版本，也可以保存“上下文快照”，再发送到生产流水线。
-9. 在“生产流水线”选择自动构建上下文或使用 Prompt 快照，依次生成任务书、正文草稿、章节复盘、角色更新候选、伏笔更新候选、一致性审稿、质量门禁和 Run Trace。
-10. 长期记忆不会自动写入。角色、伏笔、复盘、阶段摘要等更新都必须用户确认。
-11. 在“修订工作台”选择正式章节或草稿，进行全文修订或局部修订。接受修订前会保存旧正文版本。
-12. 在“章节”页复制正文、复制标题加正文，或导出当前章节 / 全部章节为 TXT 或 Markdown。
-
-## API 配置
-
-进入“设置”页，填写：
-
-- API Provider：OpenAI / Compatible API / Local Model
-- API Key
+- Provider
 - Base URL
-- Model Name
+- Model name
 - Temperature
-- Max Tokens
-- 是否启用 AI 自动总结
-- 是否启用 AI 章节诊断
+- Max tokens
+- API key
 
-没有 API Key 时，应用不会崩溃。AI 功能会返回本地模板或友好错误。API Key 不会打印到控制台。
+The API key is not intended to be persisted in the main AppData JSON. The desktop app stores it through Electron secure storage and only exposes key presence to the renderer process.
 
-## Prompt 构建器
+When AI generation is enabled, selected project context and prompt content may be sent to the configured provider. Review your provider's terms and privacy policy before using real manuscript data.
 
-Prompt 构建器是“上下文控制台”。它会显示：
+## Privacy and Local Data Boundary
 
-- token 预算与当前估算
-- 被纳入的章节、阶段摘要、角色、伏笔和时间线
-- 被省略的上下文及原因
-- 上下文风险提示
-- 伏笔 treatmentMode 与本章临时覆盖
-- 上一章结尾衔接指令
-- 最终可编辑 prompt
+Novel Director is local-first. Project data is stored on your machine, normally in Electron `userData`, unless you choose a custom data path in Settings.
 
-保存的 Prompt 版本用于保留最终文本。保存的 PromptContextSnapshot 用于保留上下文选择快照，并可发送到生产流水线。
+Important boundaries:
 
-## 生产流水线
+- The renderer does not receive direct Node `fs` access.
+- File operations go through controlled IPC handlers.
+- API keys should not appear in exported project JSON.
+- If you use a remote AI provider, prompt context leaves your machine for that request.
+- Do not paste real API keys, private manuscripts, or local data files into public issues.
 
-生产流水线是“执行器”。步骤包括：
+## Build Artifacts
 
-1. 上下文预算选择
-2. 构建上下文
-3. 生成章节任务书
-4. 生成章节正文草稿
-5. 章节复盘
-6. 角色更新候选
-7. 伏笔更新候选
-8. 一致性审稿
-9. 质量门禁
-10. 等待用户确认
+This repository does not track generated `.exe` files or packaged app binaries. Build artifacts should be produced from source and distributed through GitHub Releases with checksums.
 
-如果使用 Prompt 快照，`build_context` 不会重新自动选择上下文，而是使用快照中的选择、章节任务书、伏笔 treatmentMode override 和最终 prompt。
+Local build:
 
-Run Trace 会记录本次生成实际使用的上下文来源、选中的章节/角色/伏笔、被省略内容、伏笔处理方式、质量报告、修订结果和记忆候选接受/拒绝情况。它不会保存完整正文或 API Key。
+```bash
+npm.cmd run build
+```
 
-## 一致性审稿与质量门禁
+The lightweight launcher source is in `tools/`. It resolves the project path from `NOVEL_DIRECTOR_PROJECT_PATH` or by searching upward from the launcher location; it should not contain developer-machine absolute paths.
 
-一致性审稿是诊断层，负责发现时间线冲突、设定冲突、角色知识越界、动机断裂、伏笔误用、前后章节状态不一致等问题。
+## Synthetic Test Data
 
-质量门禁是决策层，负责判断草稿是否建议进入人工确认。它会综合章节任务、角色一致性、伏笔 treatmentMode、文风、节奏、AI 味、章节连续性和冗余控制。
+All novel titles, characters, plot fragments, and story excerpts used in tests, docs, fixtures, screenshots, or regression scripts are synthetic demo data. They are not customer manuscripts and should not be treated as production writing.
 
-一致性 issue 和质量门禁 issue 都可以进入修订工作台生成定向修订，但修订结果仍需用户接受后才会写回。
+The regression project sometimes appears as `Fog City Test Draft` / `《雾城测试稿》`; it is a fictional fixture created only for testing. Public screenshots are not tracked in this repository. If screenshots are added later, they should be regenerated from clean synthetic demo data and placed under `docs/assets/`.
 
-## 修订工作台
+## Documentation
 
-修订工作台支持：
+- [Quickstart](./QUICKSTART.md)
+- [Testing guide](./TESTING.md)
+- [Roadmap](./ROADMAP.md)
+- [Security policy](./SECURITY.md)
+- [Contributing guide](./CONTRIBUTING.md)
+- [Changelog](./CHANGELOG.md)
+- [Third-party notices](./THIRD_PARTY_NOTICES.md)
 
-- 选择正式章节或生产流水线草稿
-- 全文修订
-- 局部修订
-- 去 AI 味
-- 加强冲突
-- 优化对白
-- 压缩节奏
-- 加强章节衔接
-- 减少冗余
-- 删除重复解释
-- 修复 OOC、伏笔误用、连续性问题
+## Contributing
 
-局部修订只会替换原文中唯一匹配的目标片段。如果目标片段找不到或出现多次，系统会阻止保存，避免局部文本误覆盖整章。
+Please read [CONTRIBUTING.md](./CONTRIBUTING.md). The minimum checks before opening a pull request are:
 
-## 本地数据路径
+```bash
+npm.cmd run typecheck
+npm.cmd test
+npm.cmd run build
+```
 
-设置页的“本地数据”卡片可以：
+## Security
 
-- 查看当前数据文件路径
-- 选择新的保存位置
-- 迁移当前数据
-- 打开数据所在文件夹
-- 恢复默认路径
+Please report vulnerabilities privately. See [SECURITY.md](./SECURITY.md). Do not open public issues containing API keys, private project data, generated manuscripts, or local data files.
 
-数据路径配置保存在 Electron `userData` 下的 `app-config.json`。数据写入使用临时文件、`.bak` 备份和 rename。JSON 损坏时会把原文件备份为 `.corrupt.<timestamp>.json`，再回退为空数据，避免覆盖损坏文件。
+## License
 
-## 导出正文
-
-章节页支持：
-
-- 复制正文
-- 复制章节标题 + 正文
-- 导出当前章节 TXT
-- 导出当前章节 Markdown
-- 批量导出所有章节 TXT
-- 批量导出所有章节 Markdown
-
-文件保存通过 Electron 主进程的安全 IPC 完成，renderer 不直接访问 Node `fs`。
-
-## 试用建议
-
-- 从 3 到 5 章的小项目开始，不要一上来导入几十万字。
-- 每章写完后先做章节复盘，再保存下一章衔接状态。
-- Prompt 构建器里优先控制伏笔 treatmentMode，避免高权重伏笔每章都被推进。
-- 生产流水线生成后先看一致性审稿和质量门禁，再决定是否修订。
-- 接受任何长期记忆候选前，先确认它没有误改角色状态或提前回收伏笔。
-
-更短的上手流程见 [QUICKSTART.md](./QUICKSTART.md)。5 章压测流程见 [TESTING.md](./TESTING.md)。
-
-## 常见问题
-
-### 没有 API Key 能用吗？
-
-可以。项目管理、小说圣经、章节、角色、伏笔、阶段摘要、Prompt 构建、复制导出、修订版本管理都可以本地使用。AI 自动生成能力会返回模板或友好错误。
-
-### 为什么生产流水线生成很短或中途截断？
-
-优先检查设置页的 `Max Tokens`、模型上下文限制、Prompt 构建器 token 预算，以及章节预计字数。建议先用 Prompt 快照控制上下文，再发送到生产流水线。
-
-### AI 结果会自动污染角色卡和伏笔账本吗？
-
-不会。角色更新、伏笔更新、章节复盘、阶段摘要等长期记忆都先进入候选区，用户确认后才写入。
-
-### 修订会覆盖原文吗？
-
-不会直接覆盖。修订先生成版本。接受版本时会先把旧正文保存为 ChapterVersion。局部修订还会校验目标片段唯一匹配。
-
-### 数据文件在哪里？
-
-默认在 Electron `userData` 目录下的 `novel-director-data.json`。具体路径可在设置页查看，也可以迁移到自定义位置。
+Novel Director is released under the [MIT License](./LICENSE).

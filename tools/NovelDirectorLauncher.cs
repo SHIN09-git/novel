@@ -5,7 +5,7 @@ using System.Windows.Forms;
 
 internal static class NovelDirectorLauncher
 {
-    private const string FallbackProjectPath = @"G:\novel";
+    private const string ProjectPathEnvironmentVariable = "NOVEL_DIRECTOR_PROJECT_PATH";
 
     [STAThread]
     private static void Main()
@@ -14,7 +14,7 @@ internal static class NovelDirectorLauncher
         if (string.IsNullOrWhiteSpace(projectPath) || !File.Exists(Path.Combine(projectPath, "package.json")))
         {
             MessageBox.Show(
-                "没有找到 Novel Director 项目目录。\n\n请把启动器放在项目目录中，或确认项目仍在：\n" + FallbackProjectPath,
+                "没有找到 Novel Director 项目目录。\n\n请把启动器放在项目目录中，或设置环境变量 " + ProjectPathEnvironmentVariable + " 指向项目目录。",
                 "Novel Director",
                 MessageBoxButtons.OK,
                 MessageBoxIcon.Error
@@ -50,11 +50,16 @@ internal static class NovelDirectorLauncher
 
     private static string FindProjectPath()
     {
-        var current = AppDomain.CurrentDomain.BaseDirectory;
-        for (var i = 0; i < 4 && !string.IsNullOrWhiteSpace(current); i++)
+        var configured = Environment.GetEnvironmentVariable(ProjectPathEnvironmentVariable);
+        if (IsProjectDirectory(configured))
         {
-            if (File.Exists(Path.Combine(current, "package.json")) &&
-                Directory.Exists(Path.Combine(current, "src")))
+            return configured;
+        }
+
+        var current = AppDomain.CurrentDomain.BaseDirectory;
+        for (var i = 0; i < 8 && !string.IsNullOrWhiteSpace(current); i++)
+        {
+            if (IsProjectDirectory(current))
             {
                 return current;
             }
@@ -63,6 +68,14 @@ internal static class NovelDirectorLauncher
             current = parent == null ? string.Empty : parent.FullName;
         }
 
-        return Directory.Exists(FallbackProjectPath) ? FallbackProjectPath : string.Empty;
+        return string.Empty;
+    }
+
+    private static bool IsProjectDirectory(string path)
+    {
+        return !string.IsNullOrWhiteSpace(path) &&
+            Directory.Exists(path) &&
+            File.Exists(Path.Combine(path, "package.json")) &&
+            Directory.Exists(Path.Combine(path, "src"));
     }
 }

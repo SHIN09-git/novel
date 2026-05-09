@@ -1,220 +1,100 @@
 # Testing Guide
 
-本文档记录真实试用前的轻量压测流程。目标不是证明模型一定写得好，而是检查 5 章连续生产时，数据安全、上下文选择、伏笔调度、章节衔接、质量门禁和修订闭环是否可靠。
+This guide describes the lightweight validation flow for Novel Director before public preview releases.
 
-## 基础命令
+All story content used here is synthetic test data. The fixture title `Fog City Test Draft` / `《雾城测试稿》`, all character names, and all plot fragments are fictional examples. Do not use customer manuscripts, private drafts, or real API keys in public fixtures, screenshots, issue reports, or test artifacts.
 
-每轮发版前运行：
+## Required Commands
+
+Run these before a release or pull request:
 
 ```bash
-npm.cmd test
 npm.cmd run typecheck
+npm.cmd test
 npm.cmd run build
 ```
 
-可选生成回归数据：
+Generate the regression fixture:
 
 ```bash
 npm.cmd run rc:fixture
 ```
 
-回归数据输出到 `tmp/rc-regression/novel-director-data.json`。
+The fixture is written to:
 
-## 5 章压测目标
+```text
+tmp/rc-regression/novel-director-data.json
+```
 
-用一个小型小说项目模拟真实创作：
+## Five-Chapter Trial Flow
 
-- 1 个项目
-- 1 份小说圣经
-- 3 个主要角色
-- 5 条伏笔
-- 5 章正文或草稿
-- 1 个阶段摘要
-- 多次 Prompt 构建
-- 至少 1 次生产流水线
-- 至少 1 次修订工作台接受版本
-- 至少 1 次数据导出
-- 至少 1 次数据路径迁移验证
+Use a small synthetic project to exercise the whole loop:
 
-## 测试项目建议
+1. Create a project such as `Fog City Test Draft`.
+2. Fill in the story bible.
+3. Create three key characters: protagonist, ally, antagonist.
+4. Create at least five foreshadowing entries:
+   - low weight
+   - high weight
+   - payoff weight
+   - one expected around chapter 5
+   - one hidden or paused item
+5. Create chapters 1-3.
+6. Create a stage summary for chapters 1-3.
+7. Use Prompt Builder for chapter 4.
+8. Send a context snapshot to the Generation Pipeline.
+9. Generate or simulate a chapter draft.
+10. Review consistency, quality gate, novelty audit, and run trace.
+11. Revise the draft in Revision Workbench.
+12. Accept a revision and confirm a `ChapterVersion` is saved.
+13. Export the current chapter and all chapters.
+14. Test data path migration or merge on disposable fixture data only.
 
-项目名：《雾城测试稿》
+## Chapter Checks
 
-题材：都市悬疑 / 轻奇幻
+For each generated chapter, verify:
 
-核心体验：主角在看似普通的城市事件中发现记忆、权力和真相被系统性篡改。
+- The opening continues from the previous chapter when a continuity bridge exists.
+- Character hard states are respected: location, injury, inventory, knowledge, promises, resources, ability limits.
+- Foreshadowing treatment modes are followed: hidden, pause, hint, advance, mislead, payoff.
+- No unapproved rescue rule, named character, organization tier, or major lore reveal is introduced.
+- Long-term memory candidates remain pending until explicitly accepted.
+- Quality gate and consistency issues can enter revision.
+- Run Trace explains selected context, forced context blocks, compression records, prompt block order, and novelty audit.
 
-主要角色：
+## Data Safety Checks
 
-- 主角：调查者，目标是找出失踪案真相。
-- 女主：内部医生或档案管理员，知道部分真相但不敢说。
-- 反派：秩序维护者，表面保护城市，实际掩盖核心罪证。
+Use only disposable copies for destructive tests.
 
-伏笔建议：
+1. Confirm the app can load existing data.
+2. Change the data path.
+3. If the destination already contains data, test merge preview before confirming.
+4. Confirm backups are created before overwrite or merge.
+5. Corrupt a disposable JSON copy and confirm a `.corrupt.<timestamp>.json` backup is created.
+6. Confirm API keys are not persisted in exported or saved AppData JSON.
 
-- 低权重：一枚旧车票。
-- 中权重：反复出现的钟声。
-- 高权重：主角记忆缺页。
-- payoff：银色标记的真实含义。
-- 预计第 5 章回收：女主藏起的档案编号。
+## Export Checks
 
-## 第 1 章
+In Chapters:
 
-检查点：
+- Copy body.
+- Copy title plus body.
+- Export current chapter as TXT.
+- Export current chapter as Markdown.
+- Export all chapters as TXT.
+- Export all chapters as Markdown.
 
-1. 创建项目和小说圣经。
-2. 创建 3 个角色。
-3. 创建 5 条伏笔，并设置不同 treatmentMode。
-4. 在 Prompt 构建器准备第 1 章。
-5. 生成或手写第 1 章。
-6. 填写章节复盘。
-7. 保存“下一章衔接状态”。
+Windows-invalid filename characters should be sanitized.
 
-验收：
+## Pass Criteria
 
-- 第 1 章正文能保存。
-- 章节复盘能保存。
-- 下一章衔接状态能保存。
-- 高权重但 `pause` / `hidden` 的伏笔不会默认进入 prompt。
+A release candidate should pass when:
 
-## 第 2 章
-
-检查点：
-
-1. Prompt 构建器准备第 2 章。
-2. 检查“上一章结尾衔接”面板。
-3. 使用 Prompt 快照发送到生产流水线。
-4. 生成第 2 章任务书和正文草稿。
-5. 查看 Run Trace。
-
-验收：
-
-- 第 2 章开头能接住第 1 章结尾状态。
-- build_context 使用快照时不会重新自动选择上下文。
-- Run Trace 显示 contextSource、选中角色、选中伏笔和 omittedItems。
-
-## 第 3 章
-
-检查点：
-
-1. 继续使用生产流水线或手写章节。
-2. 生成章节复盘草稿。
-3. 提取角色变化候选。
-4. 提取伏笔候选。
-5. 只接受确认无误的候选。
-
-验收：
-
-- 候选记忆不会自动写入角色卡或伏笔账本。
-- 接受候选后才会更新对应数据。
-- 已拒绝候选不会被重复接受。
-
-## 第 1-3 章阶段摘要
-
-检查点：
-
-1. 到“阶段摘要”页，从第 1-3 章生成摘要草稿。
-2. 检查阶段剧情进展、角色关系变化、关键秘密、未解决问题。
-3. 保存阶段摘要。
-
-验收：
-
-- 阶段摘要能被 Prompt 构建器纳入。
-- 旧章节详细信息可以被阶段摘要替代，token 预算下降。
-
-## 第 4 章
-
-检查点：
-
-1. Prompt 构建器使用标准或完整模式。
-2. 手动选择相关角色和伏笔。
-3. 为部分伏笔设置本章 treatmentMode override。
-4. 保存上下文快照。
-5. 生产流水线使用该快照生成第 4 章。
-6. 查看一致性审稿和质量门禁。
-
-验收：
-
-- 手动选择角色进入 prompt。
-- 手动选择伏笔进入 prompt。
-- treatmentMode override 生效。
-- 质量门禁能识别提前回收、越权推进、章节不连续、冗余描写等问题。
-
-## 第 5 章
-
-检查点：
-
-1. 准备回收一条预计第 5 章回收的伏笔。
-2. 将该伏笔 treatmentMode 设置为 `payoff`。
-3. 生成章节任务书，确认允许回收项明确。
-4. 生成正文草稿。
-5. 如果质量门禁低分，进入修订工作台。
-6. 接受修订版本。
-7. 应用确认后的伏笔回收候选。
-
-验收：
-
-- payoff 伏笔可以被回收。
-- 非 payoff 伏笔不应被提前揭底。
-- 接受修订前会保存旧正文版本。
-- 接受草稿修订时不会误写其他章节。
-
-## 数据安全测试
-
-至少执行一次：
-
-1. 在设置页查看当前数据路径。
-2. 选择新路径。
-3. 迁移当前数据。
-4. 重启应用。
-5. 确认项目仍能打开。
-6. 恢复默认路径。
-
-可选破坏性模拟只在测试副本上做：
-
-1. 复制测试数据文件。
-2. 手动写入非法 JSON。
-3. 启动应用。
-4. 确认生成 `.corrupt.<timestamp>.json` 备份。
-
-## 导出测试
-
-在章节页验证：
-
-- 复制正文。
-- 复制标题 + 正文。
-- 导出当前章节 TXT。
-- 导出当前章节 Markdown。
-- 批量导出全部章节 TXT。
-- 批量导出全部章节 Markdown。
-
-验收：
-
-- Windows 非法文件名字符会被清理。
-- 空正文会提示，不会导出无意义内容。
-- 保存失败时能显示错误。
-
-## 质量观察清单
-
-压测时记录这些问题：
-
-- 每章是否像重新开场。
-- 角色身体状态和情绪状态是否延续。
-- 是否重复解释同一设定。
-- 是否反复使用同一类环境描写。
-- 高权重伏笔是否被过度推进。
-- 模型是否提前回收非 payoff 伏笔。
-- 一致性审稿是否能发现具体证据。
-- 质量门禁是否给出可执行修订建议。
-- 修订工作台是否能明显降低 AI 味和冗余。
-
-## 通过标准
-
-一次 5 章压测通过，至少应满足：
-
-- 应用不白屏、不崩溃。
-- 关闭重开后数据仍在。
-- Prompt 构建器、生产流水线、修订工作台都能跑通。
-- 长期记忆只在用户确认后写入。
-- 章节导出可用。
-- `npm.cmd test`、`npm.cmd run typecheck`、`npm.cmd run build` 全部通过。
+- `npm.cmd run typecheck` passes.
+- `npm.cmd test` passes.
+- `npm.cmd run build` passes.
+- Old data can load.
+- The app does not white-screen on empty projects or missing optional records.
+- AI failures do not write unconfirmed long-term memory.
+- Draft acceptance and revision acceptance preserve old chapter versions.
+- Export and data-path operations are safe and explicit.
