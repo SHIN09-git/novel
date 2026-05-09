@@ -155,6 +155,29 @@ export const validateChapterReviewSchema: AISchemaValidator = (value) =>
         )
       )
     }
+    if (obj.characterStateChangeSuggestions !== undefined) {
+      if (!Array.isArray(obj.characterStateChangeSuggestions)) {
+        issues.push(issue('$.characterStateChangeSuggestions', '必须是数组。'))
+      } else {
+        obj.characterStateChangeSuggestions.forEach((item, index) => {
+          const suggestion = asRecord(item)
+          if (!suggestion) {
+            issues.push(issue(`$.characterStateChangeSuggestions[${index}]`, '必须是对象。'))
+            return
+          }
+          issues.push(
+            ...requireStringFields(
+              suggestion,
+              ['characterId', 'category', 'key', 'label', 'changeType', 'evidence', 'riskLevel', 'suggestedTransactionType'],
+              `$.characterStateChangeSuggestions[${index}]`
+            )
+          )
+          if (!Array.isArray(suggestion.linkedCardFields)) {
+            issues.push(issue(`$.characterStateChangeSuggestions[${index}].linkedCardFields`, '必须是数组。'))
+          }
+        })
+      }
+    }
     return issues
   })
 
@@ -213,7 +236,9 @@ export const validateChapterPlanSchema: AISchemaValidator = (value) =>
       'carriedPhysicalState',
       'carriedEmotionalState',
       'unresolvedMicroTensions',
-      'forbiddenResets'
+      'forbiddenResets',
+      'allowedNovelty',
+      'forbiddenNovelty'
     ])
   )
 
@@ -256,6 +281,7 @@ export const validateQualityGateSchema: AISchemaValidator = (value) =>
           [
             'plotCoherence',
             'characterConsistency',
+            'characterStateConsistency',
             'foreshadowingControl',
             'chapterContinuity',
             'redundancyControl',
@@ -263,7 +289,8 @@ export const validateQualityGateSchema: AISchemaValidator = (value) =>
             'pacing',
             'emotionalPayoff',
             'originality',
-            'promptCompliance'
+            'promptCompliance',
+            'contextRelevanceCompliance'
           ],
           '$.dimensions'
         )

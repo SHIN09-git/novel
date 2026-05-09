@@ -7,6 +7,7 @@ import type {
   ConsistencyReviewReport,
   GeneratedChapterDraft,
   ID,
+  NoveltyAuditResult,
   PipelineContextSource,
   QualityGateDimensionScores,
   QualityGateIssue,
@@ -14,6 +15,7 @@ import type {
 } from '../shared/types'
 import { TokenEstimator } from './TokenEstimator'
 import { analyzeRedundancy } from './RedundancyService'
+import { NoveltyDetector } from './NoveltyDetector'
 
 export type QualityGateEvaluation = Pick<
   QualityGateReport,
@@ -98,6 +100,65 @@ function treatmentViolationsFromContext(body: string, context: string): QualityG
   return issues
 }
 
+function stateLedgerViolationsFromContext(body: string, context: string): QualityGateIssue[] {
+  const issues: QualityGateIssue[] = []
+  const cashMatch = context.match(/现金余额[：:]\s*([0-9]+(?:\.[0-9]+)?)/)
+  const cash = cashMatch ? Number(cashMatch[1]) : Number.NaN
+  if (Number.isFinite(cash)) {
+    for (const match of body.matchAll(/(花费|支付|买下|购买|付了|花了)\s*([0-9]+(?:\.[0-9]+)?)/g)) {
+      const amount = Number(match[2])
+      if (Number.isFinite(amount) && amount > cash && !/收入|借|赊|偷|抢|预支/.test(body.slice(Math.max(0, match.index - 80), (match.index ?? 0) + 120))) {
+        issues.push({
+          severity: 'high',
+          type: 'resource_underflow',
+          description: '正文出现超过角色状态账本余额的支出，且没有交代资金来源。',
+          evidence: match[0],
+          suggestedFix: '补充收入、借款、赊账或偷取等来源，或把支出改到当前余额以内。'
+        })
+      }
+    }
+  }
+
+  const inventoryMatch = context.match(/持有物品[：:]\s*([^\n。]+)/)
+  const inventory = inventoryMatch?.[1]?.split(/[、,，\s]+/).map((item) => item.trim()).filter(Boolean) ?? []
+  if (inventory.length) {
+    for (const match of body.matchAll(/使用了?([^，。、“”\s]{2,12}(钥匙|地图|剑|枪|药|戒指|令牌|笔记|书))/g)) {
+      const item = match[1]
+      if (!inventory.some((owned) => item.includes(owned) || owned.includes(item))) {
+        issues.push({
+          severity: 'high',
+          type: 'missing_inventory',
+          description: '正文使用了角色状态账本未记录持有的物品。',
+          evidence: item,
+          suggestedFix: '先在正文交代获得该物品，或改用账本中已有物品。'
+        })
+      }
+    }
+  }
+
+  if (/伤势|身体状态|右臂|骨裂|受伤/.test(context) && /痊愈|完全恢复|毫无伤痛|行动自如/.test(body) && !/治疗|休养|药|包扎|解释/.test(body)) {
+    issues.push({
+      severity: 'high',
+      type: 'injury_reset',
+      description: '角色伤势可能被无解释重置。',
+      evidence: body.slice(0, 160),
+      suggestedFix: '保留伤势影响，或补充明确治疗/休养/代价说明。'
+    })
+  }
+
+  if (/能力限制|冷却|代价|过度使用/.test(context) && /无限|毫无限制|连续使用|反复发动/.test(body) && !/代价|冷却|消耗|痛/.test(body)) {
+    issues.push({
+      severity: 'medium',
+      type: 'ability_overuse',
+      description: '角色能力限制可能被忽略。',
+      evidence: body.slice(0, 160),
+      suggestedFix: '恢复能力代价、冷却或失败风险，避免无成本连续使用。'
+    })
+  }
+
+  return issues
+}
+
 function fallbackEvaluation(
   chapterDraft: ChapterDraftResult | GeneratedChapterDraft,
   chapterPlan: ChapterPlan | null,
@@ -105,7 +166,7 @@ function fallbackEvaluation(
 ): QualityGateEvaluation {
   const body = bodyOf(chapterDraft)
   const tokenCount = TokenEstimator.estimate(body)
-  const issues: QualityGateIssue[] = treatmentViolationsFromContext(body, context)
+  const issues: QualityGateIssue[] = [...treatmentViolationsFromContext(body, context), ...stateLedgerViolationsFromContext(body, context)]
   const redundancy = analyzeRedundancy({ projectId: 'quality-gate', chapterId: null, draftId: null, body })
   const startsWithReset = /^(与此同时|不知过了多久|几天后|另一边|清晨|夜色|城市|世界|传说|在这座)/.test(body.trim())
   const hasContinuityContext = /上一章结尾衔接|Chapter Continuity Bridge|openingContinuationBeat|mustContinueFrom/.test(context)
@@ -164,6 +225,11 @@ function fallbackEvaluation(
   const dimensions: QualityGateDimensionScores = {
     plotCoherence: tokenCount < 500 ? 50 : 76,
     characterConsistency: 75,
+    characterStateConsistency: issues.some((issue) =>
+      ['resource_underflow', 'missing_inventory', 'injury_reset', 'knowledge_leak', 'ability_overuse', 'location_jump', 'promise_ignored', 'state_conflict'].includes(issue.type)
+    )
+      ? 58
+      : 75,
     foreshadowingControl: issues.some((issue) => issue.type === 'foreshadowing_treatment_violation') ? 62 : 75,
     chapterContinuity: issues.some((issue) => issue.type === 'chapter_continuity_break') ? 58 : 76,
     redundancyControl: Math.max(35, 82 - redundancy.overallRedundancyScore),
@@ -171,7 +237,8 @@ function fallbackEvaluation(
     pacing: tokenCount < 500 ? 45 : 72,
     emotionalPayoff: 70,
     originality: /突然|命运|无法回头/.test(body) ? 68 : 73,
-    promptCompliance: issues.some((issue) => issue.type === 'promptCompliance') ? 65 : 76
+    promptCompliance: issues.some((issue) => issue.type === 'promptCompliance') ? 65 : 76,
+    contextRelevanceCompliance: context.includes('本章角色上下文切片') || context.includes('上下文需求计划') ? 76 : 70
   }
   const overallScore = average(dimensions)
   return {
@@ -265,6 +332,71 @@ function applyConsistencyFindings(
   }
 }
 
+function noveltyIssuesFromAudit(audit: NoveltyAuditResult): QualityGateIssue[] {
+  const findings = [
+    ...audit.newNamedCharacters,
+    ...audit.newWorldRules,
+    ...audit.newSystemMechanics,
+    ...audit.newOrganizationsOrRanks,
+    ...audit.majorLoreReveals,
+    ...audit.suspiciousDeusExRules,
+    ...audit.untracedNames
+  ]
+  const noveltySeverityToQualitySeverity = (severity: NoveltyAuditResult['newWorldRules'][number]['severity']): ConsistencySeverity => {
+    if (severity === 'fail') return 'high'
+    if (severity === 'warning') return 'medium'
+    return 'low'
+  }
+  return findings
+    .filter((finding) => finding.severity !== 'info' || !finding.allowedByTask)
+    .map((finding) => ({
+      severity: noveltySeverityToQualitySeverity(finding.severity),
+      type:
+        finding.kind === 'new_named_character' || finding.kind === 'untraced_name'
+          ? 'unauthorized_new_character'
+          : finding.kind === 'new_organization_or_rank'
+            ? 'unauthorized_new_organization'
+            : finding.kind === 'major_lore_reveal'
+              ? 'unauthorized_lore_reveal'
+              : finding.kind === 'deus_ex_rule' || finding.kind === 'suspicious_deus_ex_rule'
+                ? 'deus_ex_rule_patch'
+                : 'unauthorized_new_rule',
+      description: finding.reason,
+      evidence: finding.evidenceExcerpt || finding.text,
+      suggestedFix: `${finding.suggestedAction}${finding.sourceHint ? ` Source: ${finding.sourceHint}.` : ''}`
+    }))
+}
+
+function applyNoveltyAudit(evaluation: QualityGateEvaluation, audit: NoveltyAuditResult): QualityGateEvaluation {
+  if (audit.severity === 'pass') return evaluation
+  const issues = [...evaluation.issues, ...noveltyIssuesFromAudit(audit)]
+  const dimensions = { ...evaluation.dimensions }
+  if (audit.severity === 'fail') {
+    dimensions.originality = Math.min(dimensions.originality, 55)
+    dimensions.promptCompliance = Math.min(dimensions.promptCompliance, 58)
+    dimensions.plotCoherence = Math.min(dimensions.plotCoherence, 62)
+    dimensions.contextRelevanceCompliance = Math.min(dimensions.contextRelevanceCompliance, 65)
+  } else {
+    dimensions.originality = Math.min(dimensions.originality, 68)
+    dimensions.promptCompliance = Math.min(dimensions.promptCompliance, 70)
+  }
+  const highFixes = issues.filter((issue) => issue.severity === 'high').map((issue) => issue.suggestedFix)
+  const overallScore = Math.min(evaluation.overallScore, average(dimensions))
+  return {
+    ...evaluation,
+    overallScore,
+    pass: evaluation.pass && audit.severity !== 'fail' && !issues.some((issue) => issue.severity === 'high') && overallScore >= 75,
+    dimensions,
+    issues,
+    requiredFixes: [...new Set([...evaluation.requiredFixes, ...highFixes])],
+    optionalSuggestions: [
+      ...evaluation.optionalSuggestions,
+      audit.summary,
+      ...issues.filter((issue) => issue.severity !== 'high').map((issue) => issue.suggestedFix)
+    ].filter(Boolean)
+  }
+}
+
 export class QualityGateService {
   static async evaluateChapterDraft(options: EvaluateOptions): Promise<QualityGateReport> {
     let evaluation: QualityGateEvaluation | null = null
@@ -294,6 +426,14 @@ export class QualityGateService {
       evaluation = fallbackEvaluation(options.chapterDraft, options.chapterPlan, consistencyContext)
     }
     evaluation = applyConsistencyFindings(evaluation, options.consistencyReports)
+    evaluation = applyNoveltyAudit(
+      evaluation,
+      NoveltyDetector.audit({
+        generatedText: bodyOf(options.chapterDraft),
+        context: consistencyContext,
+        chapterPlan: options.chapterPlan
+      })
+    )
     if (options.contextSource === 'prompt_snapshot') {
       evaluation = {
         ...evaluation,
@@ -316,6 +456,7 @@ export class QualityGateService {
       dimensions: {
         plotCoherence: clampScore(evaluation.dimensions.plotCoherence),
         characterConsistency: clampScore(evaluation.dimensions.characterConsistency),
+        characterStateConsistency: clampScore(evaluation.dimensions.characterStateConsistency),
         foreshadowingControl: clampScore(evaluation.dimensions.foreshadowingControl),
         chapterContinuity: clampScore(evaluation.dimensions.chapterContinuity),
         redundancyControl: clampScore(evaluation.dimensions.redundancyControl),
@@ -323,7 +464,8 @@ export class QualityGateService {
         pacing: clampScore(evaluation.dimensions.pacing),
         emotionalPayoff: clampScore(evaluation.dimensions.emotionalPayoff),
         originality: clampScore(evaluation.dimensions.originality),
-        promptCompliance: clampScore(evaluation.dimensions.promptCompliance)
+        promptCompliance: clampScore(evaluation.dimensions.promptCompliance),
+        contextRelevanceCompliance: clampScore(evaluation.dimensions.contextRelevanceCompliance)
       },
       issues: evaluation.issues,
       requiredFixes: evaluation.requiredFixes,
@@ -338,8 +480,10 @@ export class QualityGateService {
     return (
       report.overallScore < 75 ||
       report.dimensions.characterConsistency < 70 ||
+      report.dimensions.characterStateConsistency < 70 ||
       report.dimensions.foreshadowingControl < 70 ||
       report.dimensions.chapterContinuity < 70 ||
+      report.dimensions.contextRelevanceCompliance < 70 ||
       report.issues.some((issue) => issue.severity === 'high')
     )
   }

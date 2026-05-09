@@ -1,6 +1,6 @@
 import type { ChapterReviewDraft } from '../../../../shared/types'
 
-export type ReviewTextField = Exclude<keyof ChapterReviewDraft, 'continuityBridgeSuggestion'>
+export type ReviewTextField = Exclude<keyof ChapterReviewDraft, 'continuityBridgeSuggestion' | 'characterStateChangeSuggestions'>
 
 export const reviewFields: Array<{ key: ReviewTextField; label: string }> = [
   { key: 'summary', label: '本章剧情摘要' },

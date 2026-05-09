@@ -1,6 +1,6 @@
 import { defaultModulesForMode } from '../../../shared/defaults'
 import { shouldRecommendForeshadowing } from '../../../shared/foreshadowingTreatment'
-import type { AppData, Character, ContextBudgetMode, ContextBudgetProfile, ContextSelectionResult, Foreshadowing, ID, Project } from '../../../shared/types'
+import type { AppData, BuildPromptResult, ChapterTask, Character, ContextBudgetMode, ContextBudgetProfile, ContextNeedPlan, ContextSelectionResult, Foreshadowing, ForeshadowingTreatmentMode, ID, Project } from '../../../shared/types'
 import { ContextBudgetManager } from '../../../services/ContextBudgetManager'
 import { parseChapterNumbersFromText, PromptBuilderService } from '../../../services/PromptBuilderService'
 import { createPipelinePromptConfigFromSelection } from './contextSelectionConfig'
@@ -53,7 +53,13 @@ export function selectBudgetContext(
   data: AppData,
   targetChapterOrder: number,
   budgetProfile: ContextBudgetProfile,
-  forcedSelection: { characterIds?: ID[]; foreshadowingIds?: ID[] } = {}
+  forcedSelection: {
+    characterIds?: ID[]
+    foreshadowingIds?: ID[]
+    chapterTask?: Partial<ChapterTask> | null
+    foreshadowingTreatmentOverrides?: Record<ID, ForeshadowingTreatmentMode>
+    contextNeedPlan?: ContextNeedPlan | null
+  } = {}
 ): ContextSelectionResult {
   const scoped = projectData(data, project.id)
   return ContextBudgetManager.selectContext(
@@ -94,6 +100,7 @@ export function buildPipelineContext(
     chapters: scoped.chapters,
     characters: scoped.characters,
     characterStateLogs: scoped.characterStateLogs,
+    characterStateFacts: scoped.characterStateFacts,
     foreshadowings: scoped.foreshadowings,
       timelineEvents: scoped.timelineEvents,
       stageSummaries: scoped.stageSummaries,
@@ -128,8 +135,22 @@ export function buildPipelineContextFromSelection(
   emotion: string,
   wordCount: string,
   budgetProfile: ContextBudgetProfile,
-  selection: ContextSelectionResult
+  selection: ContextSelectionResult,
+  contextNeedPlan?: ContextNeedPlan | null
 ): string {
+  return buildPipelineContextResultFromSelection(project, data, targetChapterOrder, emotion, wordCount, budgetProfile, selection, contextNeedPlan).finalPrompt
+}
+
+export function buildPipelineContextResultFromSelection(
+  project: Project,
+  data: AppData,
+  targetChapterOrder: number,
+  emotion: string,
+  wordCount: string,
+  budgetProfile: ContextBudgetProfile,
+  selection: ContextSelectionResult,
+  contextNeedPlan?: ContextNeedPlan | null
+): BuildPromptResult {
   const scoped = projectData(data, project.id)
   const config = createPipelinePromptConfigFromSelection({
     projectId: project.id,
@@ -141,16 +162,18 @@ export function buildPipelineContextFromSelection(
     selection
   })
 
-  return PromptBuilderService.build({
+  return PromptBuilderService.buildResult({
     project,
     bible: scoped.bible,
     chapters: scoped.chapters,
     characters: scoped.characters,
     characterStateLogs: scoped.characterStateLogs,
+    characterStateFacts: scoped.characterStateFacts,
     foreshadowings: scoped.foreshadowings,
     timelineEvents: scoped.timelineEvents,
     stageSummaries: scoped.stageSummaries,
     chapterContinuityBridges: scoped.chapterContinuityBridges,
+    contextNeedPlan: contextNeedPlan ?? null,
     config,
     budgetProfile,
     explicitContextSelection: selection

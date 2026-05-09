@@ -17,9 +17,11 @@ async function main() {
 
   checks.push(
     assert(
-      typesSource.includes('export interface ForcedContextBlock') &&
+        typesSource.includes('export interface ForcedContextBlock') &&
         typesSource.includes('forcedContextBlocks: ForcedContextBlock[]') &&
         typesSource.includes('compressionRecords: ContextCompressionRecord[]') &&
+        typesSource.includes('promptBlockOrder: PromptBlockOrderItem[]') &&
+        typesSource.includes('noveltyAuditResult: NoveltyAuditResult | null') &&
         typesSource.includes('contextTokenEstimate: number'),
       'GenerationRunTrace models forced context blocks and compression records separately from budget-selected ids'
     )
@@ -27,8 +29,9 @@ async function main() {
 
   checks.push(
     assert(
-      runnerSource.includes("kind: 'continuity_bridge'") &&
+        runnerSource.includes("kind: 'continuity_bridge'") &&
         runnerSource.includes('forcedContextBlocks') &&
+        runnerSource.includes('promptBlockOrder') &&
         runnerSource.includes('contextTokenEstimate') &&
         runnerSource.includes('estimateForcedContextTokens(forcedContextBlocks)'),
       'build_context records continuity bridge as a forced context block and estimates budget-vs-final token delta'
@@ -69,6 +72,50 @@ async function main() {
       assert(Array.isArray(compressionRecords), 'trace compressionRecords is always serializable array', { traceId: trace.id })
     )
     checks.push(
+      assert(Array.isArray(trace.promptBlockOrder ?? []), 'trace promptBlockOrder is always serializable array', { traceId: trace.id })
+    )
+    if ((trace.promptBlockOrder ?? []).length) {
+      checks.push(
+        assert(
+          trace.promptBlockOrder.every((block) => typeof block.priority === 'number' && typeof block.tokenEstimate === 'number' && block.source && block.reason),
+          'promptBlockOrder entries explain priority, token estimate, source, and reason',
+          { traceId: trace.id, promptBlockOrder: trace.promptBlockOrder }
+        )
+      )
+      const bridgeOrder = trace.promptBlockOrder.find((block) => block.kind === 'continuity_bridge')
+      const hardCanonOrder = trace.promptBlockOrder.find((block) => block.kind === 'hard_canon')
+      if (bridgeOrder && hardCanonOrder) {
+        checks.push(
+          assert(
+            bridgeOrder.priority < hardCanonOrder.priority,
+            'promptBlockOrder keeps continuity bridge before story bible hard canon',
+            { traceId: trace.id, bridgeOrder, hardCanonOrder }
+          )
+        )
+      }
+      const noveltyOrder = trace.promptBlockOrder.find((block) => block.kind === 'forbidden_and_novelty')
+      const styleOrder = trace.promptBlockOrder.find((block) => block.kind === 'style')
+      const outputOrder = trace.promptBlockOrder.find((block) => block.kind === 'output_format')
+      if (noveltyOrder && styleOrder && outputOrder) {
+        checks.push(
+          assert(
+            styleOrder.priority < noveltyOrder.priority && noveltyOrder.priority < outputOrder.priority,
+            'promptBlockOrder keeps NoveltyPolicy after style and before output format',
+            { traceId: trace.id, styleOrder, noveltyOrder, outputOrder }
+          )
+        )
+      }
+    }
+    if (trace.noveltyAuditResult) {
+      checks.push(
+        assert(
+          ['pass', 'warning', 'fail'].includes(trace.noveltyAuditResult.severity),
+          'trace noveltyAuditResult has serializable severity',
+          { traceId: trace.id, noveltyAuditResult: trace.noveltyAuditResult }
+        )
+      )
+    }
+    checks.push(
       assert(
         !compressionRecords.some((record) => forcedBlocks.some((block) => block.sourceId === record.id)),
         'compression records do not pollute forcedContextBlocks',
@@ -84,6 +131,7 @@ async function main() {
     )
     if (trace.continuityBridgeId) {
       const continuityBlock = forcedBlocks.find((block) => block.kind === 'continuity_bridge' && block.sourceId === trace.continuityBridgeId)
+      const continuityPromptBlock = (trace.promptBlockOrder ?? []).find((block) => block.kind === 'continuity_bridge')
       checks.push(
         assert(Boolean(continuityBlock), 'continuity bridge in build_context is explained by forcedContextBlocks', {
           traceId: trace.id,
@@ -96,6 +144,13 @@ async function main() {
           traceId: trace.id,
           continuityBridgeId: trace.continuityBridgeId
         })
+      )
+      checks.push(
+        assert(
+          !trace.promptBlockOrder?.length || Boolean(continuityPromptBlock),
+          'continuity bridge forced context is also explainable in promptBlockOrder when prompt order is available',
+          { traceId: trace.id, promptBlockOrder: trace.promptBlockOrder }
+        )
       )
     }
     const forcedTokenEstimate = forcedBlocks.reduce((total, block) => total + Math.max(0, Number(block.tokenEstimate) || 0), 0)

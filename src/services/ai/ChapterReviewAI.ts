@@ -41,12 +41,14 @@ export class ChapterReviewAI {
         mustContinueFrom: '',
         mustNotReset: '',
         openMicroTensions: ''
-      }
+      },
+      characterStateChangeSuggestions: []
     }
     const userPrompt = [
       '请阅读章节正文与上下文，输出严格 JSON。',
-      '{"summary":"","newInformation":"","characterChanges":"","newForeshadowing":"","resolvedForeshadowing":"","endingHook":"","riskWarnings":"","continuityBridgeSuggestion":{"lastSceneLocation":"","lastPhysicalState":"","lastEmotionalState":"","lastUnresolvedAction":"","lastDialogueOrThought":"","immediateNextBeat":"","mustContinueFrom":"","mustNotReset":"","openMicroTensions":""}}',
+      '{"summary":"","newInformation":"","characterChanges":"","newForeshadowing":"","resolvedForeshadowing":"","endingHook":"","riskWarnings":"","continuityBridgeSuggestion":{"lastSceneLocation":"","lastPhysicalState":"","lastEmotionalState":"","lastUnresolvedAction":"","lastDialogueOrThought":"","immediateNextBeat":"","mustContinueFrom":"","mustNotReset":"","openMicroTensions":""},"characterStateChangeSuggestions":[{"characterId":"","category":"resource","key":"","label":"","changeType":"transaction","beforeValue":null,"afterValue":null,"delta":null,"evidence":"","confidence":0.5,"riskLevel":"medium","suggestedTransactionType":"update","linkedCardFields":["abilitiesAndResources"]}]}',
       'continuityBridgeSuggestion 是下一章衔接建议：只提取上一章结尾时的位置、身体状态、情绪状态、未完成动作、最后一句话/念头、下一章第一拍、必须承接内容、禁止重置项和开放小张力。',
+      'characterStateChangeSuggestions 只提取会导致硬伤的角色状态变化：现金、物品、位置、伤势、已知秘密、承诺、能力限制。不要提取一次性情绪。',
       '',
       `上下文：\n${context || '暂无'}`,
       '',

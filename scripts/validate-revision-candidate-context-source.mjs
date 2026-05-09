@@ -41,7 +41,8 @@ async function main() {
 
   checks.push(
     assert(
-      viewSource.includes('selectBudgetContext(project, data, targetOrder, budgetProfile)') &&
+      viewSource.includes('selectBudgetContext(project, data, targetOrder, budgetProfile') &&
+        viewSource.includes('chapterTask: {') &&
         viewSource.includes('buildPipelineContextFromSelection(project, data, targetOrder') &&
         promptContextSource.includes('explicitContextSelection: selection'),
       'context rebuild path uses ContextBudgetManager selection plus buildPipelineContextFromSelection'

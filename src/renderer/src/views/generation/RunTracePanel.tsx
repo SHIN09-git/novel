@@ -64,9 +64,18 @@ export function buildRunTraceSummary(
     foreshadowingTreatmentOverrides: trace.foreshadowingTreatmentOverrides,
     omittedContextItems: trace.omittedContextItems,
     contextWarnings: trace.contextWarnings,
+    contextNeedPlanId: trace.contextNeedPlanId,
+    contextNeedPlanWarnings: trace.contextNeedPlanWarnings,
+    contextNeedPlanMatchedItems: trace.contextNeedPlanMatchedItems,
+    contextNeedPlanOmittedItems: trace.contextNeedPlanOmittedItems,
+    includedCharacterStateFactIds: trace.includedCharacterStateFactIds,
+    characterStateWarnings: trace.characterStateWarnings,
+    characterStateIssueIds: trace.characterStateIssueIds,
+    noveltyAuditResult: trace.noveltyAuditResult,
     contextTokenEstimate: trace.contextTokenEstimate,
     forcedContextBlocks: trace.forcedContextBlocks,
     compressionRecords: trace.compressionRecords,
+    promptBlockOrder: trace.promptBlockOrder,
     finalPromptTokenEstimate: trace.finalPromptTokenEstimate,
     generatedDraftId: trace.generatedDraftId,
     continuityBridgeId: trace.continuityBridgeId,
@@ -166,6 +175,25 @@ export function RunTracePanel({
           </div>
           <div className="budget-columns">
             <div>
+              <h3>Prompt 优先级栈</h3>
+              <ul className="advice-list">
+                {trace.promptBlockOrder.length === 0 ? (
+                  <li>暂无结构化 Prompt block 记录。</li>
+                ) : (
+                  trace.promptBlockOrder
+                    .filter((block) => block.included)
+                    .slice(0, 14)
+                    .map((block) => (
+                      <li key={block.id}>
+                        {block.priority}. {block.title}（{block.kind}，约 {block.tokenEstimate} token）
+                        {block.forced ? '；forced' : ''}
+                        {block.compressed ? '；compressed' : ''}
+                      </li>
+                    ))
+                )}
+              </ul>
+            </div>
+            <div>
               <h3>上下文压缩</h3>
               <ul className="advice-list">
                 {trace.compressionRecords.length === 0 ? (
@@ -211,6 +239,45 @@ export function RunTracePanel({
                 {trace.forcedContextBlocks.length ? (
                   <li>强制上下文：{trace.forcedContextBlocks.map((block) => `${block.title}(${block.kind}, ${block.tokenEstimate} token)`).join('；')}</li>
                 ) : null}
+                {trace.contextNeedPlanId ? (
+                  <li>
+                    上下文需求计划：{trace.contextNeedPlanId}；匹配 {trace.contextNeedPlanMatchedItems.length} 项，省略{' '}
+                    {trace.contextNeedPlanOmittedItems.length} 项。
+                  </li>
+                ) : null}
+                {trace.contextNeedPlanWarnings.map((warning) => (
+                  <li key={`need-plan-${warning}`}>{warning}</li>
+                ))}
+                {trace.includedCharacterStateFactIds.length || trace.characterStateWarnings.length || trace.characterStateIssueIds.length ? (
+                  <li>
+                    角色状态账本：纳入 {trace.includedCharacterStateFactIds.length} 条状态事实；风险/问题{' '}
+                    {trace.characterStateWarnings.length + trace.characterStateIssueIds.length} 项。
+                  </li>
+                ) : null}
+                {trace.characterStateWarnings.map((warning) => (
+                  <li key={`character-state-${warning}`}>{warning}</li>
+                ))}
+                {trace.noveltyAuditResult ? (
+                  <li>
+                    新增内容审计：{trace.noveltyAuditResult.severity}，{trace.noveltyAuditResult.summary}
+                  </li>
+                ) : null}
+                {trace.noveltyAuditResult
+                  ? [
+                      ...trace.noveltyAuditResult.newNamedCharacters,
+                      ...trace.noveltyAuditResult.newWorldRules,
+                      ...trace.noveltyAuditResult.newSystemMechanics,
+                      ...trace.noveltyAuditResult.newOrganizationsOrRanks,
+                      ...trace.noveltyAuditResult.majorLoreReveals,
+                      ...trace.noveltyAuditResult.suspiciousDeusExRules
+                    ]
+                      .slice(0, 6)
+                      .map((finding, index) => (
+                        <li key={`novelty-${finding.kind}-${index}`}>
+                          {finding.kind}：{finding.text}；{finding.allowedByTask ? '任务书允许' : '未授权'}；证据：{finding.evidenceExcerpt}
+                        </li>
+                      ))
+                  : null}
                 {trace.compressionRecords.length ? (
                   <li>上下文压缩：{trace.compressionRecords.length} 条旧章节回顾已被短内容替换或裁掉。</li>
                 ) : null}

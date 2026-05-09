@@ -10,8 +10,86 @@ export type PipelineMode = 'conservative' | 'standard' | 'aggressive'
 export type PromptContextSnapshotSource = 'manual' | 'auto' | 'pipeline'
 export type PipelineContextSource = 'auto' | 'prompt_snapshot'
 export type ContinuitySource = 'saved_bridge' | 'auto_from_previous_ending' | 'manual'
+export type ContextNeedPlanSource = 'prompt_builder' | 'generation_pipeline' | 'manual' | 'auto'
+export type ExpectedSceneType =
+  | 'action'
+  | 'dialogue'
+  | 'investigation'
+  | 'transition'
+  | 'relationship'
+  | 'reveal'
+  | 'setup'
+  | 'payoff'
+  | 'recovery'
+  | 'custom'
+export type CharacterRoleInChapter = 'protagonist' | 'antagonist' | 'ally' | 'witness' | 'support' | 'offscreen' | 'mentioned'
+export type ExpectedPresence = 'onstage' | 'offscreen' | 'referenced'
+export type CharacterCardField =
+  | 'roleFunction'
+  | 'surfaceGoal'
+  | 'deepNeed'
+  | 'coreFear'
+  | 'decisionLogic'
+  | 'abilitiesAndResources'
+  | 'weaknessAndCost'
+  | 'relationshipTension'
+  | 'futureHooks'
+export type StateFactCategory =
+  | 'resource'
+  | 'inventory'
+  | 'location'
+  | 'physical'
+  | 'mental'
+  | 'knowledge'
+  | 'relationship'
+  | 'goal'
+  | 'promise'
+  | 'secret'
+  | 'ability'
+  | 'status'
+  | 'custom'
+export type CharacterStateValueType = 'string' | 'number' | 'boolean' | 'list' | 'text'
+export type CharacterStateTrackingLevel = 'hard' | 'soft' | 'note'
+export type CharacterStatePromptPolicy = 'always' | 'when_relevant' | 'manual_only'
+export type CharacterStateFactStatus = 'active' | 'resolved' | 'inactive' | 'retconned'
+export type CharacterStateTransactionType =
+  | 'create'
+  | 'update'
+  | 'increment'
+  | 'decrement'
+  | 'add_item'
+  | 'remove_item'
+  | 'move'
+  | 'learn'
+  | 'resolve'
+  | 'invalidate'
+export type CharacterStateTransactionSource = 'manual' | 'chapter_review' | 'pipeline' | 'revision'
+export type CharacterStateTransactionStatus = 'pending' | 'accepted' | 'rejected'
+export type CharacterStateChangeCandidateType = 'create_fact' | 'update_fact' | 'transaction' | 'resolve_fact' | 'conflict'
+export type CharacterStateRiskLevel = 'low' | 'medium' | 'high'
+export type ContinuityCheckCategory = 'location' | 'injury' | 'money' | 'inventory' | 'knowledge' | 'relationship' | 'promise' | 'ability' | 'timeline'
+export type ContextRetrievalPriorityType =
+  | 'character_card'
+  | 'character_state'
+  | 'foreshadowing'
+  | 'timeline'
+  | 'story_bible'
+  | 'stage_summary'
+  | 'chapter_ending'
+export type NoveltyAuditSeverity = 'pass' | 'warning' | 'fail'
+export type NoveltyFindingSeverity = 'info' | 'warning' | 'fail'
+export type NoveltyFindingKind =
+  | 'new_named_character'
+  | 'new_world_rule'
+  | 'new_system_mechanic'
+  | 'new_organization_or_rank'
+  | 'major_lore_reveal'
+  | 'deus_ex_rule'
+  | 'suspicious_deus_ex_rule'
+  | 'untraced_name'
 export type ChapterGenerationJobStatus = 'idle' | 'running' | 'paused' | 'completed' | 'failed'
 export type ChapterGenerationStepType =
+  | 'context_need_planning'
   | 'context_budget_selection'
   | 'build_context'
   | 'generate_chapter_plan'
@@ -198,6 +276,85 @@ export interface CharacterStateLog {
   createdAt: string
 }
 
+export type CharacterStateFactValue = string | number | boolean | string[]
+
+export interface CharacterStateFact {
+  id: ID
+  projectId: ID
+  characterId: ID
+  category: StateFactCategory
+  key: string
+  label: string
+  valueType: CharacterStateValueType
+  value: CharacterStateFactValue
+  unit: string
+  linkedCardFields: CharacterCardField[]
+  trackingLevel: CharacterStateTrackingLevel
+  promptPolicy: CharacterStatePromptPolicy
+  status: CharacterStateFactStatus
+  sourceChapterId: ID | null
+  sourceChapterOrder: number | null
+  evidence: string
+  confidence: number
+  createdAt: string
+  updatedAt: string
+}
+
+export interface CharacterStateTransaction {
+  id: ID
+  projectId: ID
+  characterId: ID
+  factId: ID
+  chapterId: ID | null
+  chapterOrder: number | null
+  transactionType: CharacterStateTransactionType
+  beforeValue: CharacterStateFactValue | null
+  afterValue: CharacterStateFactValue | null
+  delta: number | null
+  reason: string
+  evidence: string
+  source: CharacterStateTransactionSource
+  status: CharacterStateTransactionStatus
+  createdAt: string
+  updatedAt: string
+}
+
+export interface CharacterStateChangeSuggestion {
+  characterId: ID
+  category: StateFactCategory
+  key: string
+  label: string
+  changeType: CharacterStateChangeCandidateType
+  beforeValue: CharacterStateFactValue | null
+  afterValue: CharacterStateFactValue | null
+  delta: number | null
+  evidence: string
+  confidence: number
+  riskLevel: CharacterStateRiskLevel
+  suggestedTransactionType: CharacterStateTransactionType
+  linkedCardFields: CharacterCardField[]
+}
+
+export interface CharacterStateChangeCandidate {
+  id: ID
+  projectId: ID
+  characterId: ID
+  chapterId: ID | null
+  chapterOrder: number | null
+  candidateType: CharacterStateChangeCandidateType
+  targetFactId: ID | null
+  proposedFact: CharacterStateFact | null
+  proposedTransaction: CharacterStateTransaction | null
+  beforeValue: CharacterStateFactValue | null
+  afterValue: CharacterStateFactValue | null
+  evidence: string
+  confidence: number
+  riskLevel: CharacterStateRiskLevel
+  status: CharacterStateTransactionStatus
+  createdAt: string
+  updatedAt: string
+}
+
 export interface Foreshadowing {
   id: ID
   projectId: ID
@@ -285,6 +442,48 @@ export interface PromptConfig {
   useContinuityBridge?: boolean
 }
 
+export interface ExpectedCharacterNeed {
+  characterId: ID
+  roleInChapter: CharacterRoleInChapter
+  expectedPresence: ExpectedPresence
+  reason: string
+}
+
+export interface RetrievalPriority {
+  type: ContextRetrievalPriorityType
+  id: ID
+  priority: number
+  reason: string
+}
+
+export interface ContextExclusionRule {
+  type: string
+  id: ID
+  reason: string
+}
+
+export interface ContextNeedPlan {
+  id: ID
+  projectId: ID
+  targetChapterOrder: number
+  source: ContextNeedPlanSource
+  chapterIntent: string
+  expectedSceneType: ExpectedSceneType
+  expectedCharacters: ExpectedCharacterNeed[]
+  requiredCharacterCardFields: Record<ID, CharacterCardField[]>
+  requiredStateFactCategories: Record<ID, StateFactCategory[]>
+  requiredForeshadowingIds: ID[]
+  forbiddenForeshadowingIds: ID[]
+  requiredTimelineEventIds: ID[]
+  requiredWorldbuildingKeys: string[]
+  mustCheckContinuity: ContinuityCheckCategory[]
+  retrievalPriorities: RetrievalPriority[]
+  exclusionRules: ContextExclusionRule[]
+  warnings: string[]
+  createdAt: string
+  updatedAt: string
+}
+
 export interface PromptVersion {
   id: ID
   projectId: ID
@@ -310,6 +509,7 @@ export interface PromptContextSnapshot {
   selectedForeshadowingIds: ID[]
   foreshadowingTreatmentOverrides: Record<ID, ForeshadowingTreatmentMode>
   chapterTask: ChapterTask
+  contextNeedPlan: ContextNeedPlan | null
   finalPrompt: string
   estimatedTokens: number
   source: PromptContextSnapshotSource
@@ -321,11 +521,13 @@ export interface PromptContextSnapshot {
 export interface BuildPromptResult {
   finalPrompt: string
   estimatedTokens: number
+  promptBlockOrder: PromptBlockOrderItem[]
   contextSelectionResult: ContextSelectionResult | null
   selectedCharacterIds: ID[]
   selectedForeshadowingIds: ID[]
   foreshadowingTreatmentOverrides: Record<ID, ForeshadowingTreatmentMode>
   chapterTask: ChapterTask
+  contextNeedPlan: ContextNeedPlan | null
   continuityBridge: ChapterContinuityBridge | null
   continuitySource: ContinuitySource | null
   compressionRecords: ContextCompressionRecord[]
@@ -452,6 +654,7 @@ export interface ChapterReviewDraft {
   endingHook: string
   riskWarnings: string
   continuityBridgeSuggestion: ChapterContinuityBridgeSuggestion
+  characterStateChangeSuggestions: CharacterStateChangeSuggestion[]
 }
 
 export interface CharacterStateSuggestion {
@@ -578,6 +781,24 @@ export interface NextChapterSuggestions {
   readerEmotionTarget: string
 }
 
+export interface ChapterAllowedNovelty {
+  allowedNewCharacters: string[]
+  allowedNewRules: string[]
+  allowedNewSystemMechanics: string[]
+  allowedNewOrganizationsOrRanks: string[]
+  allowedLoreReveals: string[]
+  notes: string
+}
+
+export interface ChapterForbiddenNovelty {
+  forbiddenNewCharacters: string[]
+  forbiddenNewRules: string[]
+  forbiddenSystemMechanics: string[]
+  forbiddenOrganizationsOrRanks: string[]
+  forbiddenLoreReveals: string[]
+  notes: string
+}
+
 export interface ChapterPlan {
   chapterTitle: string
   chapterGoal: string
@@ -593,6 +814,8 @@ export interface ChapterPlan {
   carriedEmotionalState: string
   unresolvedMicroTensions: string
   forbiddenResets: string
+  allowedNovelty: string | ChapterAllowedNovelty
+  forbiddenNovelty: string | ChapterForbiddenNovelty
 }
 
 export interface ChapterDraftResult {
@@ -698,6 +921,7 @@ export interface ConsistencyReviewReport {
 export interface QualityGateDimensionScores {
   plotCoherence: number
   characterConsistency: number
+  characterStateConsistency: number
   foreshadowingControl: number
   chapterContinuity: number
   redundancyControl: number
@@ -706,6 +930,7 @@ export interface QualityGateDimensionScores {
   emotionalPayoff: number
   originality: number
   promptCompliance: number
+  contextRelevanceCompliance: number
 }
 
 export interface RedundancyReport {
@@ -748,6 +973,53 @@ export interface QualityGateReport {
   createdAt: string
 }
 
+export interface ChapterNoveltyPolicy {
+  allowNewNamedCharacters: boolean
+  maxNewNamedCharacters: number
+  allowNewWorldRules: boolean
+  maxNewWorldRules: number
+  allowNewSystemMechanics: boolean
+  maxNewSystemMechanics: number
+  allowNewOrganizationsOrRanks: boolean
+  maxNewOrganizationsOrRanks: number
+  allowMajorLoreReveal: boolean
+  allowedNewCharacterNames?: string[]
+  allowedNewRuleTopics?: string[]
+  allowedSystemMechanicTopics?: string[]
+  allowedOrganizationOrRankTopics?: string[]
+  allowedLoreRevealTopics?: string[]
+  forbiddenNewRuleTopics?: string[]
+  forbiddenSystemMechanicTopics?: string[]
+  forbiddenOrganizationOrRankTopics?: string[]
+  forbiddenRevealTopics?: string[]
+  requireForeshadowingForNewRules: boolean
+  requireTraceForNewEntities: boolean
+}
+
+export interface NoveltyFinding {
+  kind: NoveltyFindingKind
+  text: string
+  evidenceExcerpt: string
+  reason: string
+  severity: NoveltyFindingSeverity
+  allowedByTask: boolean
+  hasPriorForeshadowing: boolean
+  sourceHint?: string | null
+  suggestedAction: string
+}
+
+export interface NoveltyAuditResult {
+  newNamedCharacters: NoveltyFinding[]
+  newWorldRules: NoveltyFinding[]
+  newSystemMechanics: NoveltyFinding[]
+  newOrganizationsOrRanks: NoveltyFinding[]
+  majorLoreReveals: NoveltyFinding[]
+  suspiciousDeusExRules: NoveltyFinding[]
+  untracedNames: NoveltyFinding[]
+  severity: NoveltyAuditSeverity
+  summary: string
+}
+
 export interface ForcedContextBlock {
   kind: 'continuity_bridge' | 'quality_gate_issue' | string
   sourceId?: ID | null
@@ -756,6 +1028,21 @@ export interface ForcedContextBlock {
   sourceChapterOrder?: number | null
   title: string
   tokenEstimate: number
+}
+
+export interface PromptBlockOrderItem {
+  id: string
+  title: string
+  kind: string
+  priority: number
+  tokenEstimate: number
+  source: string
+  sourceIds?: ID[]
+  included: boolean
+  compressed?: boolean
+  forced?: boolean
+  omittedReason?: string | null
+  reason: string
 }
 
 export interface GenerationRunTrace {
@@ -776,6 +1063,7 @@ export interface GenerationRunTrace {
   contextTokenEstimate: number
   forcedContextBlocks: ForcedContextBlock[]
   compressionRecords: ContextCompressionRecord[]
+  promptBlockOrder: PromptBlockOrderItem[]
   finalPromptTokenEstimate: number
   generatedDraftId: ID | null
   consistencyReviewReportId: ID | null
@@ -788,6 +1076,16 @@ export interface GenerationRunTrace {
   continuitySource: ContinuitySource | null
   redundancyReportId: ID | null
   continuityWarnings: string[]
+  contextNeedPlanId: ID | null
+  requiredCharacterCardFields: Record<ID, CharacterCardField[]>
+  requiredStateFactCategories: Record<ID, StateFactCategory[]>
+  contextNeedPlanWarnings: string[]
+  contextNeedPlanMatchedItems: ID[]
+  contextNeedPlanOmittedItems: OmittedContextItem[]
+  includedCharacterStateFactIds: ID[]
+  characterStateWarnings: string[]
+  characterStateIssueIds: ID[]
+  noveltyAuditResult: NoveltyAuditResult | null
   createdAt: string
   updatedAt: string
 }
@@ -866,11 +1164,15 @@ export interface AppData {
   chapters: Chapter[]
   characters: Character[]
   characterStateLogs: CharacterStateLog[]
+  characterStateFacts: CharacterStateFact[]
+  characterStateTransactions: CharacterStateTransaction[]
+  characterStateChangeCandidates: CharacterStateChangeCandidate[]
   foreshadowings: Foreshadowing[]
   timelineEvents: TimelineEvent[]
   stageSummaries: StageSummary[]
   promptVersions: PromptVersion[]
   promptContextSnapshots: PromptContextSnapshot[]
+  contextNeedPlans: ContextNeedPlan[]
   chapterContinuityBridges: ChapterContinuityBridge[]
   chapterGenerationJobs: ChapterGenerationJob[]
   chapterGenerationSteps: ChapterGenerationStep[]
@@ -895,11 +1197,13 @@ export interface PromptBuildInput {
   chapters: Chapter[]
   characters: Character[]
   characterStateLogs: CharacterStateLog[]
+  characterStateFacts: CharacterStateFact[]
   foreshadowings: Foreshadowing[]
   timelineEvents: TimelineEvent[]
   stageSummaries: StageSummary[]
   chapterContinuityBridges?: ChapterContinuityBridge[]
   budgetProfile?: ContextBudgetProfile
   explicitContextSelection?: ContextSelectionResult
+  contextNeedPlan?: ContextNeedPlan | null
   config: PromptConfig
 }

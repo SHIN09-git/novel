@@ -1,7 +1,10 @@
 import type {
   AIResult,
+  CharacterCardField,
   Character,
+  CharacterStateChangeSuggestion,
   CharacterStateSuggestion,
+  CharacterStateTransactionType,
   Chapter,
   ChapterDraftResult,
   ChapterPlan,
@@ -24,7 +27,8 @@ import type {
   QualityGateIssue,
   RevisionRequestType,
   RevisionResult,
-  StageSummary
+  StageSummary,
+  StateFactCategory
 } from '../../shared/types'
 import type { QualityGateEvaluation } from '../QualityGateService'
 import { normalizeTreatmentMode } from '../../shared/foreshadowingTreatment'
@@ -93,9 +97,99 @@ export function normalizeNullableNumber(value: unknown): number | null {
   return null
 }
 
+const STATE_CATEGORIES: StateFactCategory[] = [
+  'resource',
+  'inventory',
+  'location',
+  'physical',
+  'mental',
+  'knowledge',
+  'relationship',
+  'goal',
+  'promise',
+  'secret',
+  'ability',
+  'status',
+  'custom'
+]
+const CARD_FIELDS: CharacterCardField[] = [
+  'roleFunction',
+  'surfaceGoal',
+  'deepNeed',
+  'coreFear',
+  'decisionLogic',
+  'abilitiesAndResources',
+  'weaknessAndCost',
+  'relationshipTension',
+  'futureHooks'
+]
+const TRANSACTION_TYPES: CharacterStateTransactionType[] = [
+  'create',
+  'update',
+  'increment',
+  'decrement',
+  'add_item',
+  'remove_item',
+  'move',
+  'learn',
+  'resolve',
+  'invalidate'
+]
+
+function normalizeStateCategory(value: unknown): StateFactCategory {
+  const raw = asString(value)
+  return STATE_CATEGORIES.includes(raw as StateFactCategory) ? (raw as StateFactCategory) : 'custom'
+}
+
+function normalizeCardFields(value: unknown): CharacterCardField[] {
+  return asStringArray(value).filter((field): field is CharacterCardField => CARD_FIELDS.includes(field as CharacterCardField))
+}
+
+function normalizeTransactionType(value: unknown): CharacterStateTransactionType {
+  const raw = asString(value)
+  return TRANSACTION_TYPES.includes(raw as CharacterStateTransactionType) ? (raw as CharacterStateTransactionType) : 'update'
+}
+
+function normalizeStateValue(value: unknown): CharacterStateChangeSuggestion['afterValue'] {
+  if (value === null || value === undefined) return null
+  if (Array.isArray(value)) return value.map((item) => String(item)).filter(Boolean)
+  if (typeof value === 'number' || typeof value === 'boolean' || typeof value === 'string') return value
+  return asText(value)
+}
+
+function ensureCharacterStateChangeSuggestion(value: unknown): CharacterStateChangeSuggestion {
+  const obj = asObject(value)
+  const changeType = asString(obj.changeType)
+  const riskLevel = asString(obj.riskLevel)
+  const delta = asNumber(obj.delta, Number.NaN)
+  return {
+    characterId: asString(obj.characterId),
+    category: normalizeStateCategory(obj.category),
+    key: asString(obj.key),
+    label: asString(obj.label) || asString(obj.key) || '状态变化',
+    changeType:
+      changeType === 'create_fact' ||
+      changeType === 'update_fact' ||
+      changeType === 'transaction' ||
+      changeType === 'resolve_fact' ||
+      changeType === 'conflict'
+        ? changeType
+        : 'update_fact',
+    beforeValue: normalizeStateValue(obj.beforeValue),
+    afterValue: normalizeStateValue(obj.afterValue),
+    delta: Number.isFinite(delta) ? delta : null,
+    evidence: asText(obj.evidence),
+    confidence: Math.max(0, Math.min(1, asNumber(obj.confidence, 0.5))),
+    riskLevel: riskLevel === 'low' || riskLevel === 'medium' || riskLevel === 'high' ? riskLevel : 'medium',
+    suggestedTransactionType: normalizeTransactionType(obj.suggestedTransactionType),
+    linkedCardFields: normalizeCardFields(obj.linkedCardFields)
+  }
+}
+
 export function ensureChapterReview(value: unknown): ChapterReviewDraft {
   const obj = asObject(value)
   const bridge = asObject(obj.continuityBridgeSuggestion)
+  const stateSuggestions = Array.isArray(obj.characterStateChangeSuggestions) ? obj.characterStateChangeSuggestions : []
   return {
     summary: asText(obj.summary),
     newInformation: asText(obj.newInformation),
@@ -114,7 +208,8 @@ export function ensureChapterReview(value: unknown): ChapterReviewDraft {
       mustContinueFrom: asText(bridge.mustContinueFrom),
       mustNotReset: asText(bridge.mustNotReset),
       openMicroTensions: asText(bridge.openMicroTensions)
-    }
+    },
+    characterStateChangeSuggestions: stateSuggestions.map(ensureCharacterStateChangeSuggestion).filter((item) => item.characterId)
   }
 }
 
@@ -226,7 +321,9 @@ export function ensureChapterPlan(value: unknown): ChapterPlan {
     carriedPhysicalState: asText(obj.carriedPhysicalState),
     carriedEmotionalState: asText(obj.carriedEmotionalState),
     unresolvedMicroTensions: asText(obj.unresolvedMicroTensions),
-    forbiddenResets: asText(obj.forbiddenResets)
+    forbiddenResets: asText(obj.forbiddenResets),
+    allowedNovelty: asText(obj.allowedNovelty),
+    forbiddenNovelty: asText(obj.forbiddenNovelty)
   }
 }
 
@@ -359,6 +456,7 @@ export function ensureDimensionScores(value: unknown): QualityGateDimensionScore
   return {
     plotCoherence: clampScore(obj.plotCoherence),
     characterConsistency: clampScore(obj.characterConsistency),
+    characterStateConsistency: clampScore(obj.characterStateConsistency),
     foreshadowingControl: clampScore(obj.foreshadowingControl),
     chapterContinuity: clampScore(obj.chapterContinuity),
     redundancyControl: clampScore(obj.redundancyControl),
@@ -366,7 +464,8 @@ export function ensureDimensionScores(value: unknown): QualityGateDimensionScore
     pacing: clampScore(obj.pacing),
     emotionalPayoff: clampScore(obj.emotionalPayoff),
     originality: clampScore(obj.originality),
-    promptCompliance: clampScore(obj.promptCompliance)
+    promptCompliance: clampScore(obj.promptCompliance),
+    contextRelevanceCompliance: clampScore(obj.contextRelevanceCompliance)
   }
 }
 

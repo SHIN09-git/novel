@@ -5,15 +5,22 @@ import type {
   ChapterGenerationJob,
   ChapterGenerationStep,
   ChapterGenerationStepType,
+  ChapterTask,
   ChapterPlan,
   ConsistencyReviewReport,
   ContextBudgetMode,
   ContextBudgetProfile,
+  ContextNeedPlan,
   ContextSelectionResult,
   ForcedContextBlock,
+  PromptBlockOrderItem,
   GeneratedChapterDraft,
+  CharacterStateChangeCandidate,
+  CharacterStateFact,
+  CharacterStateTransaction,
   ID,
   MemoryUpdateCandidate,
+  NoveltyAuditResult,
   PipelineContextSource,
   PipelineMode,
   Project,
@@ -22,12 +29,16 @@ import type {
 import { safeParseJson } from '../../../../services/AIJsonParser'
 import { AIService } from '../../../../services/AIService'
 import { ContextBudgetManager } from '../../../../services/ContextBudgetManager'
+import { ContextNeedPlannerService } from '../../../../services/ContextNeedPlannerService'
+import { CharacterStateService } from '../../../../services/CharacterStateService'
 import { QualityGateService } from '../../../../services/QualityGateService'
 import { TokenEstimator } from '../../../../services/TokenEstimator'
+import { inferPromptBlockOrderFromPrompt } from '../../../../services/PromptBuilderService'
 import { formatContinuityBridgeForPrompt, resolveContinuityBridge } from '../../../../services/ContinuityService'
 import { analyzeRedundancy } from '../../../../services/RedundancyService'
+import { NoveltyDetector } from '../../../../services/NoveltyDetector'
 import { newId, now } from '../../utils/format'
-import { createContextBudgetProfile, selectBudgetContext, buildPipelineContextFromSelection } from '../../utils/promptContext'
+import { createContextBudgetProfile, selectBudgetContext, buildPipelineContextResultFromSelection } from '../../utils/promptContext'
 import { releasePipelineRunLock, tryAcquirePipelineRunLock } from '../../utils/pipelineRunLock'
 import { buildForeshadowingTreatmentModes, estimateForcedContextTokens, upsertGenerationRunTrace } from '../../utils/runTrace'
 import type { SaveDataInput } from '../../utils/saveDataState'
@@ -36,8 +47,14 @@ interface UsePipelineRunnerArgs {
   data: AppData
   project: Project
   scoped: {
+    bible: AppData['storyBibles'][number] | null
+    chapters: AppData['chapters']
     characters: AppData['characters']
+    characterStateLogs: AppData['characterStateLogs']
+    characterStateFacts: AppData['characterStateFacts']
     foreshadowings: AppData['foreshadowings']
+    timelineEvents: AppData['timelineEvents']
+    stageSummaries: AppData['stageSummaries']
   }
   saveData: (next: SaveDataInput) => Promise<void>
   targetChapterOrder: number
@@ -52,6 +69,7 @@ interface UsePipelineRunnerArgs {
 }
 
 export const PIPELINE_STEP_ORDER: ChapterGenerationStepType[] = [
+  'context_need_planning',
   'context_budget_selection',
   'build_context',
   'generate_chapter_plan',
@@ -65,6 +83,7 @@ export const PIPELINE_STEP_ORDER: ChapterGenerationStepType[] = [
 ]
 
 export const PIPELINE_STEP_LABELS: Record<ChapterGenerationStepType, string> = {
+  context_need_planning: '上下文需求规划',
   context_budget_selection: '上下文预算选择',
   build_context: '构建上下文',
   generate_chapter_plan: '生成任务书',
@@ -105,6 +124,7 @@ function summarizeSnapshot(snapshot: PromptContextSnapshot) {
     selectedForeshadowingIds: snapshot.selectedForeshadowingIds,
     foreshadowingTreatmentOverrides: snapshot.foreshadowingTreatmentOverrides,
     chapterTask: snapshot.chapterTask,
+    contextNeedPlan: snapshot.contextNeedPlan,
     contextSelectionResult: snapshot.contextSelectionResult,
     note: snapshot.note
   }
@@ -138,6 +158,20 @@ function normalizePipelineOptions(
   }
 }
 
+function pipelineChapterTask(project: Project, options: ReturnType<typeof normalizePipelineOptions>): ChapterTask {
+  return {
+    goal: `生成第 ${options.targetChapterOrder} 章草稿`,
+    conflict: '',
+    suspenseToKeep: '',
+    allowedPayoffs: '',
+    forbiddenPayoffs: '',
+    endingHook: '',
+    readerEmotion: options.readerEmotionTarget,
+    targetWordCount: options.estimatedWordCount,
+    styleRequirement: project.style
+  }
+}
+
 function minimumDraftTokens(expectedWordCount: string): number {
   const numbers = [...expectedWordCount.matchAll(/\d+/g)].map((match) => Number(match[0])).filter((value) => Number.isFinite(value))
   const minimumWords = numbers.length > 0 ? Math.min(...numbers) : 2000
@@ -166,6 +200,30 @@ function validateGeneratedChapterDraft(body: string, expectedWordCount: string, 
   return null
 }
 
+function noveltyWarnings(audit: NoveltyAuditResult | null): string[] {
+  if (!audit || audit.severity === 'pass') return []
+  const findings = [
+    ...audit.newNamedCharacters,
+    ...audit.newWorldRules,
+    ...audit.newSystemMechanics,
+    ...audit.newOrganizationsOrRanks,
+    ...audit.majorLoreReveals,
+    ...audit.suspiciousDeusExRules,
+    ...audit.untracedNames
+  ]
+  return [
+    `Novelty audit ${audit.severity}: ${audit.summary}`,
+    ...findings.slice(0, 6).map((finding) => `${finding.kind}: ${finding.text} - ${finding.evidenceExcerpt}`)
+  ]
+}
+
+function noveltyAdjustedConfidence(audit: NoveltyAuditResult | null, base: number): number {
+  if (!audit) return base
+  if (audit.severity === 'fail') return Math.min(base, 0.35)
+  if (audit.severity === 'warning') return Math.min(base, 0.55)
+  return base
+}
+
 function mergePipelineWorking(current: AppData, working: AppData): AppData {
   return {
     ...current,
@@ -177,6 +235,7 @@ function mergePipelineWorking(current: AppData, working: AppData): AppData {
     consistencyReviewReports: working.consistencyReviewReports,
     qualityGateReports: working.qualityGateReports,
     contextBudgetProfiles: working.contextBudgetProfiles,
+    contextNeedPlans: working.contextNeedPlans,
     generationRunTraces: working.generationRunTraces,
     redundancyReports: working.redundancyReports
   }
@@ -228,6 +287,7 @@ export function usePipelineRunner({
       consistencyReviewReports: working.consistencyReviewReports,
       qualityGateReports: working.qualityGateReports,
       contextBudgetProfiles: working.contextBudgetProfiles,
+      contextNeedPlans: working.contextNeedPlans,
       generationRunTraces: working.generationRunTraces,
       redundancyReports: working.redundancyReports
     }
@@ -284,7 +344,7 @@ export function usePipelineRunner({
       promptContextSnapshotId: contextSource === 'prompt_snapshot' ? selectedSnapshot?.id ?? null : null,
       contextSource,
       status: 'running',
-      currentStep: 'context_budget_selection',
+      currentStep: 'context_need_planning',
       createdAt: timestamp,
       updatedAt: timestamp,
       errorMessage: ''
@@ -297,7 +357,7 @@ export function usePipelineRunner({
     }
     await persistWorking(working)
     setSelectedJobId(job.id)
-    await runPipelineFromStep(working, job.id, 'context_budget_selection', {
+    await runPipelineFromStep(working, job.id, 'context_need_planning', {
       targetChapterOrder,
       pipelineMode,
       estimatedWordCount,
@@ -359,6 +419,7 @@ export function usePipelineRunner({
     let context = ''
     let plan: ChapterPlan | null = null
     let draftResult: ChapterDraftResult | null = null
+    let noveltyAuditResult: NoveltyAuditResult | null = null
     const steps = working.chapterGenerationSteps.filter((step) => step.jobId === jobId)
     const startIndex = PIPELINE_STEP_ORDER.indexOf(fromStep)
 
@@ -372,6 +433,13 @@ export function usePipelineRunner({
       working.generatedChapterDrafts.find((draft) => draft.jobId === jobId && draft.status === 'draft') ??
       working.generatedChapterDrafts.find((draft) => draft.jobId === jobId) ??
       null
+    noveltyAuditResult = working.generationRunTraces.find((trace) => trace.jobId === jobId)?.noveltyAuditResult ?? null
+    let contextNeedPlan: ContextNeedPlan | null = snapshot?.contextNeedPlan ?? null
+    const needPlanStep = steps.find((step) => step.type === 'context_need_planning')
+    if (needPlanStep?.output) {
+      const savedNeedPlan = parseOutput<ContextNeedPlan | null>(needPlanStep.output, null)
+      if (savedNeedPlan) contextNeedPlan = savedNeedPlan
+    }
     let budgetProfile = createContextBudgetProfile(project.id, options.budgetMode, options.budgetMaxTokens, `第 ${options.targetChapterOrder} 章流水线预算`)
     let budgetSelection: ContextSelectionResult | null = null
     const budgetStep = steps.find((step) => step.type === 'context_budget_selection')
@@ -393,6 +461,49 @@ export function usePipelineRunner({
       await persistWorking(working)
 
       try {
+        if (type === 'context_need_planning') {
+          if (job.contextSource === 'prompt_snapshot') {
+            if (!snapshot) throw new Error('Prompt 上下文快照已丢失，请重新构建上下文。')
+            contextNeedPlan = snapshot.contextNeedPlan ?? null
+            working = updateStepInData(working, step.id, {
+              status: 'completed',
+              output: serializeOutput(contextNeedPlan ?? {
+                id: null,
+                contextSource: 'prompt_context_snapshot',
+                snapshotId: snapshot.id,
+                warning: '该快照没有保存上下文需求计划，将沿用快照中的上下文选择。'
+              })
+            })
+          } else {
+            const scopedChapters = working.chapters.filter((chapter) => chapter.projectId === project.id)
+            const previousChapter = scopedChapters.find((chapter) => chapter.order === options.targetChapterOrder - 1) ?? null
+            const continuityResult = resolveContinuityBridge({
+              projectId: project.id,
+              chapters: scopedChapters,
+              bridges: working.chapterContinuityBridges.filter((bridge) => bridge.projectId === project.id),
+              targetChapterOrder: options.targetChapterOrder
+            })
+            contextNeedPlan = ContextNeedPlannerService.buildFromChapterIntent({
+              project,
+              storyBible: scoped.bible,
+              targetChapterOrder: options.targetChapterOrder,
+              chapterTaskDraft: pipelineChapterTask(project, options),
+              previousChapter,
+              continuityBridge: continuityResult.bridge,
+              characters: scoped.characters,
+              characterStateFacts: scoped.characterStateFacts,
+              foreshadowing: scoped.foreshadowings,
+              timelineEvents: scoped.timelineEvents,
+              stageSummaries: scoped.stageSummaries,
+              source: 'generation_pipeline'
+            })
+            working = {
+              ...updateStepInData(working, step.id, { status: 'completed', output: serializeOutput(contextNeedPlan) }),
+              contextNeedPlans: [contextNeedPlan, ...working.contextNeedPlans.filter((plan) => plan.id !== contextNeedPlan?.id)]
+            }
+          }
+        }
+
         if (type === 'context_budget_selection') {
           if (job.contextSource === 'prompt_snapshot') {
             if (!snapshot) throw new Error('Prompt 上下文快照已丢失，请重新构建上下文。')
@@ -413,7 +524,10 @@ export function usePipelineRunner({
             })
           } else {
             budgetProfile = createContextBudgetProfile(project.id, options.budgetMode, options.budgetMaxTokens, `第 ${options.targetChapterOrder} 章流水线预算`)
-            budgetSelection = selectBudgetContext(project, working, options.targetChapterOrder, budgetProfile)
+            budgetSelection = selectBudgetContext(project, working, options.targetChapterOrder, budgetProfile, {
+              chapterTask: pipelineChapterTask(project, options),
+              contextNeedPlan
+            })
             working = {
               ...updateStepInData(working, step.id, {
                 status: 'completed',
@@ -425,22 +539,30 @@ export function usePipelineRunner({
         }
 
         if (type === 'build_context') {
+          let promptBlockOrder: PromptBlockOrderItem[] = []
           if (job.contextSource === 'prompt_snapshot') {
             if (!snapshot) throw new Error('Prompt 上下文快照已丢失，请重新构建上下文。')
             context = snapshot.finalPrompt
+            promptBlockOrder = inferPromptBlockOrderFromPrompt(context, 'prompt_context_snapshot')
           } else {
             if (!budgetSelection) {
-              budgetSelection = selectBudgetContext(project, working, options.targetChapterOrder, budgetProfile)
+              budgetSelection = selectBudgetContext(project, working, options.targetChapterOrder, budgetProfile, {
+                chapterTask: pipelineChapterTask(project, options),
+                contextNeedPlan
+              })
             }
-            context = buildPipelineContextFromSelection(
+            const promptResult = buildPipelineContextResultFromSelection(
               project,
               working,
               options.targetChapterOrder,
               options.readerEmotionTarget,
               options.estimatedWordCount,
               budgetProfile,
-              budgetSelection
+              budgetSelection,
+              contextNeedPlan
             )
+            context = promptResult.finalPrompt
+            promptBlockOrder = promptResult.promptBlockOrder
           }
           const continuityResult = resolveContinuityBridge({
             projectId: project.id,
@@ -450,6 +572,23 @@ export function usePipelineRunner({
           })
           if (continuityResult.bridge && !context.includes('上一章结尾衔接')) {
             context = `${context}\n\n## 上一章结尾衔接\n${formatContinuityBridgeForPrompt(continuityResult.bridge)}`
+            promptBlockOrder = [
+              ...promptBlockOrder,
+              {
+                id: 'forced-continuity-bridge',
+                title: '上一章结尾衔接',
+                kind: 'continuity_bridge',
+                priority: promptBlockOrder.length + 1,
+                tokenEstimate: TokenEstimator.estimate(formatContinuityBridgeForPrompt(continuityResult.bridge)),
+                source: continuityResult.source ?? 'continuity_service',
+                sourceIds: [continuityResult.bridge.id],
+                included: true,
+                compressed: false,
+                forced: true,
+                omittedReason: null,
+                reason: '快照或旧 prompt 缺少上一章衔接时，由流水线作为 forced context 追加。'
+              }
+            ]
           }
           const continuityPromptBlock = continuityResult.bridge ? formatContinuityBridgeForPrompt(continuityResult.bridge) : ''
           const forcedContextBlocks: ForcedContextBlock[] = continuityResult.bridge
@@ -483,6 +622,12 @@ export function usePipelineRunner({
           const selectedCharacterIds = snapshot ? snapshot.selectedCharacterIds : budgetSelection?.selectedCharacterIds ?? []
           const selectedForeshadowingIds = snapshot ? snapshot.selectedForeshadowingIds : budgetSelection?.selectedForeshadowingIds ?? []
           const treatmentOverrides = snapshot?.foreshadowingTreatmentOverrides ?? {}
+          const includedCharacterStateFacts = CharacterStateService.getRelevantCharacterStatesForPrompt(
+            selectedCharacterIds,
+            contextNeedPlan,
+            options.targetChapterOrder,
+            working.characterStateFacts.filter((fact) => fact.projectId === project.id)
+          )
           working = upsertGenerationRunTrace(working, job, {
             targetChapterOrder: options.targetChapterOrder,
             promptContextSnapshotId: job.promptContextSnapshotId ?? null,
@@ -504,10 +649,34 @@ export function usePipelineRunner({
             contextTokenEstimate: Math.max(0, finalPromptTokenEstimate - estimateForcedContextTokens(forcedContextBlocks)),
             forcedContextBlocks,
             compressionRecords: budgetSelection?.compressionRecords ?? [],
+            promptBlockOrder,
             finalPromptTokenEstimate,
             continuityBridgeId: continuityResult.bridge?.id ?? null,
             continuitySource: continuityResult.source,
-            continuityWarnings: continuityResult.warnings
+            continuityWarnings: continuityResult.warnings,
+            contextNeedPlanId: contextNeedPlan?.id ?? null,
+            requiredCharacterCardFields: contextNeedPlan?.requiredCharacterCardFields ?? {},
+            requiredStateFactCategories: contextNeedPlan?.requiredStateFactCategories ?? {},
+            contextNeedPlanWarnings: contextNeedPlan?.warnings ?? [],
+            contextNeedPlanMatchedItems: [
+              ...(contextNeedPlan?.expectedCharacters.map((item) => item.characterId) ?? []),
+              ...(contextNeedPlan?.requiredForeshadowingIds ?? []),
+              ...(contextNeedPlan?.requiredTimelineEventIds ?? [])
+            ],
+            contextNeedPlanOmittedItems: (budgetSelection?.omittedItems ?? []).filter((item) =>
+              contextNeedPlan
+                ? contextNeedPlan.expectedCharacters.some((character) => character.characterId === item.id) ||
+                  contextNeedPlan.requiredForeshadowingIds.includes(item.id ?? '') ||
+                  contextNeedPlan.requiredTimelineEventIds.includes(item.id ?? '')
+                : false
+            ),
+            includedCharacterStateFactIds: includedCharacterStateFacts.map((fact) => fact.id),
+            characterStateWarnings: includedCharacterStateFacts.length
+              ? []
+              : contextNeedPlan
+                ? ['上下文需求计划要求角色状态类别，但本章没有匹配的状态账本事实。']
+                : [],
+            characterStateIssueIds: []
           })
         }
 
@@ -550,6 +719,11 @@ export function usePipelineRunner({
             throw new Error(`${validationError} 请重试，或提高设置页 Max Tokens。`)
           }
           draftResult = result.data
+          noveltyAuditResult = NoveltyDetector.audit({
+            generatedText: result.data.body,
+            context,
+            chapterPlan: plan
+          })
           const draft: GeneratedChapterDraft = {
             id: newId(),
             projectId: project.id,
@@ -575,13 +749,18 @@ export function usePipelineRunner({
             generatedChapterDrafts: [draft, ...working.generatedChapterDrafts],
             redundancyReports: [redundancyReport, ...working.redundancyReports]
           }
-          working = upsertGenerationRunTrace(working, job, { generatedDraftId: draft.id, redundancyReportId: redundancyReport.id })
+          working = upsertGenerationRunTrace(working, job, {
+            generatedDraftId: draft.id,
+            redundancyReportId: redundancyReport.id,
+            noveltyAuditResult
+          })
         }
 
         if (type === 'generate_chapter_review') {
           if (!draftResult) throw new Error('缺少章节正文草稿，无法复盘')
           const result = await aiService.generateChapterReview(draftResult.body, context)
           if (!result.data) throw new Error(result.error || result.parseError || '复盘生成失败')
+          const auditWarnings = noveltyWarnings(noveltyAuditResult)
           const candidate: MemoryUpdateCandidate = {
             id: newId(),
             projectId: project.id,
@@ -593,7 +772,7 @@ export function usePipelineRunner({
               kind: 'chapter_review_update',
               summary: result.data.summary || '??????',
               sourceChapterOrder: options.targetChapterOrder,
-              warnings: [],
+              warnings: auditWarnings,
               targetChapterId: null,
               targetChapterOrder: options.targetChapterOrder,
               review: {
@@ -608,14 +787,78 @@ export function usePipelineRunner({
               continuityBridgeSuggestion: result.data.continuityBridgeSuggestion ?? null
             },
             evidence: 'AI 对生成正文的章节复盘草稿',
-            confidence: result.usedAI ? 0.75 : 0,
+            confidence: noveltyAdjustedConfidence(noveltyAuditResult, result.usedAI ? 0.75 : 0),
             status: 'pending',
             createdAt: now(),
             updatedAt: now()
           }
+          const stateCandidates: CharacterStateChangeCandidate[] = result.data.characterStateChangeSuggestions.map((suggestion) => {
+            const existingFact = working.characterStateFacts.find(
+              (fact) => fact.projectId === project.id && fact.characterId === suggestion.characterId && fact.key === suggestion.key && fact.status === 'active'
+            )
+            const fact: CharacterStateFact = {
+              id: existingFact?.id ?? newId(),
+              projectId: project.id,
+              characterId: suggestion.characterId,
+              category: suggestion.category,
+              key: suggestion.key,
+              label: suggestion.label,
+              valueType: Array.isArray(suggestion.afterValue) ? 'list' : typeof suggestion.afterValue === 'number' ? 'number' : 'text',
+              value: suggestion.afterValue ?? existingFact?.value ?? '',
+              unit: existingFact?.unit ?? '',
+              linkedCardFields: suggestion.linkedCardFields,
+              trackingLevel: suggestion.category === 'status' || suggestion.category === 'relationship' ? 'soft' : 'hard',
+              promptPolicy: 'when_relevant',
+              status: 'active',
+              sourceChapterId: null,
+              sourceChapterOrder: options.targetChapterOrder,
+              evidence: suggestion.evidence,
+              confidence: suggestion.confidence,
+              createdAt: existingFact?.createdAt ?? now(),
+              updatedAt: now()
+            }
+            const transaction: CharacterStateTransaction = {
+              id: newId(),
+              projectId: project.id,
+              characterId: suggestion.characterId,
+              factId: fact.id,
+              chapterId: null,
+              chapterOrder: options.targetChapterOrder,
+              transactionType: suggestion.suggestedTransactionType,
+              beforeValue: suggestion.beforeValue ?? existingFact?.value ?? null,
+              afterValue: suggestion.afterValue,
+              delta: suggestion.delta,
+              reason: suggestion.evidence,
+              evidence: suggestion.evidence,
+              source: 'pipeline',
+              status: 'pending',
+              createdAt: now(),
+              updatedAt: now()
+            }
+            return {
+              id: newId(),
+              projectId: project.id,
+              characterId: suggestion.characterId,
+              chapterId: null,
+              chapterOrder: options.targetChapterOrder,
+              candidateType: suggestion.changeType,
+              targetFactId: existingFact?.id ?? null,
+              proposedFact: fact,
+              proposedTransaction: transaction,
+              beforeValue: suggestion.beforeValue ?? existingFact?.value ?? null,
+              afterValue: suggestion.afterValue,
+              evidence: suggestion.evidence,
+              confidence: suggestion.confidence,
+              riskLevel: suggestion.riskLevel,
+              status: 'pending',
+              createdAt: now(),
+              updatedAt: now()
+            }
+          })
           working = {
             ...updateStepInData(working, step.id, { status: 'completed', output: serializeOutput(result.data) }),
-            memoryUpdateCandidates: [candidate, ...working.memoryUpdateCandidates]
+            memoryUpdateCandidates: [candidate, ...working.memoryUpdateCandidates],
+            characterStateChangeCandidates: [...stateCandidates, ...working.characterStateChangeCandidates]
           }
         }
 
@@ -623,6 +866,7 @@ export function usePipelineRunner({
           if (!draftResult) throw new Error('缺少章节正文草稿，无法提取角色更新')
           const result = await aiService.updateCharacterStates(draftResult.body, scoped.characters, context)
           if (!result.data) throw new Error(result.error || result.parseError || '角色更新提取失败')
+          const auditWarnings = noveltyWarnings(noveltyAuditResult)
           const candidates: MemoryUpdateCandidate[] = result.data.map((suggestion) => ({
             id: newId(),
             projectId: project.id,
@@ -634,7 +878,7 @@ export function usePipelineRunner({
               kind: 'character_state_update',
               summary: suggestion.changeSummary || '??????',
               sourceChapterOrder: options.targetChapterOrder,
-              warnings: [],
+              warnings: auditWarnings,
               characterId: suggestion.characterId,
               relatedChapterId: suggestion.relatedChapterId ?? null,
               relatedChapterOrder: options.targetChapterOrder,
@@ -644,7 +888,7 @@ export function usePipelineRunner({
               newNextActionTendency: suggestion.newNextActionTendency
             },
             evidence: suggestion.changeSummary,
-            confidence: suggestion.confidence,
+            confidence: noveltyAdjustedConfidence(noveltyAuditResult, suggestion.confidence),
             status: 'pending',
             createdAt: now(),
             updatedAt: now()
@@ -659,6 +903,7 @@ export function usePipelineRunner({
           if (!draftResult) throw new Error('缺少章节正文草稿，无法提取伏笔更新')
           const result = await aiService.extractForeshadowing(draftResult.body, scoped.foreshadowings, context, scoped.characters)
           if (!result.data) throw new Error(result.error || result.parseError || '伏笔更新提取失败')
+          const auditWarnings = noveltyWarnings(noveltyAuditResult)
           const newCandidates: MemoryUpdateCandidate[] = result.data.newForeshadowingCandidates.map((candidate) => ({
             id: newId(),
             projectId: project.id,
@@ -670,11 +915,11 @@ export function usePipelineRunner({
               kind: 'foreshadowing_create',
               summary: candidate.title || '????',
               sourceChapterOrder: options.targetChapterOrder,
-              warnings: [],
+              warnings: auditWarnings,
               candidate
             },
             evidence: candidate.description,
-            confidence: result.usedAI ? 0.7 : 0,
+            confidence: noveltyAdjustedConfidence(noveltyAuditResult, result.usedAI ? 0.7 : 0),
             status: 'pending',
             createdAt: now(),
             updatedAt: now()
@@ -690,7 +935,7 @@ export function usePipelineRunner({
               kind: 'foreshadowing_status_update',
               summary: change.evidenceText || '??????',
               sourceChapterOrder: options.targetChapterOrder,
-              warnings: [],
+              warnings: auditWarnings,
               foreshadowingId: change.foreshadowingId,
               suggestedStatus: change.suggestedStatus,
               recommendedTreatmentMode: change.recommendedTreatmentMode,
@@ -699,7 +944,7 @@ export function usePipelineRunner({
               notes: change.notes
             },
             evidence: change.evidenceText,
-            confidence: change.confidence,
+            confidence: noveltyAdjustedConfidence(noveltyAuditResult, change.confidence),
             status: 'pending',
             createdAt: now(),
             updatedAt: now()
@@ -735,6 +980,13 @@ export function usePipelineRunner({
 
         if (type === 'quality_gate') {
           if (!draftResult) throw new Error('缺少章节正文草稿，无法执行质量门禁')
+          noveltyAuditResult =
+            noveltyAuditResult ??
+            NoveltyDetector.audit({
+              generatedText: (draftRecord ?? draftResult).body,
+              context,
+              chapterPlan: plan
+            })
           const report = await QualityGateService.evaluateChapterDraft({
             projectId: project.id,
             jobId,
@@ -752,7 +1004,7 @@ export function usePipelineRunner({
             ...updateStepInData(working, step.id, { status: 'completed', output: serializeOutput(report) }),
             qualityGateReports: [report, ...working.qualityGateReports]
           }
-          working = upsertGenerationRunTrace(working, job, { qualityGateReportId: report.id })
+          working = upsertGenerationRunTrace(working, job, { qualityGateReportId: report.id, noveltyAuditResult })
         }
 
         if (type === 'await_user_confirmation') {

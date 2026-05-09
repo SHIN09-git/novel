@@ -28,6 +28,15 @@ import { REVIEW_SYSTEM_PROMPT } from './AIPromptTemplates'
 import { ensureChapterDraft, ensureChapterPlan, ensureConsistencyReview, rawTextAsChapterDraft } from './AIResponseNormalizer'
 import { validateChapterDraftSchema, validateChapterPlanSchema, validateConsistencyReviewSchema } from './AISchemaValidator'
 
+function formatNoveltyPlan(value: ChapterPlan['allowedNovelty'] | ChapterPlan['forbiddenNovelty']): string {
+  if (typeof value === 'string') return value
+  try {
+    return JSON.stringify(value, null, 2)
+  } catch {
+    return String(value ?? '')
+  }
+}
+
 export class GenerationPipelineAI {
   constructor(private readonly client: AIClient) {}
 
@@ -50,13 +59,17 @@ export class GenerationPipelineAI {
       carriedEmotionalState: '延续上一章结尾的情绪余波。',
       unresolvedMicroTensions: '保留上一章未释放的小张力。',
       forbiddenResets: '不要重新介绍已有环境、机制或人物关系。'
+      , allowedNovelty: 'Only introduce new named characters, rules, organizations, lore reveals, props, or system mechanics when they are explicitly required by this chapter task or already foreshadowed in context.'
+      , forbiddenNovelty: 'Do not invent rescue rules, unforeshadowed system permissions, new core canon mechanisms, arbitrary names for unknown people, or early explanations of protected mysteries.'
     }
 
     const userPrompt = [
       'You are planning the next chapter for a long-form novel pipeline.',
       'Return strict JSON only with keys:',
-      '{"chapterTitle":"","chapterGoal":"","conflictToPush":"","characterBeats":"","foreshadowingToUse":"","foreshadowingNotToReveal":"","endingHook":"","readerEmotionTarget":"","estimatedWordCount":"","openingContinuationBeat":"","carriedPhysicalState":"","carriedEmotionalState":"","unresolvedMicroTensions":"","forbiddenResets":""}',
+      '{"chapterTitle":"","chapterGoal":"","conflictToPush":"","characterBeats":"","foreshadowingToUse":"","foreshadowingNotToReveal":"","endingHook":"","readerEmotionTarget":"","estimatedWordCount":"","openingContinuationBeat":"","carriedPhysicalState":"","carriedEmotionalState":"","unresolvedMicroTensions":"","forbiddenResets":"","allowedNovelty":"","forbiddenNovelty":""}',
       'The plan must include continuity bridge fields: openingContinuationBeat, carriedPhysicalState, carriedEmotionalState, unresolvedMicroTensions, forbiddenResets.',
+      'The plan must include allowedNovelty and forbiddenNovelty. allowedNovelty should cover allowedNewCharacters, allowedNewRules, allowedNewSystemMechanics, allowedNewOrganizationsOrRanks, allowedLoreReveals, and notes. forbiddenNovelty should cover forbiddenNewCharacters, forbiddenNewRules, forbiddenSystemMechanics, forbiddenOrganizationsOrRanks, forbiddenLoreReveals, and notes.',
+      'If this is not an opening/reveal chapter, default to forbidding unforeshadowed major new rules and named characters. Crisis solutions must come from existing rules, foreshadowing, current character abilities, or the explicit task.',
       'Continuity hard rules: first scene must continue the previous chapter ending, preserve physical/emotional state, answer or carry the last hook within the first 300 Chinese characters, and avoid "meanwhile" or "some time later" unless explicitly requested.',
       `Mode: ${options.mode}. conservative = obey canon and add little; standard = moderate progress; aggressive = may propose new conflict/foreshadowing but mark it as candidate only.`,
       'Foreshadowing treatment modes in context are binding: hidden/pause must not be used by default; hint only faintly signals; advance may progress but not reveal truth; mislead may misdirect without contradicting final truth; payoff may reveal and affect choices.',
@@ -109,6 +122,8 @@ export class GenerationPipelineAI {
         `延续情绪状态：${chapterPlan.carriedEmotionalState}`,
         `未释放小张力：${chapterPlan.unresolvedMicroTensions}`,
         `禁止重置：${chapterPlan.forbiddenResets}`
+        , `Allowed novelty: ${formatNoveltyPlan(chapterPlan.allowedNovelty)}`,
+        `Forbidden novelty: ${formatNoveltyPlan(chapterPlan.forbiddenNovelty)}`
       ].join('\n')
     }
 
@@ -122,6 +137,13 @@ export class GenerationPipelineAI {
       'Continuity hard rules: first scene must continue the previous chapter ending; do not restart the chapter with a fresh world introduction; preserve carried physical and emotional state; answer or carry the previous hook within the first 300 Chinese characters; avoid "meanwhile" / "some time later" unless the plan explicitly asks for a time jump.',
       'Redundancy hard rules: do not repeat already-known environment descriptions, do not re-explain mechanisms from previous chapters, avoid repeated abstract intensifiers, avoid repeated "this is not... but..." explanation structures, and add only necessary new information.',
       'Foreshadowing treatment rules are mandatory: hidden/pause must not be advanced or mentioned unless explicitly required; hint must stay subtle and cannot explain, advance, or pay off; advance may change the clue state but cannot reveal the truth; payoff is the only mode that may reveal and resolve.',
+      'Novelty hard rules: do not invent unforeshadowed rescue rules, temporary permissions, system panel patches, new administrator ranks, or new core lore to solve the current crisis.',
+      'Crisis resolution must come from provided rules, already foreshadowed clues, existing character abilities/resources, or mechanisms explicitly allowed in the chapter plan.',
+      'If a new rule/mechanic is explicitly allowed, it must create cost, risk, or complication; it cannot be a free convenience. Do not name unknown people unless the plan allows it or the context already identifies them.',
+      'Instance rules must not suddenly expand without an announcement, record, ticket, map, environmental clue, prior setup, or chapter-plan permission.',
+      'Do not use system-panel addenda, emergency exceptions, manual evaluation, identity sharing, or administrator rank reveals as free deus-ex-machina tools.',
+      'Do not convert unauthorized new lore into stable canon; any new entity/rule/lore must remain a pending candidate until human confirmation.',
+      'Do not treat a convenient rule that first appears in the draft as established canon unless the chapter plan and Run Trace can explain its source.',
       'Do not change long-term canon, power rules, or stable worldbuilding.',
       'Do not make characters suddenly OOC. Preserve current dramatic state.',
       `Mode: ${options.mode}`,

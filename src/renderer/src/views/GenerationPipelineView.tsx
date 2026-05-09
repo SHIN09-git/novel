@@ -5,6 +5,7 @@ import type {
   ConsistencyReviewReport,
   ContextBudgetProfile,
   ContextBudgetMode,
+  ContextNeedPlan,
   ContextSelectionResult,
   ForcedContextBlock,
   GeneratedChapterDraft,
@@ -372,9 +373,27 @@ export function GenerationPipelineView({
 
     const budgetStep = selectedSteps.find((step) => step.type === 'context_budget_selection' && step.status === 'completed' && step.output.trim())
     const parsedBudget = budgetStep ? budgetSelectionFromStepOutput(budgetStep.output) : { profile: null, selection: null }
+    const needPlanStep = selectedSteps.find((step) => step.type === 'context_need_planning' && step.status === 'completed' && step.output.trim())
+    const parsedNeedPlan = needPlanStep ? safeParseJson<ContextNeedPlan>(needPlanStep.output, 'pipeline context need plan output') : { ok: false, data: null }
+    const contextNeedPlan = selectedTraceSnapshot?.contextNeedPlan ?? (parsedNeedPlan.ok ? parsedNeedPlan.data : null)
     const budgetProfile = parsedBudget.profile ?? createContextBudgetProfile(project.id, budgetMode, budgetMaxTokens, '修订候选上下文')
-    const budgetSelection = parsedBudget.selection ?? selectBudgetContext(project, data, targetOrder, budgetProfile)
-    const context = buildPipelineContextFromSelection(project, data, targetOrder, readerEmotionTarget, estimatedWordCount, budgetProfile, budgetSelection)
+    const budgetSelection =
+      parsedBudget.selection ??
+      selectBudgetContext(project, data, targetOrder, budgetProfile, {
+        chapterTask: {
+          goal: `生成第 ${targetOrder} 章草稿`,
+          conflict: issue.description,
+          suspenseToKeep: '',
+          allowedPayoffs: '',
+          forbiddenPayoffs: '',
+          endingHook: '',
+          readerEmotion: readerEmotionTarget,
+          targetWordCount: estimatedWordCount,
+          styleRequirement: project.style
+        },
+        contextNeedPlan
+      })
+    const context = buildPipelineContextFromSelection(project, data, targetOrder, readerEmotionTarget, estimatedWordCount, budgetProfile, budgetSelection, contextNeedPlan)
     return {
       context,
       contextSource: 'rebuilt_from_explicit_selection',

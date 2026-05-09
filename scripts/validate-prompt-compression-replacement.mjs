@@ -40,6 +40,7 @@ async function loadModules() {
     'src/shared/foreshadowingTreatment.ts',
     'src/services/TokenEstimator.ts',
     'src/services/ContinuityService.ts',
+    'src/services/CharacterStateService.ts',
     'src/services/ContextCompressionService.ts',
     'src/services/ContextBudgetManager.ts',
     'src/services/PromptBuilderService.ts'
@@ -310,7 +311,16 @@ async function main() {
 
   checks.push(assert(compressionSource.includes('compressChapterRecapsForBudget'), 'compression service exposes deterministic chapter recap compression'))
   checks.push(assert(promptBuilderSource.includes('formatCompressedChapterRecap') && promptBuilderSource.includes('compressionByChapterId'), 'PromptBuilderService renders compressed replacements in explicit selection mode'))
+  checks.push(
+    assert(
+      promptBuilderSource.includes('promptBlockOrder') &&
+        promptBuilderSource.includes('compressed: recentChapters.some') &&
+        promptBuilderSource.includes('compressed: Boolean(budgetSelection?.compressionRecords.length)'),
+      'compressed recap replacements are represented in promptBlockOrder without becoming forced context blocks'
+    )
+  )
   checks.push(assert(runnerSource.includes('compressionRecords: budgetSelection?.compressionRecords'), 'Run Trace records compressionRecords from the same budget selection'))
+  checks.push(assert(runnerSource.includes('promptBlockOrder,'), 'Run Trace records promptBlockOrder alongside compressionRecords'))
   checks.push(
     assert(
       generationViewSource.includes('upsertGenerationRunTraceByJobId') &&

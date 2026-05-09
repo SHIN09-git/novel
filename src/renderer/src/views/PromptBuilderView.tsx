@@ -3,6 +3,7 @@ import type {
   AppData,
   BuildPromptResult,
   ChapterTask,
+  ContextNeedPlan,
   ContextBudgetMode,
   ForeshadowingTreatmentMode,
   ID,
@@ -19,6 +20,7 @@ import {
   treatmentDescription
 } from '../../../shared/foreshadowingTreatment'
 import { ContextBudgetManager } from '../../../services/ContextBudgetManager'
+import { ContextNeedPlannerService } from '../../../services/ContextNeedPlannerService'
 import { endingExcerpt, resolveContinuityBridge } from '../../../services/ContinuityService'
 import { PromptBuilderService } from '../../../services/PromptBuilderService'
 import { TokenEstimator } from '../../../services/TokenEstimator'
@@ -73,6 +75,7 @@ export function PromptBuilderView({ data, project, saveData, onSendToPipeline }:
   const [foreshadowingTreatmentOverrides, setForeshadowingTreatmentOverrides] = useState<Record<ID, ForeshadowingTreatmentMode>>({})
   const [useContinuityBridge, setUseContinuityBridge] = useState(true)
   const [continuityInstructions, setContinuityInstructions] = useState('')
+  const [contextNeedPlan, setContextNeedPlan] = useState<ContextNeedPlan | null>(null)
   const [prompt, setPrompt] = useState('')
   const [snapshotNote, setSnapshotNote] = useState('')
   const [budgetMode, setBudgetMode] = useState<ContextBudgetMode>(data.settings.defaultPromptMode)
@@ -88,9 +91,12 @@ export function PromptBuilderView({ data, project, saveData, onSendToPipeline }:
     () =>
       selectBudgetContext(project, data, targetChapterOrder, budgetProfile, {
         characterIds: selectedCharacterIds,
-        foreshadowingIds: selectedForeshadowingIds
+        foreshadowingIds: selectedForeshadowingIds,
+        chapterTask: task,
+        foreshadowingTreatmentOverrides,
+        contextNeedPlan
       }),
-    [project, data, targetChapterOrder, budgetProfile, selectedCharacterIds, selectedForeshadowingIds]
+    [project, data, targetChapterOrder, budgetProfile, selectedCharacterIds, selectedForeshadowingIds, task, foreshadowingTreatmentOverrides, contextNeedPlan]
   )
   const autoForeshadowings = useMemo(
     () => recommendedForeshadowings(scoped.foreshadowings, targetChapterOrder),
@@ -123,6 +129,7 @@ export function PromptBuilderView({ data, project, saveData, onSendToPipeline }:
 
   useEffect(() => {
     resetAutomaticSelection()
+    setContextNeedPlan(null)
   }, [project.id, targetChapterOrder])
 
   function changeMode(nextMode: PromptMode) {
@@ -142,11 +149,13 @@ export function PromptBuilderView({ data, project, saveData, onSendToPipeline }:
       chapters: scoped.chapters,
       characters: scoped.characters,
       characterStateLogs: scoped.characterStateLogs,
+      characterStateFacts: scoped.characterStateFacts,
       foreshadowings: scoped.foreshadowings,
       timelineEvents: scoped.timelineEvents,
       stageSummaries: scoped.stageSummaries,
       chapterContinuityBridges: scoped.chapterContinuityBridges,
       budgetProfile,
+      contextNeedPlan,
       config: {
         projectId: project.id,
         targetChapterOrder,
@@ -165,6 +174,30 @@ export function PromptBuilderView({ data, project, saveData, onSendToPipeline }:
   function generatePrompt() {
     const result = buildPromptResult()
     setPrompt(result.finalPrompt)
+  }
+
+  async function generateContextNeedPlan() {
+    const plan = ContextNeedPlannerService.buildFromChapterIntent({
+      project,
+      storyBible: scoped.bible,
+      targetChapterOrder,
+      chapterTaskDraft: task,
+      previousChapter,
+      continuityBridge: continuity.bridge,
+      characters: scoped.characters,
+      characterStateFacts: scoped.characterStateFacts,
+      foreshadowing: scoped.foreshadowings,
+      timelineEvents: scoped.timelineEvents,
+      stageSummaries: scoped.stageSummaries,
+      source: 'prompt_builder'
+    })
+    setContextNeedPlan(plan)
+    setSelectedCharacterIds((current) => [...new Set([...current, ...plan.expectedCharacters.map((item) => item.characterId)])])
+    setSelectedForeshadowingIds((current) => [...new Set([...current, ...plan.requiredForeshadowingIds])].filter((id) => !plan.forbiddenForeshadowingIds.includes(id)))
+    await saveData((current) => ({
+      ...current,
+      contextNeedPlans: [plan, ...current.contextNeedPlans.filter((item) => item.id !== plan.id)]
+    }))
   }
 
   async function copyPrompt() {
@@ -211,6 +244,7 @@ export function PromptBuilderView({ data, project, saveData, onSendToPipeline }:
       selectedForeshadowingIds: result.selectedForeshadowingIds,
       foreshadowingTreatmentOverrides: result.foreshadowingTreatmentOverrides,
       chapterTask: result.chapterTask,
+      contextNeedPlan: result.contextNeedPlan,
       finalPrompt,
       estimatedTokens: TokenEstimator.estimate(finalPrompt),
       source,
@@ -221,6 +255,9 @@ export function PromptBuilderView({ data, project, saveData, onSendToPipeline }:
     await saveData((current) => ({
       ...current,
       promptContextSnapshots: [snapshot, ...current.promptContextSnapshots],
+      contextNeedPlans: snapshot.contextNeedPlan
+        ? [snapshot.contextNeedPlan, ...current.contextNeedPlans.filter((plan) => plan.id !== snapshot.contextNeedPlan?.id)]
+        : current.contextNeedPlans,
       contextBudgetProfiles: current.contextBudgetProfiles.some((profile) => profile.id === budgetProfile.id)
         ? current.contextBudgetProfiles
         : [budgetProfile, ...current.contextBudgetProfiles]
@@ -275,6 +312,72 @@ export function PromptBuilderView({ data, project, saveData, onSendToPipeline }:
         item.id === id && item.projectId === project.id ? { ...item, treatmentMode: nextMode, updatedAt: now() } : item
       )
     }))
+  }
+
+  function updateNeedPlanCharacter(characterId: ID, checked: boolean) {
+    if (!contextNeedPlan) return
+    const character = scoped.characters.find((item) => item.id === characterId)
+    if (!character) return
+    if (!checked) {
+      setContextNeedPlan({
+        ...contextNeedPlan,
+        expectedCharacters: contextNeedPlan.expectedCharacters.filter((item) => item.characterId !== characterId),
+        requiredCharacterCardFields: Object.fromEntries(
+          Object.entries(contextNeedPlan.requiredCharacterCardFields).filter(([id]) => id !== characterId)
+        ),
+        requiredStateFactCategories: Object.fromEntries(
+          Object.entries(contextNeedPlan.requiredStateFactCategories).filter(([id]) => id !== characterId)
+        ),
+        updatedAt: now()
+      })
+      return
+    }
+
+    setContextNeedPlan({
+      ...contextNeedPlan,
+      expectedCharacters: [
+        ...contextNeedPlan.expectedCharacters.filter((item) => item.characterId !== characterId),
+        {
+          characterId,
+          roleInChapter: character.isMain ? 'protagonist' : 'support',
+          expectedPresence: 'onstage',
+          reason: '用户在 Prompt 构建器中手动加入。'
+        }
+      ],
+      requiredCharacterCardFields: {
+        ...contextNeedPlan.requiredCharacterCardFields,
+        [characterId]: ContextNeedPlannerService.inferRequiredCharacterFields(character, task, contextNeedPlan.expectedSceneType)
+      },
+      requiredStateFactCategories: {
+        ...contextNeedPlan.requiredStateFactCategories,
+        [characterId]: ContextNeedPlannerService.inferRequiredStateCategories(character, task, contextNeedPlan.expectedSceneType)
+      },
+      updatedAt: now()
+    })
+  }
+
+  function updateNeedPlanForeshadowing(id: ID, role: 'required' | 'forbidden', checked: boolean) {
+    if (!contextNeedPlan) return
+    const required = new Set(contextNeedPlan.requiredForeshadowingIds)
+    const forbidden = new Set(contextNeedPlan.forbiddenForeshadowingIds)
+    if (role === 'required') {
+      checked ? required.add(id) : required.delete(id)
+      if (checked) forbidden.delete(id)
+    } else {
+      checked ? forbidden.add(id) : forbidden.delete(id)
+      if (checked) required.delete(id)
+    }
+    setContextNeedPlan({
+      ...contextNeedPlan,
+      requiredForeshadowingIds: [...required],
+      forbiddenForeshadowingIds: [...forbidden],
+      exclusionRules: [...forbidden].map((foreshadowingId) => ({
+        type: 'foreshadowing',
+        id: foreshadowingId,
+        reason: '用户在上下文需求计划中标记为禁止。'
+      })),
+      updatedAt: now()
+    })
   }
 
   return (
@@ -357,6 +460,93 @@ export function PromptBuilderView({ data, project, saveData, onSendToPipeline }:
                 </ul>
               </div>
             </div>
+          </section>
+
+          <section className="panel context-need-panel">
+            <div className="panel-title-row">
+              <h2>上下文需求计划</h2>
+              <button className="secondary-button" onClick={generateContextNeedPlan}>生成上下文需求计划</button>
+            </div>
+            {!contextNeedPlan ? (
+              <p className="muted">先判断本章需要检索哪些角色卡字段、状态事实、伏笔、时间线和设定，再交给预算调度器筛选上下文。</p>
+            ) : (
+              <div className="stack-list">
+                <p><strong>场景类型：</strong>{contextNeedPlan.expectedSceneType}</p>
+                <TextArea
+                  label="本章意图"
+                  value={contextNeedPlan.chapterIntent}
+                  rows={3}
+                  onChange={(chapterIntent) => setContextNeedPlan({ ...contextNeedPlan, chapterIntent, updatedAt: now() })}
+                />
+                <div className="budget-columns">
+                  <div>
+                    <h3>预计出场角色</h3>
+                    <ul className="advice-list">
+                      {contextNeedPlan.expectedCharacters.map((item) => {
+                        const character = scoped.characters.find((candidate) => candidate.id === item.characterId)
+                        const fields = contextNeedPlan.requiredCharacterCardFields[item.characterId] ?? []
+                        const categories = contextNeedPlan.requiredStateFactCategories[item.characterId] ?? []
+                        return (
+                          <li key={item.characterId}>
+                            {character?.name ?? item.characterId}：{item.expectedPresence} / {item.roleInChapter}
+                            <br />
+                            <span className="muted">字段 {fields.join('、') || '-'}；状态 {categories.join('、') || '-'}</span>
+                          </li>
+                        )
+                      })}
+                      {contextNeedPlan.expectedCharacters.length === 0 ? <li>暂无预计角色。</li> : null}
+                    </ul>
+                  </div>
+                  <div>
+                    <h3>伏笔与连续性</h3>
+                    <ul className="advice-list">
+                      <li>需要伏笔：{contextNeedPlan.requiredForeshadowingIds.length}</li>
+                      <li>禁止伏笔：{contextNeedPlan.forbiddenForeshadowingIds.length}</li>
+                      <li>必须检查：{contextNeedPlan.mustCheckContinuity.join('、') || '-'}</li>
+                      {contextNeedPlan.warnings.map((warning) => <li key={warning}>{warning}</li>)}
+                    </ul>
+                  </div>
+                </div>
+                <details className="context-item">
+                  <summary>手动微调需求计划</summary>
+                  <div className="budget-columns">
+                    <div>
+                      <h3>出场角色</h3>
+                      <div className="checkbox-grid">
+                        {scoped.characters.map((character) => (
+                          <Toggle
+                            key={character.id}
+                            label={character.name}
+                            checked={contextNeedPlan.expectedCharacters.some((item) => item.characterId === character.id)}
+                            onChange={(checked) => updateNeedPlanCharacter(character.id, checked)}
+                          />
+                        ))}
+                      </div>
+                    </div>
+                    <div>
+                      <h3>伏笔需求</h3>
+                      <div className="stack-list">
+                        {scoped.foreshadowings.slice(0, 12).map((item) => (
+                          <div key={item.id} className="context-item">
+                            <strong>{item.title}</strong>
+                            <Toggle
+                              label="本章需要检索"
+                              checked={contextNeedPlan.requiredForeshadowingIds.includes(item.id)}
+                              onChange={(checked) => updateNeedPlanForeshadowing(item.id, 'required', checked)}
+                            />
+                            <Toggle
+                              label="本章禁止提及/推进"
+                              checked={contextNeedPlan.forbiddenForeshadowingIds.includes(item.id)}
+                              onChange={(checked) => updateNeedPlanForeshadowing(item.id, 'forbidden', checked)}
+                            />
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  </div>
+                </details>
+              </div>
+            )}
           </section>
 
           <section className="panel">

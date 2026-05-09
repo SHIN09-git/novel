@@ -120,10 +120,11 @@ async function main() {
 
   checks.push(
     assert(
-      pipelineRunnerSource.includes('buildPipelineContextFromSelection(') &&
+      pipelineRunnerSource.includes('buildPipelineContextResultFromSelection(') &&
         pipelineRunnerSource.includes('budgetSelection') &&
         pipelineRunnerSource.includes('const selectedCharacterIds = snapshot ? snapshot.selectedCharacterIds : budgetSelection?.selectedCharacterIds') &&
-        pipelineRunnerSource.includes('selectedForeshadowingIds,'),
+        pipelineRunnerSource.includes('selectedForeshadowingIds,') &&
+        pipelineRunnerSource.includes('promptBlockOrder'),
       'GenerationPipelineView builds prompt context and Run Trace from the same budget selection'
     )
   )
@@ -141,6 +142,36 @@ async function main() {
         budgetManagerSource.includes('replacementTextForCompressedChapter') &&
         promptBuilderSource.includes('formatCompressedChapterRecap'),
       'budget selection can compress old chapter recaps and PromptBuilderService renders the compressed replacement'
+    )
+  )
+
+  checks.push(
+    assert(
+      promptBuilderSource.includes('promptBlockOrder') &&
+        promptBuilderSource.includes('0. 上下文冲突优先级规则') &&
+        promptBuilderSource.includes('2. 上一章结尾衔接 Bridge') &&
+        promptBuilderSource.includes('3. 本章任务契约') &&
+        promptBuilderSource.includes('10. 最小硬设定 HardCanonPack') &&
+        promptBuilderSource.indexOf('2. 上一章结尾衔接 Bridge') < promptBuilderSource.indexOf('10. 最小硬设定 HardCanonPack'),
+      'PromptBuilderService records promptBlockOrder and keeps bridge/task before hard canon and style blocks'
+    )
+  )
+
+  checks.push(
+    assert(
+      promptBuilderSource.includes('11. 风格要求 StyleEnvelope') &&
+        promptBuilderSource.indexOf('3. 本章任务契约') < promptBuilderSource.indexOf('11. 风格要求 StyleEnvelope'),
+      'style envelope is a later expression filter and cannot outrank the chapter task'
+    )
+  )
+
+  checks.push(
+    assert(
+      promptBuilderSource.includes('12. 禁止事项与 NoveltyPolicy') &&
+        promptBuilderSource.includes('不得新增未授权命名角色') &&
+        promptBuilderSource.indexOf('11. 风格要求 StyleEnvelope') < promptBuilderSource.indexOf('12. 禁止事项与 NoveltyPolicy') &&
+        promptBuilderSource.indexOf('12. 禁止事项与 NoveltyPolicy') < promptBuilderSource.indexOf('13. 输出格式要求'),
+      'NoveltyPolicy remains in the forbidden block after style and before output format'
     )
   )
 

@@ -4,7 +4,27 @@ import type {
   ChapterTask,
   ChapterContinuityBridge,
   ChapterGenerationJob,
+  CharacterCardField,
+  CharacterStateChangeCandidate,
+  CharacterStateChangeSuggestion,
+  CharacterStateFact,
+  CharacterStateFactStatus,
+  CharacterStatePromptPolicy,
+  CharacterStateRiskLevel,
+  CharacterStateTrackingLevel,
+  CharacterStateTransaction,
+  CharacterStateTransactionSource,
+  CharacterStateTransactionStatus,
+  CharacterStateTransactionType,
+  CharacterStateValueType,
+  CharacterStateFactValue,
+  ContinuityCheckCategory,
   ContextBudgetProfile,
+  ContextExclusionRule,
+  ContextNeedPlan,
+  ExpectedCharacterNeed,
+  ExpectedPresence,
+  ExpectedSceneType,
   ContextSelectionResult,
   ConsistencyIssueStatus,
   ConsistencyIssueType,
@@ -20,11 +40,18 @@ import type {
   MemoryUpdateCandidate,
   MemoryUpdateCandidateType,
   MemoryUpdatePatch,
+  NoveltyAuditResult,
+  NoveltyAuditSeverity,
+  NoveltyFinding,
+  NoveltyFindingKind,
   QualityGateReport,
   RedundancyReport,
   PromptMode,
   PromptModuleSelection,
   PromptContextSnapshot,
+  PromptBlockOrderItem,
+  RetrievalPriority,
+  StateFactCategory,
   StoryBible
 } from './types'
 import { normalizeTreatmentMode } from './foreshadowingTreatment'
@@ -51,11 +78,15 @@ export const EMPTY_APP_DATA: AppData = {
   chapters: [],
   characters: [],
   characterStateLogs: [],
+  characterStateFacts: [],
+  characterStateTransactions: [],
+  characterStateChangeCandidates: [],
   foreshadowings: [],
   timelineEvents: [],
   stageSummaries: [],
   promptVersions: [],
   promptContextSnapshots: [],
+  contextNeedPlans: [],
   chapterContinuityBridges: [],
   chapterGenerationJobs: [],
   chapterGenerationSteps: [],
@@ -401,6 +432,330 @@ function normalizeContextSelectionResult(value: unknown): ContextSelectionResult
   }
 }
 
+const CHARACTER_CARD_FIELDS: CharacterCardField[] = [
+  'roleFunction',
+  'surfaceGoal',
+  'deepNeed',
+  'coreFear',
+  'decisionLogic',
+  'abilitiesAndResources',
+  'weaknessAndCost',
+  'relationshipTension',
+  'futureHooks'
+]
+
+const STATE_FACT_CATEGORIES: StateFactCategory[] = [
+  'resource',
+  'inventory',
+  'location',
+  'physical',
+  'mental',
+  'knowledge',
+  'relationship',
+  'goal',
+  'promise',
+  'secret',
+  'ability',
+  'status',
+  'custom'
+]
+
+const CHARACTER_STATE_VALUE_TYPES: CharacterStateValueType[] = ['string', 'number', 'boolean', 'list', 'text']
+const CHARACTER_STATE_TRACKING_LEVELS: CharacterStateTrackingLevel[] = ['hard', 'soft', 'note']
+const CHARACTER_STATE_PROMPT_POLICIES: CharacterStatePromptPolicy[] = ['always', 'when_relevant', 'manual_only']
+const CHARACTER_STATE_FACT_STATUSES: CharacterStateFactStatus[] = ['active', 'resolved', 'inactive', 'retconned']
+const CHARACTER_STATE_TRANSACTION_TYPES: CharacterStateTransactionType[] = [
+  'create',
+  'update',
+  'increment',
+  'decrement',
+  'add_item',
+  'remove_item',
+  'move',
+  'learn',
+  'resolve',
+  'invalidate'
+]
+const CHARACTER_STATE_TRANSACTION_SOURCES: CharacterStateTransactionSource[] = ['manual', 'chapter_review', 'pipeline', 'revision']
+const CHARACTER_STATE_TRANSACTION_STATUSES: CharacterStateTransactionStatus[] = ['pending', 'accepted', 'rejected']
+const CHARACTER_STATE_CANDIDATE_TYPES = ['create_fact', 'update_fact', 'transaction', 'resolve_fact', 'conflict'] as const
+const CHARACTER_STATE_RISK_LEVELS: CharacterStateRiskLevel[] = ['low', 'medium', 'high']
+
+const EXPECTED_SCENE_TYPES: ExpectedSceneType[] = [
+  'action',
+  'dialogue',
+  'investigation',
+  'transition',
+  'relationship',
+  'reveal',
+  'setup',
+  'payoff',
+  'recovery',
+  'custom'
+]
+
+const EXPECTED_PRESENCES: ExpectedPresence[] = ['onstage', 'offscreen', 'referenced']
+
+const CONTINUITY_CHECK_CATEGORIES: ContinuityCheckCategory[] = [
+  'location',
+  'injury',
+  'money',
+  'inventory',
+  'knowledge',
+  'relationship',
+  'promise',
+  'ability',
+  'timeline'
+]
+
+function normalizeRecordArray<T extends string>(value: unknown, allowed: readonly T[]): T[] {
+  return stringArrayValue(value).filter((item): item is T => allowed.includes(item as T))
+}
+
+function normalizeStateFactCategory(value: unknown): StateFactCategory {
+  const raw = stringValue(value)
+  return STATE_FACT_CATEGORIES.includes(raw as StateFactCategory) ? (raw as StateFactCategory) : 'custom'
+}
+
+function normalizeStateFactValue(value: unknown, valueType: CharacterStateValueType): CharacterStateFactValue {
+  if (valueType === 'number') {
+    if (typeof value === 'number' && Number.isFinite(value)) return value
+    if (typeof value === 'string' && value.trim() && Number.isFinite(Number(value))) return Number(value)
+    return 0
+  }
+  if (valueType === 'boolean') return typeof value === 'boolean' ? value : String(value).toLowerCase() === 'true'
+  if (valueType === 'list') {
+    if (Array.isArray(value)) return value.map((item) => String(item)).filter(Boolean)
+    if (typeof value === 'string') return value.split(/[,\n，、]/).map((item) => item.trim()).filter(Boolean)
+    return []
+  }
+  return value === null || value === undefined ? '' : String(value)
+}
+
+function normalizeCharacterStateFact(value: unknown): CharacterStateFact {
+  const fact = objectOrEmpty(value)
+  const timestamp = new Date().toISOString()
+  const valueTypeRaw = stringValue(fact.valueType)
+  const valueType = CHARACTER_STATE_VALUE_TYPES.includes(valueTypeRaw as CharacterStateValueType)
+    ? (valueTypeRaw as CharacterStateValueType)
+    : 'text'
+  const trackingLevelRaw = stringValue(fact.trackingLevel)
+  const promptPolicyRaw = stringValue(fact.promptPolicy)
+  const statusRaw = stringValue(fact.status)
+  return {
+    id: stringValue(fact.id),
+    projectId: stringValue(fact.projectId),
+    characterId: stringValue(fact.characterId),
+    category: normalizeStateFactCategory(fact.category),
+    key: stringValue(fact.key),
+    label: stringValue(fact.label) || stringValue(fact.key) || '状态事实',
+    valueType,
+    value: normalizeStateFactValue(fact.value, valueType),
+    unit: stringValue(fact.unit),
+    linkedCardFields: normalizeRecordArray(fact.linkedCardFields, CHARACTER_CARD_FIELDS),
+    trackingLevel: CHARACTER_STATE_TRACKING_LEVELS.includes(trackingLevelRaw as CharacterStateTrackingLevel)
+      ? (trackingLevelRaw as CharacterStateTrackingLevel)
+      : 'hard',
+    promptPolicy: CHARACTER_STATE_PROMPT_POLICIES.includes(promptPolicyRaw as CharacterStatePromptPolicy)
+      ? (promptPolicyRaw as CharacterStatePromptPolicy)
+      : 'when_relevant',
+    status: CHARACTER_STATE_FACT_STATUSES.includes(statusRaw as CharacterStateFactStatus)
+      ? (statusRaw as CharacterStateFactStatus)
+      : 'active',
+    sourceChapterId: stringValue(fact.sourceChapterId) || null,
+    sourceChapterOrder: typeof fact.sourceChapterOrder === 'number' ? fact.sourceChapterOrder : null,
+    evidence: stringValue(fact.evidence),
+    confidence: typeof fact.confidence === 'number' ? Math.max(0, Math.min(1, fact.confidence)) : 0.7,
+    createdAt: stringValue(fact.createdAt) || timestamp,
+    updatedAt: stringValue(fact.updatedAt) || timestamp
+  }
+}
+
+function normalizeCharacterStateTransaction(value: unknown): CharacterStateTransaction {
+  const transaction = objectOrEmpty(value)
+  const timestamp = new Date().toISOString()
+  const transactionTypeRaw = stringValue(transaction.transactionType)
+  const sourceRaw = stringValue(transaction.source)
+  const statusRaw = stringValue(transaction.status)
+  return {
+    id: stringValue(transaction.id),
+    projectId: stringValue(transaction.projectId),
+    characterId: stringValue(transaction.characterId),
+    factId: stringValue(transaction.factId),
+    chapterId: stringValue(transaction.chapterId) || null,
+    chapterOrder: typeof transaction.chapterOrder === 'number' ? transaction.chapterOrder : null,
+    transactionType: CHARACTER_STATE_TRANSACTION_TYPES.includes(transactionTypeRaw as CharacterStateTransactionType)
+      ? (transactionTypeRaw as CharacterStateTransactionType)
+      : 'update',
+    beforeValue: transaction.beforeValue === undefined ? null : (transaction.beforeValue as CharacterStateFactValue),
+    afterValue: transaction.afterValue === undefined ? null : (transaction.afterValue as CharacterStateFactValue),
+    delta: typeof transaction.delta === 'number' ? transaction.delta : null,
+    reason: stringValue(transaction.reason),
+    evidence: stringValue(transaction.evidence),
+    source: CHARACTER_STATE_TRANSACTION_SOURCES.includes(sourceRaw as CharacterStateTransactionSource)
+      ? (sourceRaw as CharacterStateTransactionSource)
+      : 'manual',
+    status: CHARACTER_STATE_TRANSACTION_STATUSES.includes(statusRaw as CharacterStateTransactionStatus)
+      ? (statusRaw as CharacterStateTransactionStatus)
+      : 'accepted',
+    createdAt: stringValue(transaction.createdAt) || timestamp,
+    updatedAt: stringValue(transaction.updatedAt) || timestamp
+  }
+}
+
+function normalizeCharacterStateChangeSuggestion(value: unknown): CharacterStateChangeSuggestion {
+  const item = objectOrEmpty(value)
+  const candidateTypeRaw = stringValue(item.changeType)
+  const transactionTypeRaw = stringValue(item.suggestedTransactionType)
+  const riskRaw = stringValue(item.riskLevel)
+  return {
+    characterId: stringValue(item.characterId),
+    category: normalizeStateFactCategory(item.category),
+    key: stringValue(item.key),
+    label: stringValue(item.label) || stringValue(item.key) || '状态变化',
+    changeType: CHARACTER_STATE_CANDIDATE_TYPES.includes(candidateTypeRaw as CharacterStateChangeCandidate['candidateType'])
+      ? (candidateTypeRaw as CharacterStateChangeCandidate['candidateType'])
+      : 'update_fact',
+    beforeValue: item.beforeValue === undefined ? null : (item.beforeValue as CharacterStateFactValue),
+    afterValue: item.afterValue === undefined ? null : (item.afterValue as CharacterStateFactValue),
+    delta: typeof item.delta === 'number' ? item.delta : null,
+    evidence: stringValue(item.evidence),
+    confidence: typeof item.confidence === 'number' ? Math.max(0, Math.min(1, item.confidence)) : 0.6,
+    riskLevel: CHARACTER_STATE_RISK_LEVELS.includes(riskRaw as CharacterStateRiskLevel) ? (riskRaw as CharacterStateRiskLevel) : 'medium',
+    suggestedTransactionType: CHARACTER_STATE_TRANSACTION_TYPES.includes(transactionTypeRaw as CharacterStateTransactionType)
+      ? (transactionTypeRaw as CharacterStateTransactionType)
+      : 'update',
+    linkedCardFields: normalizeRecordArray(item.linkedCardFields, CHARACTER_CARD_FIELDS)
+  }
+}
+
+function normalizeCharacterStateChangeCandidate(value: unknown): CharacterStateChangeCandidate {
+  const candidate = objectOrEmpty(value)
+  const timestamp = new Date().toISOString()
+  const candidateTypeRaw = stringValue(candidate.candidateType)
+  const riskRaw = stringValue(candidate.riskLevel)
+  const statusRaw = stringValue(candidate.status)
+  return {
+    id: stringValue(candidate.id),
+    projectId: stringValue(candidate.projectId),
+    characterId: stringValue(candidate.characterId),
+    chapterId: stringValue(candidate.chapterId) || null,
+    chapterOrder: typeof candidate.chapterOrder === 'number' ? candidate.chapterOrder : null,
+    candidateType: CHARACTER_STATE_CANDIDATE_TYPES.includes(candidateTypeRaw as CharacterStateChangeCandidate['candidateType'])
+      ? (candidateTypeRaw as CharacterStateChangeCandidate['candidateType'])
+      : 'update_fact',
+    targetFactId: stringValue(candidate.targetFactId) || null,
+    proposedFact: candidate.proposedFact ? normalizeCharacterStateFact(candidate.proposedFact) : null,
+    proposedTransaction: candidate.proposedTransaction ? normalizeCharacterStateTransaction(candidate.proposedTransaction) : null,
+    beforeValue: candidate.beforeValue === undefined ? null : (candidate.beforeValue as CharacterStateFactValue),
+    afterValue: candidate.afterValue === undefined ? null : (candidate.afterValue as CharacterStateFactValue),
+    evidence: stringValue(candidate.evidence),
+    confidence: typeof candidate.confidence === 'number' ? Math.max(0, Math.min(1, candidate.confidence)) : 0.6,
+    riskLevel: CHARACTER_STATE_RISK_LEVELS.includes(riskRaw as CharacterStateRiskLevel) ? (riskRaw as CharacterStateRiskLevel) : 'medium',
+    status: CHARACTER_STATE_TRANSACTION_STATUSES.includes(statusRaw as CharacterStateTransactionStatus)
+      ? (statusRaw as CharacterStateTransactionStatus)
+      : 'pending',
+    createdAt: stringValue(candidate.createdAt) || timestamp,
+    updatedAt: stringValue(candidate.updatedAt) || timestamp
+  }
+}
+
+function normalizeRequiredCharacterCardFields(value: unknown): Record<string, CharacterCardField[]> {
+  const record = objectOrEmpty(value)
+  return Object.fromEntries(
+    Object.entries(record).map(([id, fields]) => [id, normalizeRecordArray(fields, CHARACTER_CARD_FIELDS)])
+  )
+}
+
+function normalizeRequiredStateFactCategories(value: unknown): Record<string, StateFactCategory[]> {
+  const record = objectOrEmpty(value)
+  return Object.fromEntries(
+    Object.entries(record).map(([id, categories]) => [id, normalizeRecordArray(categories, STATE_FACT_CATEGORIES)])
+  )
+}
+
+function normalizeExpectedCharacterNeed(value: unknown): ExpectedCharacterNeed {
+  const item = objectOrEmpty(value)
+  const role = stringValue(item.roleInChapter)
+  const presence = stringValue(item.expectedPresence)
+  return {
+    characterId: stringValue(item.characterId),
+    roleInChapter:
+      role === 'protagonist' ||
+      role === 'antagonist' ||
+      role === 'ally' ||
+      role === 'witness' ||
+      role === 'support' ||
+      role === 'offscreen' ||
+      role === 'mentioned'
+        ? role
+        : 'support',
+    expectedPresence: EXPECTED_PRESENCES.includes(presence as ExpectedPresence) ? (presence as ExpectedPresence) : 'onstage',
+    reason: stringValue(item.reason)
+  }
+}
+
+function normalizeRetrievalPriority(value: unknown): RetrievalPriority {
+  const item = objectOrEmpty(value)
+  const type = stringValue(item.type)
+  return {
+    type:
+      type === 'character_card' ||
+      type === 'character_state' ||
+      type === 'foreshadowing' ||
+      type === 'timeline' ||
+      type === 'story_bible' ||
+      type === 'stage_summary' ||
+      type === 'chapter_ending'
+        ? type
+        : 'story_bible',
+    id: stringValue(item.id),
+    priority: typeof item.priority === 'number' ? Math.max(0, Math.min(100, item.priority)) : 50,
+    reason: stringValue(item.reason)
+  }
+}
+
+function normalizeContextExclusionRule(value: unknown): ContextExclusionRule {
+  const item = objectOrEmpty(value)
+  return {
+    type: stringValue(item.type) || 'unknown',
+    id: stringValue(item.id),
+    reason: stringValue(item.reason)
+  }
+}
+
+function normalizeContextNeedPlan(value: ContextNeedPlan | Record<string, unknown>): ContextNeedPlan {
+  const plan = objectOrEmpty(value)
+  const timestamp = new Date().toISOString()
+  const sceneType = stringValue(plan.expectedSceneType)
+  const source = stringValue(plan.source)
+  return {
+    ...(value as ContextNeedPlan),
+    id: stringValue(plan.id) || `context-need-plan-${timestamp}`,
+    projectId: stringValue(plan.projectId),
+    targetChapterOrder: typeof plan.targetChapterOrder === 'number' ? plan.targetChapterOrder : 1,
+    source:
+      source === 'prompt_builder' || source === 'generation_pipeline' || source === 'manual' || source === 'auto'
+        ? source
+        : 'auto',
+    chapterIntent: stringValue(plan.chapterIntent),
+    expectedSceneType: EXPECTED_SCENE_TYPES.includes(sceneType as ExpectedSceneType) ? (sceneType as ExpectedSceneType) : 'custom',
+    expectedCharacters: arrayOrEmpty(plan.expectedCharacters).map(normalizeExpectedCharacterNeed).filter((item) => item.characterId),
+    requiredCharacterCardFields: normalizeRequiredCharacterCardFields(plan.requiredCharacterCardFields),
+    requiredStateFactCategories: normalizeRequiredStateFactCategories(plan.requiredStateFactCategories),
+    requiredForeshadowingIds: stringArrayValue(plan.requiredForeshadowingIds),
+    forbiddenForeshadowingIds: stringArrayValue(plan.forbiddenForeshadowingIds),
+    requiredTimelineEventIds: stringArrayValue(plan.requiredTimelineEventIds),
+    requiredWorldbuildingKeys: stringArrayValue(plan.requiredWorldbuildingKeys),
+    mustCheckContinuity: normalizeRecordArray(plan.mustCheckContinuity, CONTINUITY_CHECK_CATEGORIES),
+    retrievalPriorities: arrayOrEmpty(plan.retrievalPriorities).map(normalizeRetrievalPriority),
+    exclusionRules: arrayOrEmpty(plan.exclusionRules).map(normalizeContextExclusionRule),
+    warnings: stringArrayValue(plan.warnings),
+    createdAt: stringValue(plan.createdAt) || timestamp,
+    updatedAt: stringValue(plan.updatedAt) || timestamp
+  }
+}
+
 function normalizeContextCompressionRecords(value: unknown): ContextSelectionResult['compressionRecords'] {
   return arrayOrEmpty<Record<string, unknown>>(value).map((entry) => {
     const record = objectOrEmpty(entry)
@@ -510,6 +865,7 @@ function normalizeQualityGateReport(value: QualityGateReport | Record<string, un
     dimensions: {
       plotCoherence: typeof dimensions.plotCoherence === 'number' ? dimensions.plotCoherence : 70,
       characterConsistency: typeof dimensions.characterConsistency === 'number' ? dimensions.characterConsistency : 70,
+      characterStateConsistency: typeof dimensions.characterStateConsistency === 'number' ? dimensions.characterStateConsistency : 70,
       foreshadowingControl: typeof dimensions.foreshadowingControl === 'number' ? dimensions.foreshadowingControl : 70,
       chapterContinuity: typeof dimensions.chapterContinuity === 'number' ? dimensions.chapterContinuity : 70,
       redundancyControl: typeof dimensions.redundancyControl === 'number' ? dimensions.redundancyControl : 70,
@@ -517,7 +873,8 @@ function normalizeQualityGateReport(value: QualityGateReport | Record<string, un
       pacing: typeof dimensions.pacing === 'number' ? dimensions.pacing : 70,
       emotionalPayoff: typeof dimensions.emotionalPayoff === 'number' ? dimensions.emotionalPayoff : 70,
       originality: typeof dimensions.originality === 'number' ? dimensions.originality : 70,
-      promptCompliance: typeof dimensions.promptCompliance === 'number' ? dimensions.promptCompliance : 70
+      promptCompliance: typeof dimensions.promptCompliance === 'number' ? dimensions.promptCompliance : 70,
+      contextRelevanceCompliance: typeof dimensions.contextRelevanceCompliance === 'number' ? dimensions.contextRelevanceCompliance : 70
     },
     issues: Array.isArray(report.issues) ? (report.issues as QualityGateReport['issues']) : [],
     requiredFixes: stringArrayValue(report.requiredFixes),
@@ -561,6 +918,7 @@ function normalizePromptContextSnapshot(value: PromptContextSnapshot | Record<st
     selectedForeshadowingIds: stringArrayValue(snapshot.selectedForeshadowingIds),
     foreshadowingTreatmentOverrides: objectOrEmpty(snapshot.foreshadowingTreatmentOverrides) as PromptContextSnapshot['foreshadowingTreatmentOverrides'],
     chapterTask: normalizeChapterTask(snapshot.chapterTask),
+    contextNeedPlan: snapshot.contextNeedPlan ? normalizeContextNeedPlan(snapshot.contextNeedPlan as Record<string, unknown>) : null,
     finalPrompt: stringValue(snapshot.finalPrompt),
     estimatedTokens: typeof snapshot.estimatedTokens === 'number' ? snapshot.estimatedTokens : 0,
     source: snapshot.source === 'auto' || snapshot.source === 'pipeline' ? snapshot.source : 'manual',
@@ -718,6 +1076,86 @@ function normalizeForcedContextBlocks(value: unknown): ForcedContextBlock[] {
   })
 }
 
+function normalizePromptBlockOrder(value: unknown): PromptBlockOrderItem[] {
+  return arrayOrEmpty<Record<string, unknown>>(value).map((entry, index) => {
+    const block = objectOrEmpty(entry)
+    return {
+      id: stringValue(block.id) || `prompt-block-${index}`,
+      title: stringValue(block.title) || 'Prompt block',
+      kind: stringValue(block.kind) || 'unknown',
+      priority: typeof block.priority === 'number' && Number.isFinite(block.priority) ? block.priority : index + 1,
+      tokenEstimate: typeof block.tokenEstimate === 'number' && Number.isFinite(block.tokenEstimate) ? Math.max(0, block.tokenEstimate) : 0,
+      source: stringValue(block.source) || 'unknown',
+      sourceIds: stringArrayValue(block.sourceIds),
+      included: typeof block.included === 'boolean' ? block.included : true,
+      compressed: typeof block.compressed === 'boolean' ? block.compressed : false,
+      forced: typeof block.forced === 'boolean' ? block.forced : false,
+      omittedReason: stringValue(block.omittedReason) || null,
+      reason: stringValue(block.reason) || '旧数据缺少 prompt block reason。'
+    }
+  })
+}
+
+function normalizeNoveltyFindingKind(value: unknown): NoveltyFindingKind {
+  const raw = stringValue(value)
+  if (
+    raw === 'new_named_character' ||
+    raw === 'new_world_rule' ||
+    raw === 'new_system_mechanic' ||
+    raw === 'new_organization_or_rank' ||
+    raw === 'major_lore_reveal' ||
+    raw === 'deus_ex_rule' ||
+    raw === 'suspicious_deus_ex_rule' ||
+    raw === 'untraced_name'
+  ) {
+    return raw
+  }
+  return 'new_world_rule'
+}
+
+function normalizeNoveltyAuditSeverity(value: unknown): NoveltyAuditSeverity {
+  return value === 'pass' || value === 'warning' || value === 'fail' ? value : 'pass'
+}
+
+function normalizeNoveltyFindingSeverity(value: unknown): NoveltyFinding['severity'] {
+  if (value === 'info' || value === 'warning' || value === 'fail') return value
+  if (value === 'low') return 'info'
+  if (value === 'medium') return 'warning'
+  if (value === 'high') return 'fail'
+  return 'warning'
+}
+
+function normalizeNoveltyFinding(value: unknown): NoveltyFinding {
+  const finding = objectOrEmpty(value)
+  return {
+    kind: normalizeNoveltyFindingKind(finding.kind),
+    text: stringValue(finding.text),
+    evidenceExcerpt: stringValue(finding.evidenceExcerpt),
+    reason: stringValue(finding.reason),
+    severity: normalizeNoveltyFindingSeverity(finding.severity),
+    allowedByTask: typeof finding.allowedByTask === 'boolean' ? finding.allowedByTask : false,
+    hasPriorForeshadowing: typeof finding.hasPriorForeshadowing === 'boolean' ? finding.hasPriorForeshadowing : false,
+    sourceHint: stringValue(finding.sourceHint) || null,
+    suggestedAction: stringValue(finding.suggestedAction)
+  }
+}
+
+function normalizeNoveltyAuditResult(value: unknown): NoveltyAuditResult | null {
+  if (!value || typeof value !== 'object') return null
+  const audit = objectOrEmpty(value)
+  return {
+    newNamedCharacters: arrayOrEmpty<NoveltyFinding>(audit.newNamedCharacters).map(normalizeNoveltyFinding),
+    newWorldRules: arrayOrEmpty<NoveltyFinding>(audit.newWorldRules).map(normalizeNoveltyFinding),
+    newSystemMechanics: arrayOrEmpty<NoveltyFinding>(audit.newSystemMechanics).map(normalizeNoveltyFinding),
+    newOrganizationsOrRanks: arrayOrEmpty<NoveltyFinding>(audit.newOrganizationsOrRanks).map(normalizeNoveltyFinding),
+    majorLoreReveals: arrayOrEmpty<NoveltyFinding>(audit.majorLoreReveals).map(normalizeNoveltyFinding),
+    suspiciousDeusExRules: arrayOrEmpty<NoveltyFinding>(audit.suspiciousDeusExRules).map(normalizeNoveltyFinding),
+    untracedNames: arrayOrEmpty<NoveltyFinding>(audit.untracedNames).map(normalizeNoveltyFinding),
+    severity: normalizeNoveltyAuditSeverity(audit.severity),
+    summary: stringValue(audit.summary)
+  }
+}
+
 function normalizeGenerationRunTrace(value: GenerationRunTrace | Record<string, unknown>): GenerationRunTrace {
   const trace = objectOrEmpty(value)
   const timestamp = new Date().toISOString()
@@ -744,6 +1182,7 @@ function normalizeGenerationRunTrace(value: GenerationRunTrace | Record<string, 
     contextTokenEstimate: typeof trace.contextTokenEstimate === 'number' ? trace.contextTokenEstimate : 0,
     forcedContextBlocks: normalizeForcedContextBlocks(trace.forcedContextBlocks),
     compressionRecords: normalizeContextCompressionRecords(trace.compressionRecords),
+    promptBlockOrder: normalizePromptBlockOrder(trace.promptBlockOrder),
     finalPromptTokenEstimate: typeof trace.finalPromptTokenEstimate === 'number' ? trace.finalPromptTokenEstimate : 0,
     generatedDraftId: stringValue(trace.generatedDraftId) || null,
     consistencyReviewReportId: stringValue(trace.consistencyReviewReportId) || null,
@@ -756,6 +1195,18 @@ function normalizeGenerationRunTrace(value: GenerationRunTrace | Record<string, 
     continuitySource,
     redundancyReportId: stringValue(trace.redundancyReportId) || null,
     continuityWarnings: stringArrayValue(trace.continuityWarnings),
+    contextNeedPlanId: stringValue(trace.contextNeedPlanId) || null,
+    requiredCharacterCardFields: normalizeRequiredCharacterCardFields(trace.requiredCharacterCardFields),
+    requiredStateFactCategories: normalizeRequiredStateFactCategories(trace.requiredStateFactCategories),
+    contextNeedPlanWarnings: stringArrayValue(trace.contextNeedPlanWarnings),
+    contextNeedPlanMatchedItems: stringArrayValue(trace.contextNeedPlanMatchedItems),
+    contextNeedPlanOmittedItems: Array.isArray(trace.contextNeedPlanOmittedItems)
+      ? (trace.contextNeedPlanOmittedItems as GenerationRunTrace['contextNeedPlanOmittedItems'])
+      : [],
+    includedCharacterStateFactIds: stringArrayValue(trace.includedCharacterStateFactIds),
+    characterStateWarnings: stringArrayValue(trace.characterStateWarnings),
+    characterStateIssueIds: stringArrayValue(trace.characterStateIssueIds),
+    noveltyAuditResult: normalizeNoveltyAuditResult(trace.noveltyAuditResult),
     createdAt: stringValue(trace.createdAt) || timestamp,
     updatedAt: stringValue(trace.updatedAt) || timestamp
   }
@@ -782,11 +1233,15 @@ export function normalizeAppData(input: Partial<AppData>): AppData {
     chapters: arrayOrEmpty(raw.chapters),
     characters: arrayOrEmpty(raw.characters),
     characterStateLogs: arrayOrEmpty(raw.characterStateLogs),
+    characterStateFacts: arrayOrEmpty<CharacterStateFact>(raw.characterStateFacts).map(normalizeCharacterStateFact),
+    characterStateTransactions: arrayOrEmpty<CharacterStateTransaction>(raw.characterStateTransactions).map(normalizeCharacterStateTransaction),
+    characterStateChangeCandidates: arrayOrEmpty<CharacterStateChangeCandidate>(raw.characterStateChangeCandidates).map(normalizeCharacterStateChangeCandidate),
     foreshadowings: arrayOrEmpty<Foreshadowing>(raw.foreshadowings).map(normalizeForeshadowing),
     timelineEvents: arrayOrEmpty(raw.timelineEvents),
     stageSummaries: arrayOrEmpty(raw.stageSummaries),
     promptVersions: arrayOrEmpty(raw.promptVersions),
     promptContextSnapshots: arrayOrEmpty<PromptContextSnapshot>(raw.promptContextSnapshots).map(normalizePromptContextSnapshot),
+    contextNeedPlans: arrayOrEmpty<ContextNeedPlan>(raw.contextNeedPlans).map(normalizeContextNeedPlan),
     chapterContinuityBridges: arrayOrEmpty<ChapterContinuityBridge>(raw.chapterContinuityBridges).map(normalizeChapterContinuityBridge),
     chapterGenerationJobs: arrayOrEmpty<ChapterGenerationJob>(raw.chapterGenerationJobs).map(normalizeChapterGenerationJob),
     chapterGenerationSteps: arrayOrEmpty(raw.chapterGenerationSteps),

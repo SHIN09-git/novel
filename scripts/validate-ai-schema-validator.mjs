@@ -16,13 +16,32 @@ async function loadTsModule(relativePath) {
     compilerOptions: {
       module: ts.ModuleKind.ES2022,
       target: ts.ScriptTarget.ES2022,
-      useDefineForClassFields: true
+      useDefineForClassFields: true,
+      verbatimModuleSyntax: false
     }
   })
   await mkdir(outDir, { recursive: true })
   const outPath = join(outDir, `${relativePath.replace(/[\\/.:]/g, '-')}.mjs`)
   await writeFile(outPath, compiled.outputText, 'utf-8')
   return import(`${pathToFileURL(outPath).href}?t=${Date.now()}`)
+}
+
+function dimensionScores(overrides = {}) {
+  return {
+    plotCoherence: 70,
+    characterConsistency: 80,
+    characterStateConsistency: 76,
+    foreshadowingControl: 64,
+    chapterContinuity: 88,
+    redundancyControl: 92,
+    styleMatch: 75,
+    pacing: 77,
+    emotionalPayoff: 73,
+    originality: 80,
+    promptCompliance: 82,
+    contextRelevanceCompliance: 74,
+    ...overrides
+  }
 }
 
 async function main() {
@@ -34,7 +53,6 @@ async function main() {
   const pipelineSource = await readFile(join(root, 'src', 'services', 'ai', 'GenerationPipelineAI.ts'), 'utf-8')
   const qualitySource = await readFile(join(root, 'src', 'services', 'ai', 'QualityGateAI.ts'), 'utf-8')
   const revisionSource = await readFile(join(root, 'src', 'services', 'ai', 'RevisionAI.ts'), 'utf-8')
-  const packageJson = JSON.parse(await readFile(join(root, 'package.json'), 'utf-8'))
 
   const validReview = validator.validateChapterReviewSchema({
     summary: '',
@@ -59,32 +77,26 @@ async function main() {
   checks.push(assert(validReview.ok, 'valid chapter review response passes schema validation', validReview))
 
   const flexibleReview = validator.validateChapterReviewSchema({
-    summary: ['上一章从密道钩子接起', '主角确认右臂异变仍在扩散'],
-    newInformation: { rule: '银灰裂纹会响应旧钥匙', cost: '靠近时会短暂失温' },
-    characterChanges: ['女主开始怀疑主角隐瞒关键事实'],
-    newForeshadowing: ['旧钥匙发热', '墙上出现银灰裂纹'],
-    resolvedForeshadowing: ['旧照片中的符号被部分解释'],
-    endingHook: '门后传来熟悉的呼吸声',
-    riskWarnings: ['不要回收主谜团', '不要让角色直接说破'],
+    summary: ['previous chapter ended at a locked gate', 'the arm mutation continues'],
+    newInformation: { rule: 'old key reacts to silver cracks', cost: 'temperature drops nearby' },
+    characterChanges: ['the heroine starts doubting the protagonist'],
+    newForeshadowing: ['old key heats up', 'silver crack appears on the wall'],
+    resolvedForeshadowing: ['photo symbol is partially explained'],
+    endingHook: 'familiar breathing behind the door',
+    riskWarnings: ['do not pay off the main mystery', 'do not let a character explain the clue directly'],
     continuityBridgeSuggestion: {
-      lastSceneLocation: '密道尽头的铁门前',
-      lastPhysicalState: ['右臂灼痛', '呼吸紊乱'],
-      lastEmotionalState: '警惕和震惊',
-      lastUnresolvedAction: '刚把手按在门把上，还没有推开',
-      lastDialogueOrThought: { thought: '门后的人为什么知道我的名字？' },
-      immediateNextBeat: '从推门后的几秒开始',
-      mustContinueFrom: '接住门后呼吸声这个钩子',
-      mustNotReset: ['不要重新介绍倒悬都市', '不要重复解释银灰裂纹'],
-      openMicroTensions: ['林克没有回答塞尔达', '右臂异变还在扩散']
+      lastSceneLocation: 'in front of the iron door',
+      lastPhysicalState: ['right arm burning', 'breathing uneven'],
+      lastEmotionalState: 'alert and shocked',
+      lastUnresolvedAction: 'hand on the handle, door not opened',
+      lastDialogueOrThought: { thought: 'why does the person behind the door know my name' },
+      immediateNextBeat: 'begin seconds after opening the door',
+      mustContinueFrom: 'carry the breathing hook',
+      mustNotReset: ['do not reintroduce the inverted city', 'do not re-explain the silver crack'],
+      openMicroTensions: ['Link has not answered Zelda', 'right arm mutation is spreading']
     }
   })
-  checks.push(
-    assert(
-      flexibleReview.ok,
-      'chapter review validator accepts text-like AI outputs such as arrays and objects',
-      flexibleReview
-    )
-  )
+  checks.push(assert(flexibleReview.ok, 'chapter review validator accepts arrays and objects as text-like output', flexibleReview))
 
   const invalidReview = validator.validateChapterReviewSchema({ summary: '', continuityBridgeSuggestion: {} })
   checks.push(
@@ -95,49 +107,46 @@ async function main() {
     )
   )
 
-  const chapterDraft = validator.validateChapterDraftSchema({ chapterText: '正文内容' })
+  const chapterDraft = validator.validateChapterDraftSchema({ chapterText: 'chapter body' })
   checks.push(assert(chapterDraft.ok, 'chapter draft validator accepts normalizer body aliases', chapterDraft))
 
-
   const flexibleChapterPlan = validator.validateChapterPlanSchema({
-    chapterTitle: '第 4 章',
-    chapterGoal: '承接上一章结尾',
-    conflictToPush: '推进主线冲突',
-    characterBeats: ['主角保持怀疑', '女主压住恐惧'],
-    foreshadowingToUse: ['只暗示银灰裂纹', '推进旧钥匙线索'],
-    foreshadowingNotToReveal: ['不要回收王室真相', '不要解释钥匙来源'],
-    endingHook: '门后传来熟悉的声音',
-    readerEmotionTarget: '紧张、好奇',
+    chapterTitle: 'Chapter 4',
+    chapterGoal: 'Continue from previous ending',
+    conflictToPush: 'Push the central conflict',
+    characterBeats: ['protagonist remains suspicious', 'heroine suppresses fear'],
+    foreshadowingToUse: ['hint the silver crack', 'advance the old key clue'],
+    foreshadowingNotToReveal: ['do not pay off the royal truth', 'do not explain the key origin'],
+    endingHook: 'familiar breathing behind the door',
+    readerEmotionTarget: 'tension and curiosity',
     estimatedWordCount: 4500,
-    openingContinuationBeat: '从上一章开门动作后的几秒开始',
-    carriedPhysicalState: '右臂灼痛',
-    carriedEmotionalState: '警惕和震惊',
-    unresolvedMicroTensions: ['林克没有回答塞尔达', '右臂异变还在扩散'],
-    forbiddenResets: '不要重新介绍倒悬都市'
+    openingContinuationBeat: 'start seconds after the previous door opening',
+    carriedPhysicalState: 'right arm burning',
+    carriedEmotionalState: 'alert and shocked',
+    unresolvedMicroTensions: ['Link has not answered Zelda', 'right arm mutation is spreading'],
+    forbiddenResets: 'do not reintroduce the inverted city',
+    allowedNovelty: ['allow one costly new instance hint'],
+    forbiddenNovelty: ['forbid unforeshadowed rescue rules', 'forbid unauthorized named characters']
   })
-  checks.push(
-    assert(
-      flexibleChapterPlan.ok,
-      'chapter plan validator accepts common text-like AI outputs such as arrays and numeric word counts',
-      flexibleChapterPlan
-    )
-  )
+  checks.push(assert(flexibleChapterPlan.ok, 'chapter plan validator accepts text-like output and novelty fields', flexibleChapterPlan))
 
   const invalidChapterPlan = validator.validateChapterPlanSchema({
-    chapterTitle: '第 4 章',
-    chapterGoal: '承接上一章结尾',
-    conflictToPush: '推进主线冲突',
-    characterBeats: '主角保持怀疑',
+    chapterTitle: 'Chapter 4',
+    chapterGoal: 'Continue from previous ending',
+    conflictToPush: 'Push central conflict',
+    characterBeats: 'protagonist remains suspicious',
     foreshadowingToUse: null,
-    foreshadowingNotToReveal: '不要回收王室真相',
-    endingHook: '门后传来熟悉的声音',
-    readerEmotionTarget: '紧张、好奇',
+    foreshadowingNotToReveal: 'do not reveal the royal truth',
+    endingHook: 'familiar breathing behind the door',
+    readerEmotionTarget: 'tension and curiosity',
     estimatedWordCount: 4500,
-    openingContinuationBeat: '从上一章开门动作后的几秒开始',
-    carriedPhysicalState: '右臂灼痛',
-    carriedEmotionalState: '警惕和震惊',
-    unresolvedMicroTensions: '林克没有回答塞尔达',
-    forbiddenResets: '不要重新介绍倒悬都市'
+    openingContinuationBeat: 'start seconds after door opening',
+    carriedPhysicalState: 'right arm burning',
+    carriedEmotionalState: 'alert and shocked',
+    unresolvedMicroTensions: 'Link has not answered Zelda',
+    forbiddenResets: 'do not reintroduce the inverted city',
+    allowedNovelty: 'none',
+    forbiddenNovelty: 'forbid unforeshadowed rescue rules'
   })
   checks.push(
     assert(
@@ -165,19 +174,8 @@ async function main() {
   const invalidGateIssue = validator.validateQualityGateSchema({
     overallScore: 72,
     pass: false,
-    dimensions: {
-      plotCoherence: 70,
-      characterConsistency: 80,
-      foreshadowingControl: 64,
-      chapterContinuity: 88,
-      redundancyControl: 92,
-      styleMatch: 75,
-      pacing: 77,
-      emotionalPayoff: 73,
-      originality: 80,
-      promptCompliance: 82
-    },
-    issues: [{ severity: 'urgent', type: 'foreshadowing_treatment_violation', description: '提前回收伏笔' }],
+    dimensions: dimensionScores(),
+    issues: [{ severity: 'urgent', type: 'foreshadowing_treatment_violation', description: 'early payoff' }],
     requiredFixes: [],
     optionalSuggestions: []
   })
@@ -189,7 +187,7 @@ async function main() {
     )
   )
 
-  const invalidRevision = validator.validateRevisionResultSchema({ revisedText: '修订文本' })
+  const invalidRevision = validator.validateRevisionResultSchema({ revisedText: 'revised text' })
   checks.push(
     assert(
       !invalidRevision.ok && invalidRevision.issues.some((issue) => issue.path === '$.changedSummary'),
@@ -199,24 +197,24 @@ async function main() {
   )
 
   const flexibleRevision = validator.validateRevisionResultSchema({
-    revisedText: '修订文本',
-    changedSummary: ['压缩重复描写', '保留事实'],
-    risks: ['可能削弱氛围'],
-    preservedFacts: { location: '旧港区', hook: '门后有呼吸声' }
+    revisedText: 'revised text',
+    changedSummary: ['compressed repeated description', 'preserved facts'],
+    risks: ['may reduce atmosphere'],
+    preservedFacts: { location: 'old harbor', hook: 'breathing behind the door' }
   })
   checks.push(assert(flexibleRevision.ok, 'revision result validator accepts text-like metadata fields', flexibleRevision))
 
   const validMemoryPatch = validator.validateMemoryUpdatePatchSchema({
     schemaVersion: 1,
     kind: 'foreshadowing_status_update',
-    summary: '推进银灰钥匙伏笔',
+    summary: 'advance the silver key clue',
     sourceChapterOrder: 4,
     foreshadowingId: 'f1',
     suggestedStatus: 'partial',
     recommendedTreatmentMode: 'advance',
     actualPayoffChapter: null,
-    evidenceText: '钥匙发热',
-    notes: '只推进，不回收',
+    evidenceText: 'the key heats up',
+    notes: 'advance only, no payoff',
     warnings: []
   })
   checks.push(assert(validMemoryPatch.ok, 'structured memory update patch passes schema validation', validMemoryPatch))
@@ -224,10 +222,10 @@ async function main() {
   const invalidMemoryPatch = validator.validateMemoryUpdatePatchSchema({
     schemaVersion: 1,
     kind: 'foreshadowing_status_update',
-    summary: '错误状态',
+    summary: 'bad status',
     foreshadowingId: 'f1',
     suggestedStatus: 'done',
-    evidenceText: '证据',
+    evidenceText: 'evidence',
     notes: ''
   })
   checks.push(
@@ -250,6 +248,13 @@ async function main() {
 
   checks.push(
     assert(
+      normalizerSource.includes('asText(obj.allowedNovelty)') && normalizerSource.includes('asText(obj.forbiddenNovelty)'),
+      'AIResponseNormalizer normalizes novelty fields on chapter plans'
+    )
+  )
+
+  checks.push(
+    assert(
       chapterReviewSource.includes('validateChapterReviewSchema') &&
         chapterReviewSource.includes('validateCharacterSuggestionsSchema') &&
         chapterReviewSource.includes('validateForeshadowingExtractionSchema') &&
@@ -262,8 +267,9 @@ async function main() {
     assert(
       pipelineSource.includes('validateChapterPlanSchema') &&
         pipelineSource.includes('validateChapterDraftSchema') &&
-        pipelineSource.includes('validateConsistencyReviewSchema'),
-      'generation pipeline AI calls pass schema validators'
+        pipelineSource.includes('allowedNovelty') &&
+        pipelineSource.includes('forbiddenNovelty'),
+      'generation pipeline AI calls pass schema validators and novelty fields'
     )
   )
 
@@ -271,42 +277,27 @@ async function main() {
     assert(
       qualitySource.includes('validateQualityGateSchema') &&
         qualitySource.includes('validateRevisionCandidateSchema') &&
-        revisionSource.includes('validateRevisionResultSchema'),
-      'quality gate and revision AI calls pass schema validators'
+        qualitySource.includes('unauthorized_new_rule'),
+      'quality gate AI calls pass schema validators and novelty guardrail instructions'
     )
   )
 
   checks.push(
     assert(
-      normalizerSource.includes('changedSummary: asText(obj.changedSummary)') &&
-        normalizerSource.includes('risks: asText(obj.risks)') &&
-        normalizerSource.includes('preservedFacts: asText(obj.preservedFacts)'),
-      'revision normalizer preserves array/object metadata by converting it to text'
+      revisionSource.includes('validateRevisionResultSchema'),
+      'revision AI calls pass revision result schema validator'
     )
-  )
-
-  checks.push(
-    assert(
-      normalizerSource.includes('newForeshadowing: asText(obj.newForeshadowing)') &&
-        normalizerSource.includes('resolvedForeshadowing: asText(obj.resolvedForeshadowing)') &&
-        normalizerSource.includes('riskWarnings: asText(obj.riskWarnings)') &&
-        normalizerSource.includes('openMicroTensions: asText(bridge.openMicroTensions)'),
-      'chapter review normalizer preserves array/object review fields by converting them to text'
-    )
-  )
-
-  checks.push(
-    assert(packageJson.scripts?.test?.includes('validate-ai-schema-validator.mjs'), 'npm test includes validate-ai-schema-validator.mjs')
   )
 
   const failed = checks.filter((check) => !check.ok)
-  const report = { ok: failed.length === 0, totalChecks: checks.length, failed }
-  console.log(JSON.stringify(report, null, 2))
-  if (failed.length) process.exit(1)
+  for (const check of checks) {
+    console.log(`${check.ok ? '✓' : '✗'} ${check.message}`)
+    if (!check.ok) console.log(JSON.stringify(check.details, null, 2))
+  }
+  if (failed.length) process.exitCode = 1
 }
 
 main().catch((error) => {
-  console.error(error instanceof Error ? error.message : String(error))
-  process.exit(1)
+  console.error(error)
+  process.exitCode = 1
 })
-

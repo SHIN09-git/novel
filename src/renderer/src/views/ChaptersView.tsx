@@ -7,6 +7,10 @@ import type {
   ChapterContinuityBridgeSuggestion,
   ChapterReviewDraft,
   ChapterVersion,
+  CharacterStateChangeCandidate,
+  CharacterStateChangeSuggestion,
+  CharacterStateFact,
+  CharacterStateTransaction,
   CharacterStateLog,
   CharacterStateSuggestion,
   Foreshadowing,
@@ -296,7 +300,7 @@ export function ChaptersView({ data, project, saveData }: ProjectProps) {
 
   async function applyAllReviewDraft() {
     if (!selected || !reviewDraft) return
-    const { continuityBridgeSuggestion, ...chapterReview } = reviewDraft
+    const { continuityBridgeSuggestion, characterStateChangeSuggestions: _stateSuggestions, ...chapterReview } = reviewDraft
     await updateChapter(selected.id, chapterReview)
     if (continuityBridgeSuggestion) await saveContinuityBridge(continuityBridgeSuggestion)
   }
@@ -362,6 +366,80 @@ export function ChaptersView({ data, project, saveData }: ProjectProps) {
       characterStateLogs: [...current.characterStateLogs, log]
     }))
     setCharacterSuggestions((items) => items.filter((item) => item !== suggestion))
+  }
+
+  async function createStateChangeCandidate(suggestion: CharacterStateChangeSuggestion) {
+    if (!selected) return
+    const character = scoped.characters.find((item) => item.id === suggestion.characterId)
+    if (!character) return
+    const timestamp = now()
+    const existingFact = scoped.characterStateFacts.find(
+      (fact) => fact.characterId === suggestion.characterId && fact.key === suggestion.key && fact.status === 'active'
+    )
+    const proposedFact: CharacterStateFact = {
+      id: existingFact?.id ?? newId(),
+      projectId: project.id,
+      characterId: suggestion.characterId,
+      category: suggestion.category,
+      key: suggestion.key,
+      label: suggestion.label,
+      valueType: Array.isArray(suggestion.afterValue) ? 'list' : typeof suggestion.afterValue === 'number' ? 'number' : 'text',
+      value: suggestion.afterValue ?? existingFact?.value ?? '',
+      unit: existingFact?.unit ?? '',
+      linkedCardFields: suggestion.linkedCardFields,
+      trackingLevel: suggestion.category === 'relationship' || suggestion.category === 'status' ? 'soft' : 'hard',
+      promptPolicy: 'when_relevant',
+      status: 'active',
+      sourceChapterId: selected.id,
+      sourceChapterOrder: selected.order,
+      evidence: suggestion.evidence,
+      confidence: suggestion.confidence,
+      createdAt: existingFact?.createdAt ?? timestamp,
+      updatedAt: timestamp
+    }
+    const proposedTransaction: CharacterStateTransaction = {
+      id: newId(),
+      projectId: project.id,
+      characterId: suggestion.characterId,
+      factId: proposedFact.id,
+      chapterId: selected.id,
+      chapterOrder: selected.order,
+      transactionType: suggestion.suggestedTransactionType,
+      beforeValue: suggestion.beforeValue ?? existingFact?.value ?? null,
+      afterValue: suggestion.afterValue,
+      delta: suggestion.delta,
+      reason: suggestion.evidence,
+      evidence: suggestion.evidence,
+      source: 'chapter_review',
+      status: 'pending',
+      createdAt: timestamp,
+      updatedAt: timestamp
+    }
+    const candidate: CharacterStateChangeCandidate = {
+      id: newId(),
+      projectId: project.id,
+      characterId: suggestion.characterId,
+      chapterId: selected.id,
+      chapterOrder: selected.order,
+      candidateType: suggestion.changeType,
+      targetFactId: existingFact?.id ?? null,
+      proposedFact,
+      proposedTransaction,
+      beforeValue: suggestion.beforeValue ?? existingFact?.value ?? null,
+      afterValue: suggestion.afterValue,
+      evidence: suggestion.evidence,
+      confidence: suggestion.confidence,
+      riskLevel: suggestion.riskLevel,
+      status: 'pending',
+      createdAt: timestamp,
+      updatedAt: timestamp
+    }
+    await saveData((current) => ({
+      ...current,
+      projects: updateProjectTimestamp(current, project.id),
+      characterStateChangeCandidates: [candidate, ...current.characterStateChangeCandidates]
+    }))
+    setAiMessage(`已加入 ${character.name} 的状态变化候选。`)
   }
 
   async function applyForeshadowingCandidate(candidate: ForeshadowingCandidate, status: ForeshadowingStatus = 'unresolved') {
@@ -609,6 +687,9 @@ export function ChaptersView({ data, project, saveData }: ProjectProps) {
                 }}
                 onApplyCharacterSuggestion={(suggestion) => {
                   void applyCharacterSuggestion(suggestion)
+                }}
+                onCreateStateChangeCandidate={(suggestion) => {
+                  void createStateChangeCandidate(suggestion)
                 }}
                 onApplyForeshadowingCandidate={(candidate, status) => {
                   void applyForeshadowingCandidate(candidate, status)

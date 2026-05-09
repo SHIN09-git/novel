@@ -1,6 +1,7 @@
 import type {
   ChapterReviewDraft,
   Character,
+  CharacterStateChangeSuggestion,
   CharacterStateSuggestion,
   Foreshadowing,
   ForeshadowingCandidate,
@@ -28,6 +29,7 @@ interface ChapterAIDraftPanelsProps {
   onApplyReviewField: (field: ReviewTextField) => void
   onSaveContinuityBridge: (suggestion: ChapterReviewDraft['continuityBridgeSuggestion']) => void
   onApplyCharacterSuggestion: (suggestion: CharacterStateSuggestion) => void
+  onCreateStateChangeCandidate: (suggestion: CharacterStateChangeSuggestion) => void
   onApplyForeshadowingCandidate: (candidate: ForeshadowingCandidate, status?: ForeshadowingStatus) => void
   onApplyStatusChange: (change: ForeshadowingStatusChangeSuggestion) => void
   onSetNextSuggestions: (suggestions: NextChapterSuggestions) => void
@@ -49,6 +51,7 @@ export function ChapterAIDraftPanels({
   onApplyReviewField,
   onSaveContinuityBridge,
   onApplyCharacterSuggestion,
+  onCreateStateChangeCandidate,
   onApplyForeshadowingCandidate,
   onApplyStatusChange,
   onSetNextSuggestions,
@@ -159,6 +162,28 @@ export function ChapterAIDraftPanels({
               保存为下一章衔接状态
             </button>
           </div>
+          {reviewDraft.characterStateChangeSuggestions.length > 0 ? (
+            <div className="panel continuity-mini-panel">
+              <h3>角色状态变化候选</h3>
+              <p className="muted">这些变化不会自动写入状态账本。加入候选后，可在角色页确认应用。</p>
+              <div className="candidate-list">
+                {reviewDraft.characterStateChangeSuggestions.map((suggestion) => {
+                  const character = characters.find((item) => item.id === suggestion.characterId)
+                  return (
+                    <article key={`${suggestion.characterId}-${suggestion.key}-${suggestion.evidence}`} className="candidate-card">
+                      <h3>{character?.name ?? '未知角色'} · {suggestion.label}</h3>
+                      <p>{String(suggestion.beforeValue ?? '未记录')} → {String(suggestion.afterValue ?? '未记录')}</p>
+                      <p>{suggestion.evidence || '暂无证据文本'}</p>
+                      <p>类别：{suggestion.category} · 风险：{suggestion.riskLevel} · 置信度：{Math.round(suggestion.confidence * 100)}%</p>
+                      <button className="primary-button" onClick={() => onCreateStateChangeCandidate(suggestion)}>
+                        加入待确认状态候选
+                      </button>
+                    </article>
+                  )
+                })}
+              </div>
+            </div>
+          ) : null}
         </div>
       ) : null}
 
