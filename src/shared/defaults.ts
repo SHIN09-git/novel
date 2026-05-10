@@ -52,7 +52,12 @@ import type {
   PromptBlockOrderItem,
   RetrievalPriority,
   StateFactCategory,
-  StoryBible
+  StoryBible,
+  StoryDirectionChapterBeat,
+  StoryDirectionGuide,
+  StoryDirectionGuideSource,
+  StoryDirectionGuideStatus,
+  StoryDirectionHorizon
 } from './types'
 import { normalizeTreatmentMode } from './foreshadowingTreatment'
 
@@ -86,6 +91,7 @@ export const EMPTY_APP_DATA: AppData = {
   stageSummaries: [],
   promptVersions: [],
   promptContextSnapshots: [],
+  storyDirectionGuides: [],
   contextNeedPlans: [],
   chapterContinuityBridges: [],
   chapterGenerationJobs: [],
@@ -756,6 +762,82 @@ function normalizeContextNeedPlan(value: ContextNeedPlan | Record<string, unknow
   }
 }
 
+function normalizeStoryDirectionStatus(value: unknown): StoryDirectionGuideStatus {
+  return value === 'active' || value === 'archived' || value === 'draft' ? value : 'draft'
+}
+
+function normalizeStoryDirectionSource(value: unknown): StoryDirectionGuideSource {
+  return value === 'user_polished' || value === 'mixed' || value === 'ai_generated' ? value : 'ai_generated'
+}
+
+function normalizeStoryDirectionHorizon(value: unknown): StoryDirectionHorizon {
+  return value === 10 ? 10 : 5
+}
+
+function normalizeStoryDirectionBeat(value: unknown, index = 0, startChapterOrder = 1): StoryDirectionChapterBeat {
+  const beat = objectOrEmpty(value)
+  const chapterOffset = typeof beat.chapterOffset === 'number' && Number.isFinite(beat.chapterOffset) ? Math.max(1, Math.round(beat.chapterOffset)) : index + 1
+  return {
+    id: stringValue(beat.id) || `story-beat-${Date.now()}-${index}`,
+    chapterOffset,
+    chapterOrder:
+      typeof beat.chapterOrder === 'number' && Number.isFinite(beat.chapterOrder)
+        ? Math.max(1, Math.round(beat.chapterOrder))
+        : startChapterOrder + chapterOffset - 1,
+    goal: stringValue(beat.goal),
+    conflict: stringValue(beat.conflict),
+    characterFocus: stringValue(beat.characterFocus),
+    foreshadowingToUse: stringValue(beat.foreshadowingToUse),
+    foreshadowingNotToReveal: stringValue(beat.foreshadowingNotToReveal),
+    suspenseToKeep: stringValue(beat.suspenseToKeep),
+    endingHook: stringValue(beat.endingHook),
+    readerEmotion: stringValue(beat.readerEmotion),
+    mustAvoid: stringValue(beat.mustAvoid),
+    notes: stringValue(beat.notes)
+  }
+}
+
+function normalizeStoryDirectionGuide(value: StoryDirectionGuide | Record<string, unknown>): StoryDirectionGuide {
+  const guide = objectOrEmpty(value)
+  const timestamp = new Date().toISOString()
+  const horizonChapters = normalizeStoryDirectionHorizon(guide.horizonChapters)
+  const startChapterOrder =
+    typeof guide.startChapterOrder === 'number' && Number.isFinite(guide.startChapterOrder)
+      ? Math.max(1, Math.round(guide.startChapterOrder))
+      : 1
+  const endChapterOrder =
+    typeof guide.endChapterOrder === 'number' && Number.isFinite(guide.endChapterOrder)
+      ? Math.max(startChapterOrder, Math.round(guide.endChapterOrder))
+      : startChapterOrder + horizonChapters - 1
+  return {
+    ...(value as StoryDirectionGuide),
+    id: stringValue(guide.id) || `story-direction-${timestamp}`,
+    projectId: stringValue(guide.projectId),
+    title: stringValue(guide.title) || 'Story direction guide',
+    status: normalizeStoryDirectionStatus(guide.status),
+    source: normalizeStoryDirectionSource(guide.source),
+    horizonChapters,
+    startChapterOrder,
+    endChapterOrder,
+    userRawIdea: stringValue(guide.userRawIdea),
+    userPolishedIdea: stringValue(guide.userPolishedIdea),
+    aiGuidance: stringValue(guide.aiGuidance),
+    strategicTheme: stringValue(guide.strategicTheme),
+    coreDramaticPromise: stringValue(guide.coreDramaticPromise),
+    emotionalCurve: stringValue(guide.emotionalCurve),
+    characterArcDirectives: stringValue(guide.characterArcDirectives),
+    foreshadowingDirectives: stringValue(guide.foreshadowingDirectives),
+    constraints: stringValue(guide.constraints),
+    forbiddenTurns: stringValue(guide.forbiddenTurns),
+    chapterBeats: arrayOrEmpty(guide.chapterBeats).map((beat, index) => normalizeStoryDirectionBeat(beat, index, startChapterOrder)),
+    generatedFromStageSummaryIds: stringArrayValue(guide.generatedFromStageSummaryIds),
+    generatedFromChapterIds: stringArrayValue(guide.generatedFromChapterIds),
+    warnings: stringArrayValue(guide.warnings),
+    createdAt: stringValue(guide.createdAt) || timestamp,
+    updatedAt: stringValue(guide.updatedAt) || timestamp
+  }
+}
+
 function normalizeContextCompressionRecords(value: unknown): ContextSelectionResult['compressionRecords'] {
   return arrayOrEmpty<Record<string, unknown>>(value).map((entry) => {
     const record = objectOrEmpty(entry)
@@ -919,6 +1001,7 @@ function normalizePromptContextSnapshot(value: PromptContextSnapshot | Record<st
     foreshadowingTreatmentOverrides: objectOrEmpty(snapshot.foreshadowingTreatmentOverrides) as PromptContextSnapshot['foreshadowingTreatmentOverrides'],
     chapterTask: normalizeChapterTask(snapshot.chapterTask),
     contextNeedPlan: snapshot.contextNeedPlan ? normalizeContextNeedPlan(snapshot.contextNeedPlan as Record<string, unknown>) : null,
+    storyDirectionGuide: snapshot.storyDirectionGuide ? normalizeStoryDirectionGuide(snapshot.storyDirectionGuide as Record<string, unknown>) : null,
     finalPrompt: stringValue(snapshot.finalPrompt),
     estimatedTokens: typeof snapshot.estimatedTokens === 'number' ? snapshot.estimatedTokens : 0,
     source: snapshot.source === 'auto' || snapshot.source === 'pipeline' ? snapshot.source : 'manual',
@@ -1172,10 +1255,11 @@ function normalizeGenerationRunTrace(value: GenerationRunTrace | Record<string, 
     promptContextSnapshotId: stringValue(trace.promptContextSnapshotId) || null,
     contextSource: trace.contextSource === 'prompt_snapshot' ? 'prompt_snapshot' : 'auto',
     selectedChapterIds: stringArrayValue(trace.selectedChapterIds),
-    selectedStageSummaryIds: stringArrayValue(trace.selectedStageSummaryIds),
-    selectedCharacterIds: stringArrayValue(trace.selectedCharacterIds),
-    selectedForeshadowingIds: stringArrayValue(trace.selectedForeshadowingIds),
-    foreshadowingTreatmentModes: normalizeForeshadowingTreatmentMap(trace.foreshadowingTreatmentModes),
+      selectedStageSummaryIds: stringArrayValue(trace.selectedStageSummaryIds),
+      selectedCharacterIds: stringArrayValue(trace.selectedCharacterIds),
+      selectedForeshadowingIds: stringArrayValue(trace.selectedForeshadowingIds),
+      selectedTimelineEventIds: stringArrayValue(trace.selectedTimelineEventIds),
+      foreshadowingTreatmentModes: normalizeForeshadowingTreatmentMap(trace.foreshadowingTreatmentModes),
     foreshadowingTreatmentOverrides: normalizeForeshadowingTreatmentMap(trace.foreshadowingTreatmentOverrides),
     omittedContextItems: Array.isArray(trace.omittedContextItems) ? (trace.omittedContextItems as GenerationRunTrace['omittedContextItems']) : [],
     contextWarnings: stringArrayValue(trace.contextWarnings),
@@ -1207,6 +1291,16 @@ function normalizeGenerationRunTrace(value: GenerationRunTrace | Record<string, 
     characterStateWarnings: stringArrayValue(trace.characterStateWarnings),
     characterStateIssueIds: stringArrayValue(trace.characterStateIssueIds),
     noveltyAuditResult: normalizeNoveltyAuditResult(trace.noveltyAuditResult),
+    storyDirectionGuideId: stringValue(trace.storyDirectionGuideId) || null,
+    storyDirectionGuideSource:
+      trace.storyDirectionGuideSource === 'user_polished' || trace.storyDirectionGuideSource === 'mixed' || trace.storyDirectionGuideSource === 'ai_generated'
+        ? trace.storyDirectionGuideSource
+        : null,
+    storyDirectionGuideHorizon: trace.storyDirectionGuideHorizon === 5 || trace.storyDirectionGuideHorizon === 10 ? trace.storyDirectionGuideHorizon : null,
+    storyDirectionGuideStartChapterOrder: typeof trace.storyDirectionGuideStartChapterOrder === 'number' ? trace.storyDirectionGuideStartChapterOrder : null,
+    storyDirectionGuideEndChapterOrder: typeof trace.storyDirectionGuideEndChapterOrder === 'number' ? trace.storyDirectionGuideEndChapterOrder : null,
+    storyDirectionBeatId: stringValue(trace.storyDirectionBeatId) || null,
+    storyDirectionAppliedToChapterTask: typeof trace.storyDirectionAppliedToChapterTask === 'boolean' ? trace.storyDirectionAppliedToChapterTask : false,
     createdAt: stringValue(trace.createdAt) || timestamp,
     updatedAt: stringValue(trace.updatedAt) || timestamp
   }
@@ -1241,6 +1335,7 @@ export function normalizeAppData(input: Partial<AppData>): AppData {
     stageSummaries: arrayOrEmpty(raw.stageSummaries),
     promptVersions: arrayOrEmpty(raw.promptVersions),
     promptContextSnapshots: arrayOrEmpty<PromptContextSnapshot>(raw.promptContextSnapshots).map(normalizePromptContextSnapshot),
+    storyDirectionGuides: arrayOrEmpty<StoryDirectionGuide>(raw.storyDirectionGuides).map(normalizeStoryDirectionGuide),
     contextNeedPlans: arrayOrEmpty<ContextNeedPlan>(raw.contextNeedPlans).map(normalizeContextNeedPlan),
     chapterContinuityBridges: arrayOrEmpty<ChapterContinuityBridge>(raw.chapterContinuityBridges).map(normalizeChapterContinuityBridge),
     chapterGenerationJobs: arrayOrEmpty<ChapterGenerationJob>(raw.chapterGenerationJobs).map(normalizeChapterGenerationJob),

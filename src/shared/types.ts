@@ -93,6 +93,9 @@ export type ChapterGenerationStepType =
   | 'context_budget_selection'
   | 'build_context'
   | 'generate_chapter_plan'
+  | 'context_need_planning_from_plan'
+  | 'context_budget_selection_delta'
+  | 'rebuild_context_with_plan'
   | 'generate_chapter_draft'
   | 'generate_chapter_review'
   | 'propose_character_updates'
@@ -484,6 +487,86 @@ export interface ContextNeedPlan {
   updatedAt: string
 }
 
+export interface PlanContextGapAnalysisResult {
+  baseContextNeedPlanId: ID | null
+  derivedContextNeedPlan: ContextNeedPlan
+  newlyRequiredCharacterIds: ID[]
+  newlyRequiredForeshadowingIds: ID[]
+  newlyRequiredTimelineEventIds: ID[]
+  newlyRequiredStateFactCategories: Record<ID, StateFactCategory[]>
+  warnings: string[]
+  reason: string
+}
+
+export type StoryDirectionGuideStatus = 'draft' | 'active' | 'archived'
+export type StoryDirectionGuideSource = 'user_polished' | 'ai_generated' | 'mixed'
+export type StoryDirectionHorizon = 5 | 10
+
+export interface StoryDirectionChapterBeat {
+  id: ID
+  chapterOffset: number
+  chapterOrder: number | null
+  goal: string
+  conflict: string
+  characterFocus: string
+  foreshadowingToUse: string
+  foreshadowingNotToReveal: string
+  suspenseToKeep: string
+  endingHook: string
+  readerEmotion: string
+  mustAvoid: string
+  notes: string
+}
+
+export interface StoryDirectionGuide {
+  id: ID
+  projectId: ID
+  title: string
+  status: StoryDirectionGuideStatus
+  source: StoryDirectionGuideSource
+  horizonChapters: StoryDirectionHorizon
+  startChapterOrder: number
+  endChapterOrder: number
+  userRawIdea: string
+  userPolishedIdea: string
+  aiGuidance: string
+  strategicTheme: string
+  coreDramaticPromise: string
+  emotionalCurve: string
+  characterArcDirectives: string
+  foreshadowingDirectives: string
+  constraints: string
+  forbiddenTurns: string
+  chapterBeats: StoryDirectionChapterBeat[]
+  generatedFromStageSummaryIds: ID[]
+  generatedFromChapterIds: ID[]
+  warnings: string[]
+  createdAt: string
+  updatedAt: string
+}
+
+export interface StoryDirectionPolishResult {
+  polishedIdea: string
+  preservedUserIntent: string
+  assumptions: string[]
+  constraints: string[]
+  warnings: string[]
+}
+
+export interface StoryDirectionGenerationResult {
+  title: string
+  aiGuidance: string
+  strategicTheme: string
+  coreDramaticPromise: string
+  emotionalCurve: string
+  characterArcDirectives: string
+  foreshadowingDirectives: string
+  constraints: string
+  forbiddenTurns: string
+  chapterBeats: Omit<StoryDirectionChapterBeat, 'id'>[]
+  warnings: string[]
+}
+
 export interface PromptVersion {
   id: ID
   projectId: ID
@@ -510,6 +593,7 @@ export interface PromptContextSnapshot {
   foreshadowingTreatmentOverrides: Record<ID, ForeshadowingTreatmentMode>
   chapterTask: ChapterTask
   contextNeedPlan: ContextNeedPlan | null
+  storyDirectionGuide: StoryDirectionGuide | null
   finalPrompt: string
   estimatedTokens: number
   source: PromptContextSnapshotSource
@@ -528,6 +612,7 @@ export interface BuildPromptResult {
   foreshadowingTreatmentOverrides: Record<ID, ForeshadowingTreatmentMode>
   chapterTask: ChapterTask
   contextNeedPlan: ContextNeedPlan | null
+  storyDirectionGuide: StoryDirectionGuide | null
   continuityBridge: ChapterContinuityBridge | null
   continuitySource: ContinuitySource | null
   compressionRecords: ContextCompressionRecord[]
@@ -1056,6 +1141,7 @@ export interface GenerationRunTrace {
   selectedStageSummaryIds: ID[]
   selectedCharacterIds: ID[]
   selectedForeshadowingIds: ID[]
+  selectedTimelineEventIds: ID[]
   foreshadowingTreatmentModes: Record<ID, ForeshadowingTreatmentMode>
   foreshadowingTreatmentOverrides: Record<ID, ForeshadowingTreatmentMode>
   omittedContextItems: OmittedContextItem[]
@@ -1086,6 +1172,13 @@ export interface GenerationRunTrace {
   characterStateWarnings: string[]
   characterStateIssueIds: ID[]
   noveltyAuditResult: NoveltyAuditResult | null
+  storyDirectionGuideId: ID | null
+  storyDirectionGuideSource: StoryDirectionGuideSource | null
+  storyDirectionGuideHorizon: StoryDirectionHorizon | null
+  storyDirectionGuideStartChapterOrder: number | null
+  storyDirectionGuideEndChapterOrder: number | null
+  storyDirectionBeatId: ID | null
+  storyDirectionAppliedToChapterTask: boolean
   createdAt: string
   updatedAt: string
 }
@@ -1172,6 +1265,7 @@ export interface AppData {
   stageSummaries: StageSummary[]
   promptVersions: PromptVersion[]
   promptContextSnapshots: PromptContextSnapshot[]
+  storyDirectionGuides: StoryDirectionGuide[]
   contextNeedPlans: ContextNeedPlan[]
   chapterContinuityBridges: ChapterContinuityBridge[]
   chapterGenerationJobs: ChapterGenerationJob[]
@@ -1205,5 +1299,6 @@ export interface PromptBuildInput {
   budgetProfile?: ContextBudgetProfile
   explicitContextSelection?: ContextSelectionResult
   contextNeedPlan?: ContextNeedPlan | null
+  storyDirectionGuide?: StoryDirectionGuide | null
   config: PromptConfig
 }

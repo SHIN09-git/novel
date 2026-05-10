@@ -65,6 +65,11 @@ export function buildRunTraceSummary(
     omittedContextItems: trace.omittedContextItems,
     contextWarnings: trace.contextWarnings,
     contextNeedPlanId: trace.contextNeedPlanId,
+    storyDirectionGuideId: trace.storyDirectionGuideId,
+    storyDirectionGuideSource: trace.storyDirectionGuideSource,
+    storyDirectionGuideHorizon: trace.storyDirectionGuideHorizon,
+    storyDirectionBeatId: trace.storyDirectionBeatId,
+    storyDirectionAppliedToChapterTask: trace.storyDirectionAppliedToChapterTask,
     contextNeedPlanWarnings: trace.contextNeedPlanWarnings,
     contextNeedPlanMatchedItems: trace.contextNeedPlanMatchedItems,
     contextNeedPlanOmittedItems: trace.contextNeedPlanOmittedItems,
@@ -243,6 +248,12 @@ export function RunTracePanel({
                   <li>
                     上下文需求计划：{trace.contextNeedPlanId}；匹配 {trace.contextNeedPlanMatchedItems.length} 项，省略{' '}
                     {trace.contextNeedPlanOmittedItems.length} 项。
+                  </li>
+                ) : null}
+                {trace.storyDirectionGuideId ? (
+                  <li>
+                    剧情导向：{trace.storyDirectionGuideId}；覆盖第 {trace.storyDirectionGuideStartChapterOrder ?? '-'}-
+                    {trace.storyDirectionGuideEndChapterOrder ?? '-'} 章；{trace.storyDirectionAppliedToChapterTask ? '已转入本章任务' : '仅记录/快照模式未自动读取'}。
                   </li>
                 ) : null}
                 {trace.contextNeedPlanWarnings.map((warning) => (

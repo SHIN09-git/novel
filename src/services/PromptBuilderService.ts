@@ -31,15 +31,82 @@ import { ContextBudgetManager } from './ContextBudgetManager'
 import { formatContinuityBridgeForPrompt, resolveContinuityBridge } from './ContinuityService'
 import { TokenEstimator } from './TokenEstimator'
 import { CharacterStateService } from './CharacterStateService'
+import { StoryDirectionService } from './StoryDirectionService'
+
+const PLACEHOLDER_PATTERNS = [
+  /待补充/i,
+  /暂无/i,
+  /未填写/i,
+  /未设置/i,
+  /暂无与本章需求匹配/i,
+  /寰呰/i,
+  /鏆傛棤/i,
+  /鏈懡鍚/i,
+  /鏈/i
+]
+
+const AUDIT_LINE_PATTERNS = [
+  /^风险[:：]/,
+  /^审稿[:：]/,
+  /建议后续章节/,
+  /正文可能提前/,
+  /超出允许范围/,
+  /^椋庨櫓[:：]?/,
+  /^瀹＄[:：]?/,
+  /寤鸿鍚庣画/,
+  /姝ｆ枃鍙兘/,
+  /瓒呭嚭鍏佽鑼冨洿/
+]
+
+function isPlaceholderText(value: unknown): boolean {
+  if (value === null || value === undefined) return true
+  const text = String(value).trim()
+  if (!text) return true
+  return PLACEHOLDER_PATTERNS.some((pattern) => pattern.test(text))
+}
 
 function valueOrEmpty(value: string | number | null | undefined): string {
-  if (value === null || value === undefined || value === '') return '待补充'
-  return String(value)
+  if (isPlaceholderText(value)) return ''
+  return String(value).trim()
+}
+
+function fieldLine(label: string, value: unknown): string {
+  const text = valueOrEmpty(value as string | number | null | undefined)
+  return text ? `${label}${text}` : ''
+}
+
+function cleanPromptBody(raw: string): string {
+  const lines = raw
+    .split('\n')
+    .map((line) => line.trimEnd())
+    .filter((line) => {
+      const trimmed = line.trim()
+      if (!trimmed) return true
+      if (isPlaceholderText(trimmed)) return false
+      if (
+        /[:：]\s*$/.test(trimmed) &&
+        !/(规则|约束|字段|类别|更新|处理|状态|以下优先级处理)[:：]\s*$/.test(trimmed)
+      ) {
+        return false
+      }
+      if (/^[-*]\s*[:：]?\s*$/.test(trimmed)) return false
+      if (AUDIT_LINE_PATTERNS.some((pattern) => pattern.test(trimmed))) return false
+      return true
+    })
+
+  const compacted: string[] = []
+  for (const line of lines) {
+    if (!line.trim() && !compacted[compacted.length - 1]?.trim()) continue
+    compacted.push(line)
+  }
+  return compacted.join('\n').trim()
 }
 
 function section(title: string, enabled: boolean, body: string): string {
   if (!enabled) return ''
-  return `## ${title}\n${body.trim() || '待补充'}\n`
+  const cleaned = cleanPromptBody(body)
+  if (!cleaned) return ''
+  return `## ${title}\n${cleaned}\n`
 }
 
 interface PromptBlockDraft {
@@ -62,18 +129,20 @@ function renderPromptBlock(block: PromptBlockDraft): string {
 }
 
 function blockToOrderItem(block: PromptBlockDraft): PromptBlockOrderItem {
+  const rendered = renderPromptBlock(block)
+  const included = Boolean(rendered)
   return {
     id: block.id,
     title: block.title,
     kind: block.kind,
     priority: block.priority,
-    tokenEstimate: block.enabled ? TokenEstimator.estimate(renderPromptBlock(block)) : 0,
+    tokenEstimate: included ? TokenEstimator.estimate(rendered) : 0,
     source: block.source,
     sourceIds: block.sourceIds ?? [],
-    included: block.enabled,
+    included,
     compressed: block.compressed ?? false,
     forced: block.forced ?? false,
-    omittedReason: block.enabled ? null : block.omittedReason ?? '模块关闭或无可用内容。',
+    omittedReason: included ? null : block.omittedReason ?? '模块关闭或无可用内容。',
     reason: block.reason
   }
 }
@@ -154,8 +223,7 @@ function summarizeChapter(chapter: Chapter, includeBody: boolean): string {
     `角色变化：${valueOrEmpty(chapter.characterChanges)}`,
     `新增伏笔：${valueOrEmpty(chapter.newForeshadowing)}`,
     `已回收伏笔：${valueOrEmpty(chapter.resolvedForeshadowing)}`,
-    `结尾钩子：${valueOrEmpty(chapter.endingHook)}`,
-    `风险提醒：${valueOrEmpty(chapter.riskWarnings)}`
+    `结尾钩子：${valueOrEmpty(chapter.endingHook)}`
   ]
 
   if (includeBody && chapter.body.trim()) {
@@ -163,6 +231,50 @@ function summarizeChapter(chapter: Chapter, includeBody: boolean): string {
   }
 
   return lines.join('\n')
+}
+
+function normalizeDedupText(text: string): string {
+  return text
+    .replace(/\s+/g, '')
+    .replace(/[，。！？；：、,.!?;:"'“”‘’（）()【】\[\]《》<>]/g, '')
+    .toLowerCase()
+}
+
+function bridgeDedupFacts(bridge: ChapterContinuityBridge | null): string[] {
+  if (!bridge) return []
+  return [
+    bridge.lastSceneLocation,
+    bridge.lastPhysicalState,
+    bridge.lastEmotionalState,
+    bridge.lastUnresolvedAction,
+    bridge.lastDialogueOrThought,
+    bridge.immediateNextBeat,
+    bridge.mustContinueFrom,
+    bridge.mustNotReset,
+    bridge.openMicroTensions
+  ]
+    .map(valueOrEmpty)
+    .map(normalizeDedupText)
+    .filter((text) => text.length >= 8)
+}
+
+function dedupeAgainstBridge(text: string, bridge: ChapterContinuityBridge | null): string {
+  const bridgeFacts = bridgeDedupFacts(bridge)
+  if (!bridgeFacts.length) return cleanPromptBody(text)
+  const seen = new Set<string>()
+  return cleanPromptBody(
+    text
+      .split('\n')
+      .filter((line) => {
+        const normalized = normalizeDedupText(line)
+        if (!normalized) return true
+        if (seen.has(normalized)) return false
+        seen.add(normalized)
+        if (normalized.length < 8) return true
+        return !bridgeFacts.some((fact) => normalized.includes(fact) || fact.includes(normalized))
+      })
+      .join('\n')
+  )
 }
 
 function formatCompressedChapterRecap(chapter: Chapter, record: ContextCompressionRecord): string {
@@ -211,18 +323,13 @@ function recentCharacterLogs(characterId: ID, logs: CharacterStateLog[]): Charac
 function formatCharacter(character: Character, logs: CharacterStateLog[]): string {
   const lines = [
     `### ${character.name || '未命名角色'}${character.isMain ? '（主要角色）' : ''}`,
-    `角色定位：${valueOrEmpty(character.role)}`,
-    `表层目标：${valueOrEmpty(character.surfaceGoal)}`,
-    `深层欲望：${valueOrEmpty(character.deepDesire)}`,
-    `核心恐惧：${valueOrEmpty(character.coreFear)}`,
-    `自我欺骗：${valueOrEmpty(character.selfDeception)}`,
+    `本章定位：${valueOrEmpty(character.role)}`,
+    `当前表层目标：${valueOrEmpty(character.surfaceGoal)}`,
     `当前知道的信息：${valueOrEmpty(character.knownInformation)}`,
     `当前不知道的信息：${valueOrEmpty(character.unknownInformation)}`,
-    `与主角关系状态：${valueOrEmpty(character.protagonistRelationship)}`,
-    `当前情绪状态：${valueOrEmpty(character.emotionalState)}`,
-    `下一阶段行为倾向：${valueOrEmpty(character.nextActionTendency)}`,
-    `禁止写法：${valueOrEmpty(character.forbiddenWriting)}`,
-    `最近一次变化章节：${valueOrEmpty(character.lastChangedChapter)}`
+    `当前情绪/关系状态：${[valueOrEmpty(character.emotionalState), valueOrEmpty(character.protagonistRelationship)].filter(Boolean).join('；')}`,
+    `本章可行动作或行为倾向：${valueOrEmpty(character.nextActionTendency)}`,
+    `禁止写法：${valueOrEmpty(character.forbiddenWriting)}`
   ]
 
   const recentLogs = recentCharacterLogs(character.id, logs)
@@ -327,7 +434,7 @@ function formatStateFact(fact: CharacterStateFact): string {
   const unit = fact.unit ? ` ${fact.unit}` : ''
   const source = fact.sourceChapterOrder ? `来源：第 ${fact.sourceChapterOrder} 章。` : ''
   const policy = fact.trackingLevel === 'hard' ? '硬状态' : fact.trackingLevel === 'soft' ? '软状态' : '备注'
-  return `- ${fact.label}：${value}${unit}。（${policy}；${source || '来源待补'}）`
+  return `- ${fact.label}：${value}${unit}。（${[policy, source].filter(Boolean).join('；')}）`
 }
 
 function formatCharacterStateLedgerSlice(
@@ -338,7 +445,7 @@ function formatCharacterStateLedgerSlice(
 ): string {
   const characterIds = characters.map((character) => character.id)
   const selectedFacts = CharacterStateService.getRelevantCharacterStatesForPrompt(characterIds, plan, targetChapterOrder, facts)
-  if (!selectedFacts.length) return '暂无与本章需求匹配的角色状态账本事实。'
+  if (!selectedFacts.length) return ''
   const names = new Map(characters.map((character) => [character.id, character.name || '未命名角色']))
   const grouped = selectedFacts.reduce<Record<ID, CharacterStateFact[]>>((acc, fact) => {
     acc[fact.characterId] = [...(acc[fact.characterId] ?? []), fact]
@@ -432,7 +539,7 @@ function treatmentGroupInstruction(mode: ReturnType<typeof effectiveTreatmentMod
 }
 
 function formatForeshadowingOperationTable(items: Foreshadowing[], config: PromptConfig): string {
-  if (!items.length) return '暂无需要进入本章 prompt 的未回收中/高权重伏笔。'
+  if (!items.length) return ''
   const grouped = items.reduce<Record<string, Foreshadowing[]>>((acc, item) => {
     const mode = effectiveTreatmentMode(item, config.foreshadowingTreatmentOverrides)
     const key = mode === 'hidden' || mode === 'pause' ? 'blocked' : mode
@@ -457,10 +564,12 @@ function formatForeshadowingOperationTable(items: Foreshadowing[], config: Promp
           return [
             `- 【${item.title || '未命名伏笔'}】`,
             `  - 状态：${foreshadowingStatusLabel(item.status)}；权重：${foreshadowingWeightLabel(item.weight)}；处理方式：${treatmentLabel(actualMode)}${isOverride ? '（本章 override / 手动强选）' : ''}`,
-            `  - 首次出现：第 ${valueOrEmpty(item.firstChapterOrder)} 章；预计回收：${valueOrEmpty(item.expectedPayoff)}`,
-            `  - 本章允许行为：${treatmentPromptRules(actualMode).join('；')}`,
-            `  - 本章禁止行为：${isBlocked ? '主动提及、推进、解释、回收。' : '越过当前 treatmentMode，提前解释、揭底或回收。'}`,
-            item.notes ? `  - 注意事项：${item.notes}` : ''
+            valueOrEmpty(item.firstChapterOrder) ? `  - 首次出现：第 ${valueOrEmpty(item.firstChapterOrder)} 章` : '',
+            fieldLine('  - 预计回收方向：', item.expectedPayoff),
+            fieldLine('  - 回收方式：', item.payoffMethod),
+            fieldLine('  - 关联主线：', item.relatedMainPlot),
+            isBlocked && isOverride ? '  - 本章限制：虽被手动强选，但仍应保持暂停/隐藏，不主动推进、不解释、不回收。' : '',
+            fieldLine('  - 注意事项：', item.notes)
           ]
             .filter(Boolean)
             .join('\n')
@@ -750,21 +859,33 @@ export class PromptBuilderService {
     const latestProgress =
       previousChapters
         .slice(-1)
-        .map((chapter) => `截至第 ${chapter.order} 章：${chapter.summary || '待补充最近章节摘要。'}`)
-        .join('\n') || '暂无最近章节摘要，请先填写章节复盘。'
+        .map((chapter) => (valueOrEmpty(chapter.summary) ? `截至第 ${chapter.order} 章：${valueOrEmpty(chapter.summary)}` : ''))
+        .filter(Boolean)
+        .join('\n')
+    const dedupedLatestProgress = dedupeAgainstBridge(latestProgress, continuity.bridge)
 
     const task = config.task
     const taskText = [
-      `本章目标：${valueOrEmpty(task.goal)}`,
-      `本章必须推进的冲突：${valueOrEmpty(task.conflict)}`,
-      `本章必须保留的悬念：${valueOrEmpty(task.suspenseToKeep)}`,
-      `本章允许回收的伏笔：${valueOrEmpty(task.allowedPayoffs)}`,
-      `本章禁止回收的伏笔：${valueOrEmpty(task.forbiddenPayoffs)}`,
-      `本章结尾钩子：${valueOrEmpty(task.endingHook)}`,
-      `本章读者应该产生的情绪：${valueOrEmpty(task.readerEmotion)}`,
-      `本章预计字数：${valueOrEmpty(task.targetWordCount)}`,
-      `文风要求：${valueOrEmpty(task.styleRequirement)}`
-    ].join('\n')
+      fieldLine('本章目标：', task.goal),
+      fieldLine('本章必须推进的冲突：', task.conflict),
+      fieldLine('本章必须保留的悬念：', task.suspenseToKeep),
+      fieldLine('本章允许回收的伏笔：', task.allowedPayoffs),
+      fieldLine('本章禁止回收的伏笔：', task.forbiddenPayoffs),
+      fieldLine('本章结尾钩子：', task.endingHook),
+      fieldLine('本章读者应该产生的情绪：', task.readerEmotion),
+      fieldLine('本章预计字数：', task.targetWordCount),
+      fieldLine('文风要求：', task.styleRequirement)
+    ]
+      .filter(Boolean)
+      .join('\n')
+    const taskWarnings = [
+      ['本章目标', task.goal],
+      ['本章必须推进的冲突', task.conflict],
+      ['本章结尾钩子', task.endingHook],
+      ['本章读者应该产生的情绪', task.readerEmotion]
+    ]
+      .filter(([, value]) => isPlaceholderText(value))
+      .map(([label]) => `章节任务字段缺失：${label}`)
 
     const characterStateText = [
       '【角色状态账本切片】',
@@ -776,7 +897,7 @@ export class PromptBuilderService {
               contextNeedPlan ? formatCharacterNeedSlice(character, characterStateLogs, contextNeedPlan) : formatCharacter(character, characterStateLogs)
             )
             .join('\n\n')
-        : '暂无主要角色或本章相关角色。'
+        : ''
     ]
       .filter(Boolean)
       .join('\n\n')
@@ -784,14 +905,18 @@ export class PromptBuilderService {
     const recentChapterText = recentChapters
       .map((chapter) => {
         const compression = compressionByChapterId.get(chapter.id)
-        return compression ? formatCompressedChapterRecap(chapter, compression) : summarizeChapter(chapter, config.mode === 'full')
+        const recap = compression ? formatCompressedChapterRecap(chapter, compression) : summarizeChapter(chapter, config.mode === 'full')
+        return dedupeAgainstBridge(recap, continuity.bridge)
       })
       .filter(Boolean)
       .join('\n\n')
 
+    const storyDirectionGuide = workingInput.storyDirectionGuide ?? null
+    const storyDirectionText = StoryDirectionService.formatForPrompt(storyDirectionGuide, target)
+
     const remoteSummaryText = selectedSummaries.length
       ? selectedSummaries.map(formatStageSummary).join('\n\n')
-      : '暂无阶段摘要档案。标准模式默认保留最近 2 个阶段摘要，完整模式保留全部阶段摘要。'
+      : ''
 
     const blocks: PromptBlockDraft[] = [
       {
@@ -860,6 +985,17 @@ export class PromptBuilderService {
         reason: '将 treatmentMode 转译为本章可暗示、可推进、可误导、可回收和禁止提及的操作表。'
       },
       {
+        id: 'story-direction-guide',
+        title: '6. 中期剧情导向 StoryDirectionGuide',
+        kind: 'story_direction',
+        priority: 6,
+        source: 'story_direction_guides',
+        sourceIds: storyDirectionGuide ? [storyDirectionGuide.id] : [],
+        enabled: Boolean(storyDirectionGuide),
+        body: storyDirectionText,
+        reason: '提供未来 5/10 章的软性剧情推进方向；不得覆盖上一章衔接、本章任务、角色硬状态和伏笔规则。'
+      },
+      {
         id: 'current-progress',
         title: '6. 当前剧情状态',
         kind: 'current_progress',
@@ -867,7 +1003,7 @@ export class PromptBuilderService {
         source: 'chapter_recaps',
         sourceIds: previousChapters.slice(-1).map((chapter) => chapter.id),
         enabled: config.modules.progress,
-        body: latestProgress,
+        body: dedupedLatestProgress,
         reason: '只提供当前位置的剧情状态，不抢占上一章衔接和任务契约。'
       },
       {
@@ -936,9 +1072,9 @@ export class PromptBuilderService {
         sourceIds: bible ? [bible.projectId] : [],
         enabled: config.modules.forbidden,
         body: [
-          `禁用套路：${bible?.bannedTropes || '待补充'}`,
-          `不可违背设定：${bible?.immutableFacts || '待补充'}`,
-          `禁止提前回收：${task.forbiddenPayoffs || '待补充'}`,
+          fieldLine('禁用套路：', bible?.bannedTropes),
+          fieldLine('不可违背设定：', bible?.immutableFacts),
+          fieldLine('禁止提前回收：', task.forbiddenPayoffs),
           '不得让已明确的角色认知突然消失；不得无铺垫改变力量体系规则；不得把阶段摘要已经归档的信息重新写成新发现。',
           'NoveltyPolicy：不得新增未铺垫救命规则、临时系统权限、新管理员层级、新核心机制或给未知人物随意命名，除非本章任务明确允许。',
           '不得为了让主角脱困而临时新增刚好可用的规则；解决危机必须来自已提供规则、已铺垫伏笔、角色已有能力或本章任务明确允许的机制。',
@@ -957,11 +1093,10 @@ export class PromptBuilderService {
         source: 'prompt_builder',
         enabled: config.modules.outputFormat,
         body: [
-          'Novelty guardrail: do not invent unforeshadowed rescue rules, temporary system permissions, new administrator ranks, new core mechanics, or arbitrary names for unknown people unless the task explicitly allows them.',
-          'Rule horror / infinite-flow constraint: any new rule must have prior context, task permission, cost, or risk. Do not use system-panel addenda as a free deus-ex-machina escape.',
           `请直接输出第 ${target} 章正文。`,
           '保留清晰场景推进、人物动作、对话和心理变化。',
           '章节结尾必须形成钩子，但不要用作者说明替代正文。',
+          '不得新增无铺垫救命规则、临时权限、新管理员、新组织层级或新核心机制；所有新规则必须来自已有线索、本章任务许可，并带来代价或更大风险。',
           '不要输出大纲、分析、注释或 Markdown 标题，除非用户另行要求。'
         ].join('\n'),
         reason: '最后限定输出形态，避免模型输出分析、任务书或 Markdown 大纲。'
@@ -984,10 +1119,11 @@ export class PromptBuilderService {
       foreshadowingTreatmentOverrides: config.foreshadowingTreatmentOverrides ?? {},
       chapterTask: config.task,
       contextNeedPlan,
+      storyDirectionGuide,
       continuityBridge: continuity.bridge,
       continuitySource: continuity.source,
       compressionRecords: budgetSelection?.compressionRecords ?? [],
-      warnings: [...(budgetSelection?.warnings ?? []), ...continuity.warnings]
+      warnings: [...(budgetSelection?.warnings ?? []), ...continuity.warnings, ...taskWarnings]
     }
   }
 

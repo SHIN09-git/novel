@@ -1,6 +1,6 @@
 import { defaultModulesForMode } from '../../../shared/defaults'
 import { shouldRecommendForeshadowing } from '../../../shared/foreshadowingTreatment'
-import type { AppData, BuildPromptResult, ChapterTask, Character, ContextBudgetMode, ContextBudgetProfile, ContextNeedPlan, ContextSelectionResult, Foreshadowing, ForeshadowingTreatmentMode, ID, Project } from '../../../shared/types'
+import type { AppData, BuildPromptResult, ChapterTask, Character, ContextBudgetMode, ContextBudgetProfile, ContextNeedPlan, ContextSelectionResult, Foreshadowing, ForeshadowingTreatmentMode, ID, Project, StoryDirectionGuide } from '../../../shared/types'
 import { ContextBudgetManager } from '../../../services/ContextBudgetManager'
 import { parseChapterNumbersFromText, PromptBuilderService } from '../../../services/PromptBuilderService'
 import { createPipelinePromptConfigFromSelection } from './contextSelectionConfig'
@@ -85,10 +85,11 @@ export function buildPipelineContext(
   emotion: string,
   wordCount: string,
   budgetProfile?: ContextBudgetProfile,
-  explicitSelection?: ContextSelectionResult
+  explicitSelection?: ContextSelectionResult,
+  storyDirectionGuide?: StoryDirectionGuide | null
 ): string {
   if (budgetProfile && explicitSelection) {
-    return buildPipelineContextFromSelection(project, data, targetChapterOrder, emotion, wordCount, budgetProfile, explicitSelection)
+    return buildPipelineContextFromSelection(project, data, targetChapterOrder, emotion, wordCount, budgetProfile, explicitSelection, null, storyDirectionGuide)
   }
 
   const scoped = projectData(data, project.id)
@@ -124,7 +125,8 @@ export function buildPipelineContext(
       selectedCharacterIds: autoCharacters.map((character) => character.id),
       selectedForeshadowingIds: autoForeshadowings.map((item) => item.id)
     },
-    budgetProfile
+    budgetProfile,
+    storyDirectionGuide
   })
 }
 
@@ -136,9 +138,10 @@ export function buildPipelineContextFromSelection(
   wordCount: string,
   budgetProfile: ContextBudgetProfile,
   selection: ContextSelectionResult,
-  contextNeedPlan?: ContextNeedPlan | null
+  contextNeedPlan?: ContextNeedPlan | null,
+  storyDirectionGuide?: StoryDirectionGuide | null
 ): string {
-  return buildPipelineContextResultFromSelection(project, data, targetChapterOrder, emotion, wordCount, budgetProfile, selection, contextNeedPlan).finalPrompt
+  return buildPipelineContextResultFromSelection(project, data, targetChapterOrder, emotion, wordCount, budgetProfile, selection, contextNeedPlan, storyDirectionGuide).finalPrompt
 }
 
 export function buildPipelineContextResultFromSelection(
@@ -149,7 +152,8 @@ export function buildPipelineContextResultFromSelection(
   wordCount: string,
   budgetProfile: ContextBudgetProfile,
   selection: ContextSelectionResult,
-  contextNeedPlan?: ContextNeedPlan | null
+  contextNeedPlan?: ContextNeedPlan | null,
+  storyDirectionGuide?: StoryDirectionGuide | null
 ): BuildPromptResult {
   const scoped = projectData(data, project.id)
   const config = createPipelinePromptConfigFromSelection({
@@ -174,6 +178,7 @@ export function buildPipelineContextResultFromSelection(
     stageSummaries: scoped.stageSummaries,
     chapterContinuityBridges: scoped.chapterContinuityBridges,
     contextNeedPlan: contextNeedPlan ?? null,
+    storyDirectionGuide: storyDirectionGuide ?? null,
     config,
     budgetProfile,
     explicitContextSelection: selection

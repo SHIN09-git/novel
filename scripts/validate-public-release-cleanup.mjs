@@ -79,6 +79,11 @@ const filesToScan = walk('.')
   .filter((file) => !file.startsWith(`out${'\\'}`))
   .filter((file) => !file.startsWith(`tmp${'\\'}`))
   .filter((file) => !file.startsWith(`.npm-cache${'\\'}`))
+  .filter((file) => !file.startsWith(`.electron-builder-cache${'\\'}`))
+  .filter((file) => !file.startsWith(`dist${'\\'}`))
+  .filter((file) => !file.startsWith(`dist-launcher${'\\'}`))
+  .filter((file) => !file.startsWith(`release${'\\'}`))
+  .filter((file) => !file.startsWith(`releases${'\\'}`))
   .filter((file) => !/\.(png|jpg|jpeg|gif|ico|exe|dll|bin)$/i.test(file))
 
 const suspicious = []

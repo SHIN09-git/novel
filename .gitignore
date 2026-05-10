@@ -2,6 +2,7 @@ node_modules/
 out/
 dist/
 .npm-cache/
+.electron-builder-cache/
 tmp/
 *.log
 .DS_Store

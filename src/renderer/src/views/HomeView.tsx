@@ -89,6 +89,7 @@ export function HomeView({
         stageSummaries: current.stageSummaries.filter((item) => item.projectId !== project.id),
         promptVersions: current.promptVersions.filter((item) => item.projectId !== project.id),
         promptContextSnapshots: current.promptContextSnapshots.filter((item) => item.projectId !== project.id),
+        storyDirectionGuides: current.storyDirectionGuides.filter((item) => item.projectId !== project.id),
         chapterContinuityBridges: current.chapterContinuityBridges.filter((item) => item.projectId !== project.id),
         chapterGenerationJobs: current.chapterGenerationJobs.filter((item) => item.projectId !== project.id),
         chapterGenerationSteps: current.chapterGenerationSteps.filter((item) => !projectJobIds.has(item.jobId)),

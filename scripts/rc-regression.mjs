@@ -453,9 +453,13 @@ function makeRcData() {
   }
 
   const steps = [
+    'context_need_planning',
     'context_budget_selection',
     'build_context',
     'generate_chapter_plan',
+    'context_need_planning_from_plan',
+    'context_budget_selection_delta',
+    'rebuild_context_with_plan',
     'generate_chapter_draft',
     'generate_chapter_review',
     'propose_character_updates',
@@ -761,6 +765,7 @@ function makeRcData() {
         selectedStageSummaryIds: [stageSummary.id],
         selectedCharacterIds: [protagonistId, heroineId, villainId],
         selectedForeshadowingIds: foreshadowings.slice(1, 4).map((item) => item.id),
+        selectedTimelineEventIds: [],
         foreshadowingTreatmentModes: Object.fromEntries(foreshadowings.slice(1, 4).map((item) => [item.id, item.treatmentMode])),
         foreshadowingTreatmentOverrides: {
           [foreshadowings[2].id]: 'advance'

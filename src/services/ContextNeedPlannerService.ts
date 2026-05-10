@@ -18,8 +18,10 @@ import type {
   StageSummary,
   StateFactCategory,
   StoryBible,
+  StoryDirectionGuide,
   TimelineEvent
 } from '../shared/types'
+import { StoryDirectionService } from './StoryDirectionService'
 
 interface BuildNeedPlanInput {
   project: Project
@@ -33,6 +35,8 @@ interface BuildNeedPlanInput {
   foreshadowing: Foreshadowing[]
   timelineEvents: TimelineEvent[]
   stageSummaries: StageSummary[]
+  storyDirectionGuide?: StoryDirectionGuide | null
+  storyDirectionPromptText?: string
   source?: ContextNeedPlanSource
 }
 
@@ -120,7 +124,9 @@ function inferRoleInChapter(character: Character, taskText: string): CharacterRo
 export class ContextNeedPlannerService {
   static buildFromChapterIntent(input: BuildNeedPlanInput): ContextNeedPlan {
     const timestamp = now()
-    const taskText = combinedTaskText(input.chapterTaskDraft)
+    const storyDirectionText =
+      input.storyDirectionPromptText ?? StoryDirectionService.formatForPrompt(input.storyDirectionGuide ?? null, input.targetChapterOrder)
+    const taskText = [combinedTaskText(input.chapterTaskDraft), storyDirectionText].map(textValue).filter(Boolean).join('\n')
     const sceneType = inferSceneType(input.chapterTaskDraft, input.continuityBridge)
     const relatedCharacterIds = new Set<ID>()
 

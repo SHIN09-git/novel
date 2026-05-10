@@ -41,6 +41,7 @@ export function createEmptyGenerationRunTrace(job: ChapterGenerationJob): Genera
     selectedStageSummaryIds: [],
     selectedCharacterIds: [],
     selectedForeshadowingIds: [],
+    selectedTimelineEventIds: [],
     foreshadowingTreatmentModes: {},
     foreshadowingTreatmentOverrides: {},
     omittedContextItems: [],
@@ -71,6 +72,13 @@ export function createEmptyGenerationRunTrace(job: ChapterGenerationJob): Genera
     characterStateWarnings: [],
     characterStateIssueIds: [],
     noveltyAuditResult: null,
+    storyDirectionGuideId: null,
+    storyDirectionGuideSource: null,
+    storyDirectionGuideHorizon: null,
+    storyDirectionGuideStartChapterOrder: null,
+    storyDirectionGuideEndChapterOrder: null,
+    storyDirectionBeatId: null,
+    storyDirectionAppliedToChapterTask: false,
     createdAt: timestamp,
     updatedAt: timestamp
   }

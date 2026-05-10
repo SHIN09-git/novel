@@ -23,6 +23,7 @@ import { ContextBudgetManager } from '../../../services/ContextBudgetManager'
 import { ContextNeedPlannerService } from '../../../services/ContextNeedPlannerService'
 import { endingExcerpt, resolveContinuityBridge } from '../../../services/ContinuityService'
 import { PromptBuilderService } from '../../../services/PromptBuilderService'
+import { StoryDirectionService } from '../../../services/StoryDirectionService'
 import { TokenEstimator } from '../../../services/TokenEstimator'
 import { useConfirm } from '../components/ConfirmDialog'
 import { NumberInput, SelectField, TextArea, TextInput, Toggle } from '../components/FormFields'
@@ -120,6 +121,10 @@ export function PromptBuilderView({ data, project, saveData, onSendToPipeline }:
     () => scoped.chapters.find((chapter) => chapter.order === targetChapterOrder - 1) ?? null,
     [scoped.chapters, targetChapterOrder]
   )
+  const activeStoryDirectionGuide = useMemo(
+    () => StoryDirectionService.getActiveGuideForChapter(data.storyDirectionGuides ?? [], project.id, targetChapterOrder),
+    [data.storyDirectionGuides, project.id, targetChapterOrder]
+  )
 
   function resetAutomaticSelection() {
     setSelectedForeshadowingIds(autoForeshadowings.map((item) => item.id))
@@ -156,6 +161,7 @@ export function PromptBuilderView({ data, project, saveData, onSendToPipeline }:
       chapterContinuityBridges: scoped.chapterContinuityBridges,
       budgetProfile,
       contextNeedPlan,
+      storyDirectionGuide: activeStoryDirectionGuide,
       config: {
         projectId: project.id,
         targetChapterOrder,
@@ -189,6 +195,8 @@ export function PromptBuilderView({ data, project, saveData, onSendToPipeline }:
       foreshadowing: scoped.foreshadowings,
       timelineEvents: scoped.timelineEvents,
       stageSummaries: scoped.stageSummaries,
+      storyDirectionGuide: activeStoryDirectionGuide,
+      storyDirectionPromptText: StoryDirectionService.formatForPrompt(activeStoryDirectionGuide, targetChapterOrder),
       source: 'prompt_builder'
     })
     setContextNeedPlan(plan)
@@ -245,6 +253,7 @@ export function PromptBuilderView({ data, project, saveData, onSendToPipeline }:
       foreshadowingTreatmentOverrides: result.foreshadowingTreatmentOverrides,
       chapterTask: result.chapterTask,
       contextNeedPlan: result.contextNeedPlan,
+      storyDirectionGuide: result.storyDirectionGuide,
       finalPrompt,
       estimatedTokens: TokenEstimator.estimate(finalPrompt),
       source,

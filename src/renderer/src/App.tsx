@@ -12,6 +12,7 @@ import { TimelineView } from './views/TimelineView'
 
 const ChaptersView = lazy(() => import('./views/ChaptersView').then((module) => ({ default: module.ChaptersView })))
 const PromptBuilderView = lazy(() => import('./views/PromptBuilderView').then((module) => ({ default: module.PromptBuilderView })))
+const StoryDirectionView = lazy(() => import('./views/StoryDirectionView').then((module) => ({ default: module.StoryDirectionView })))
 const GenerationPipelineView = lazy(() =>
   import('./views/GenerationPipelineView').then((module) => ({ default: module.GenerationPipelineView }))
 )
@@ -61,6 +62,8 @@ export default function App() {
         return <TimelineView data={activeData} project={activeProject} saveData={saveData} />
       case 'stages':
         return <StageSummaryView data={activeData} project={activeProject} saveData={saveData} />
+      case 'direction':
+        return <StoryDirectionView data={activeData} project={activeProject} saveData={saveData} />
       case 'prompt':
         return (
           <PromptBuilderView

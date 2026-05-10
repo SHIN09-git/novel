@@ -60,8 +60,10 @@ async function main() {
   )
   checks.push(
     assert(
-      promptBuilderSource.includes('Novelty guardrail') && promptBuilderSource.includes('deus-ex-machina escape'),
-      'PromptBuilderService includes novelty constraints in final prompt'
+      !promptBuilderSource.includes('Novelty guardrail:') &&
+        !promptBuilderSource.includes('Rule horror / infinite-flow constraint:') &&
+        promptBuilderSource.includes('NoveltyPolicy'),
+      'PromptBuilderService keeps novelty constraints in the Chinese final prompt without duplicate English guardrails'
     )
   )
   checks.push(

@@ -14,6 +14,7 @@ export function projectData(data: AppData, projectId: ID) {
     stageSummaries: data.stageSummaries.filter((item) => item.projectId === projectId),
     promptVersions: data.promptVersions.filter((item) => item.projectId === projectId),
     promptContextSnapshots: data.promptContextSnapshots.filter((item) => item.projectId === projectId),
+    storyDirectionGuides: (data.storyDirectionGuides ?? []).filter((item) => item.projectId === projectId),
     chapterContinuityBridges: data.chapterContinuityBridges.filter((item) => item.projectId === projectId),
     chapterGenerationJobs: data.chapterGenerationJobs.filter((item) => item.projectId === projectId),
     chapterGenerationSteps: data.chapterGenerationSteps,

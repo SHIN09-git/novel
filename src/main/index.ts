@@ -11,6 +11,9 @@ let credentialService: SecureCredentialService
 const isSmokeTest = process.env.NOVEL_DIRECTOR_SMOKE_TEST === '1'
 
 function createWindow(): void {
+  const windowIcon = app.isPackaged
+    ? join(process.resourcesPath, 'icon.png')
+    : join(process.cwd(), 'build', 'icon.png')
   const mainWindow = new BrowserWindow({
     width: 1280,
     height: 860,
@@ -18,6 +21,7 @@ function createWindow(): void {
     minHeight: 720,
     show: false,
     autoHideMenuBar: true,
+    icon: windowIcon,
     title: 'Novel Director',
     webPreferences: {
       preload: join(__dirname, '../preload/index.mjs'),

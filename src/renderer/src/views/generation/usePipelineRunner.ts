@@ -13,6 +13,7 @@ import type {
   ContextNeedPlan,
   ContextSelectionResult,
   ForcedContextBlock,
+  PlanContextGapAnalysisResult,
   PromptBlockOrderItem,
   GeneratedChapterDraft,
   CharacterStateChangeCandidate,
@@ -24,7 +25,8 @@ import type {
   PipelineContextSource,
   PipelineMode,
   Project,
-  PromptContextSnapshot
+  PromptContextSnapshot,
+  StoryDirectionGuide
 } from '../../../../shared/types'
 import { safeParseJson } from '../../../../services/AIJsonParser'
 import { AIService } from '../../../../services/AIService'
@@ -37,6 +39,8 @@ import { inferPromptBlockOrderFromPrompt } from '../../../../services/PromptBuil
 import { formatContinuityBridgeForPrompt, resolveContinuityBridge } from '../../../../services/ContinuityService'
 import { analyzeRedundancy } from '../../../../services/RedundancyService'
 import { NoveltyDetector } from '../../../../services/NoveltyDetector'
+import { PlanContextGapAnalyzerService } from '../../../../services/PlanContextGapAnalyzerService'
+import { StoryDirectionService } from '../../../../services/StoryDirectionService'
 import { newId, now } from '../../utils/format'
 import { createContextBudgetProfile, selectBudgetContext, buildPipelineContextResultFromSelection } from '../../utils/promptContext'
 import { releasePipelineRunLock, tryAcquirePipelineRunLock } from '../../utils/pipelineRunLock'
@@ -73,6 +77,9 @@ export const PIPELINE_STEP_ORDER: ChapterGenerationStepType[] = [
   'context_budget_selection',
   'build_context',
   'generate_chapter_plan',
+  'context_need_planning_from_plan',
+  'context_budget_selection_delta',
+  'rebuild_context_with_plan',
   'generate_chapter_draft',
   'generate_chapter_review',
   'propose_character_updates',
@@ -87,6 +94,9 @@ export const PIPELINE_STEP_LABELS: Record<ChapterGenerationStepType, string> = {
   context_budget_selection: '上下文预算选择',
   build_context: '构建上下文',
   generate_chapter_plan: '生成任务书',
+  context_need_planning_from_plan: '计划后需求补全',
+  context_budget_selection_delta: '补选上下文',
+  rebuild_context_with_plan: '重建计划上下文',
   generate_chapter_draft: '生成正文',
   generate_chapter_review: '复盘章节',
   propose_character_updates: '提取角色更新',
@@ -111,6 +121,15 @@ function pipelineContextFromStepOutput(output: string): string {
   if (parsed.ok && typeof parsed.data.finalPrompt === 'string' && parsed.data.finalPrompt.trim()) return parsed.data.finalPrompt
   if (parsed.ok && typeof parsed.data.context === 'string' && parsed.data.context.trim()) return parsed.data.context
   return output
+}
+
+function uniqueIds(ids: ID[]): ID[] {
+  return [...new Set(ids.filter(Boolean))]
+}
+
+function diffIds(next: ID[] = [], previous: ID[] = []): ID[] {
+  const previousSet = new Set(previous)
+  return uniqueIds(next.filter((id) => !previousSet.has(id)))
 }
 
 function summarizeSnapshot(snapshot: PromptContextSnapshot) {
@@ -158,15 +177,20 @@ function normalizePipelineOptions(
   }
 }
 
-function pipelineChapterTask(project: Project, options: ReturnType<typeof normalizePipelineOptions>): ChapterTask {
+function pipelineChapterTask(
+  project: Project,
+  options: ReturnType<typeof normalizePipelineOptions>,
+  activeStoryDirectionGuide?: StoryDirectionGuide | null
+): ChapterTask {
+  const directionPatch = StoryDirectionService.deriveChapterTaskPatch(activeStoryDirectionGuide ?? null, options.targetChapterOrder)
   return {
-    goal: `生成第 ${options.targetChapterOrder} 章草稿`,
-    conflict: '',
-    suspenseToKeep: '',
-    allowedPayoffs: '',
-    forbiddenPayoffs: '',
-    endingHook: '',
-    readerEmotion: options.readerEmotionTarget,
+    goal: directionPatch.goal || `生成第 ${options.targetChapterOrder} 章草稿`,
+    conflict: directionPatch.conflict || '',
+    suspenseToKeep: directionPatch.suspenseToKeep || '',
+    allowedPayoffs: directionPatch.allowedPayoffs || '',
+    forbiddenPayoffs: directionPatch.forbiddenPayoffs || '',
+    endingHook: directionPatch.endingHook || '',
+    readerEmotion: directionPatch.readerEmotion || options.readerEmotionTarget,
     targetWordCount: options.estimatedWordCount,
     styleRequirement: project.style
   }
@@ -416,10 +440,33 @@ export function usePipelineRunner({
       job.contextSource === 'prompt_snapshot' && job.promptContextSnapshotId
         ? working.promptContextSnapshots.find((item) => item.id === job.promptContextSnapshotId) ?? null
         : null
+    const activeStoryDirectionGuide =
+      job.contextSource === 'prompt_snapshot'
+        ? null
+        : StoryDirectionService.getActiveGuideForChapter(
+            working.storyDirectionGuides ?? [],
+            project.id,
+            options.targetChapterOrder
+          )
+    const activeStoryDirectionBeat = activeStoryDirectionGuide
+      ? StoryDirectionService.getBeatForChapter(activeStoryDirectionGuide, options.targetChapterOrder)
+      : null
+    const storyDirectionTracePatch = {
+      storyDirectionGuideId: activeStoryDirectionGuide?.id ?? null,
+      storyDirectionGuideSource: activeStoryDirectionGuide?.source ?? null,
+      storyDirectionGuideHorizon: activeStoryDirectionGuide?.horizonChapters ?? null,
+      storyDirectionGuideStartChapterOrder: activeStoryDirectionGuide?.startChapterOrder ?? null,
+      storyDirectionGuideEndChapterOrder: activeStoryDirectionGuide?.endChapterOrder ?? null,
+      storyDirectionBeatId: activeStoryDirectionBeat?.id ?? null,
+      storyDirectionAppliedToChapterTask: Boolean(activeStoryDirectionGuide)
+    }
     let context = ''
     let plan: ChapterPlan | null = null
     let draftResult: ChapterDraftResult | null = null
     let noveltyAuditResult: NoveltyAuditResult | null = null
+    let planGapAnalysis: PlanContextGapAnalysisResult | null = null
+    let contextNeedPlanFromPlan: ContextNeedPlan | null = null
+    let rebuiltContextFromPlan = false
     const steps = working.chapterGenerationSteps.filter((step) => step.jobId === jobId)
     const startIndex = PIPELINE_STEP_ORDER.indexOf(fromStep)
 
@@ -447,6 +494,25 @@ export function usePipelineRunner({
       const savedBudget = parseOutput<{ profile?: ContextBudgetProfile; selection?: ContextSelectionResult } | null>(budgetStep.output, null)
       if (savedBudget?.profile) budgetProfile = savedBudget.profile
       if (savedBudget?.selection) budgetSelection = savedBudget.selection
+    }
+    const planNeedStep = steps.find((step) => step.type === 'context_need_planning_from_plan')
+    if (planNeedStep?.output) {
+      planGapAnalysis = parseOutput<PlanContextGapAnalysisResult | null>(planNeedStep.output, null)
+      if (planGapAnalysis?.derivedContextNeedPlan) {
+        contextNeedPlanFromPlan = planGapAnalysis.derivedContextNeedPlan
+        if (job.contextSource !== 'prompt_snapshot') contextNeedPlan = contextNeedPlanFromPlan
+      }
+    }
+    const budgetDeltaStep = steps.find((step) => step.type === 'context_budget_selection_delta')
+    if (budgetDeltaStep?.output) {
+      const savedBudget = parseOutput<{ profile?: ContextBudgetProfile; selection?: ContextSelectionResult } | null>(budgetDeltaStep.output, null)
+      if (savedBudget?.profile) budgetProfile = savedBudget.profile
+      if (savedBudget?.selection) budgetSelection = savedBudget.selection
+    }
+    const rebuildContextStep = steps.find((step) => step.type === 'rebuild_context_with_plan')
+    if (rebuildContextStep?.output) {
+      context = pipelineContextFromStepOutput(rebuildContextStep.output)
+      if (context.trim()) rebuiltContextFromPlan = true
     }
 
     for (const type of PIPELINE_STEP_ORDER.slice(startIndex)) {
@@ -487,7 +553,7 @@ export function usePipelineRunner({
               project,
               storyBible: scoped.bible,
               targetChapterOrder: options.targetChapterOrder,
-              chapterTaskDraft: pipelineChapterTask(project, options),
+              chapterTaskDraft: pipelineChapterTask(project, options, activeStoryDirectionGuide),
               previousChapter,
               continuityBridge: continuityResult.bridge,
               characters: scoped.characters,
@@ -495,6 +561,8 @@ export function usePipelineRunner({
               foreshadowing: scoped.foreshadowings,
               timelineEvents: scoped.timelineEvents,
               stageSummaries: scoped.stageSummaries,
+              storyDirectionGuide: activeStoryDirectionGuide,
+              storyDirectionPromptText: StoryDirectionService.formatForPrompt(activeStoryDirectionGuide, options.targetChapterOrder),
               source: 'generation_pipeline'
             })
             working = {
@@ -525,7 +593,7 @@ export function usePipelineRunner({
           } else {
             budgetProfile = createContextBudgetProfile(project.id, options.budgetMode, options.budgetMaxTokens, `第 ${options.targetChapterOrder} 章流水线预算`)
             budgetSelection = selectBudgetContext(project, working, options.targetChapterOrder, budgetProfile, {
-              chapterTask: pipelineChapterTask(project, options),
+              chapterTask: pipelineChapterTask(project, options, activeStoryDirectionGuide),
               contextNeedPlan
             })
             working = {
@@ -547,7 +615,7 @@ export function usePipelineRunner({
           } else {
             if (!budgetSelection) {
               budgetSelection = selectBudgetContext(project, working, options.targetChapterOrder, budgetProfile, {
-                chapterTask: pipelineChapterTask(project, options),
+                chapterTask: pipelineChapterTask(project, options, activeStoryDirectionGuide),
                 contextNeedPlan
               })
             }
@@ -559,7 +627,8 @@ export function usePipelineRunner({
               options.estimatedWordCount,
               budgetProfile,
               budgetSelection,
-              contextNeedPlan
+              contextNeedPlan,
+              activeStoryDirectionGuide
             )
             context = promptResult.finalPrompt
             promptBlockOrder = promptResult.promptBlockOrder
@@ -621,6 +690,7 @@ export function usePipelineRunner({
           })
           const selectedCharacterIds = snapshot ? snapshot.selectedCharacterIds : budgetSelection?.selectedCharacterIds ?? []
           const selectedForeshadowingIds = snapshot ? snapshot.selectedForeshadowingIds : budgetSelection?.selectedForeshadowingIds ?? []
+          const selectedTimelineEventIds = snapshot ? snapshot.contextSelectionResult.selectedTimelineEventIds : budgetSelection?.selectedTimelineEventIds ?? []
           const treatmentOverrides = snapshot?.foreshadowingTreatmentOverrides ?? {}
           const includedCharacterStateFacts = CharacterStateService.getRelevantCharacterStatesForPrompt(
             selectedCharacterIds,
@@ -629,13 +699,15 @@ export function usePipelineRunner({
             working.characterStateFacts.filter((fact) => fact.projectId === project.id)
           )
           working = upsertGenerationRunTrace(working, job, {
+            ...storyDirectionTracePatch,
             targetChapterOrder: options.targetChapterOrder,
             promptContextSnapshotId: job.promptContextSnapshotId ?? null,
             contextSource: job.contextSource,
-            selectedChapterIds: budgetSelection?.selectedChapterIds ?? [],
-            selectedStageSummaryIds: budgetSelection?.selectedStageSummaryIds ?? [],
+            selectedChapterIds: snapshot ? snapshot.contextSelectionResult.selectedChapterIds : budgetSelection?.selectedChapterIds ?? [],
+            selectedStageSummaryIds: snapshot ? snapshot.contextSelectionResult.selectedStageSummaryIds : budgetSelection?.selectedStageSummaryIds ?? [],
             selectedCharacterIds,
             selectedForeshadowingIds,
+            selectedTimelineEventIds,
             foreshadowingTreatmentModes: buildForeshadowingTreatmentModes(working.foreshadowings, selectedForeshadowingIds, treatmentOverrides),
             foreshadowingTreatmentOverrides: treatmentOverrides,
             omittedContextItems: budgetSelection?.omittedItems ?? [],
@@ -696,8 +768,242 @@ export function usePipelineRunner({
           })
         }
 
+        if (type === 'context_need_planning_from_plan') {
+          if (!plan) throw new Error('缺少章节任务书，无法进行计划后上下文补全')
+          const analysis = PlanContextGapAnalyzerService.buildFromChapterPlan({
+            project,
+            targetChapterOrder: options.targetChapterOrder,
+            baseContextNeedPlan: contextNeedPlan,
+            plan,
+            characters: working.characters.filter((character) => character.projectId === project.id),
+            foreshadowings: working.foreshadowings.filter((item) => item.projectId === project.id),
+            timelineEvents: working.timelineEvents.filter((event) => event.projectId === project.id),
+            characterStateFacts: working.characterStateFacts.filter((fact) => fact.projectId === project.id)
+          })
+          planGapAnalysis =
+            job.contextSource === 'prompt_snapshot'
+              ? {
+                  ...analysis,
+                  warnings: [...analysis.warnings, 'Prompt 快照模式不会自动补选上下文；如任务书新增了角色、伏笔或时间线，请回到 Prompt 构建器重新保存快照。'],
+                  reason: 'Prompt 快照模式保持用户手动上下文，不自动重建。'
+                }
+              : analysis
+          if (job.contextSource !== 'prompt_snapshot') {
+            contextNeedPlanFromPlan = planGapAnalysis.derivedContextNeedPlan
+            contextNeedPlan = contextNeedPlanFromPlan
+            working = {
+              ...working,
+              contextNeedPlans: [contextNeedPlanFromPlan, ...working.contextNeedPlans.filter((item) => item.id !== contextNeedPlanFromPlan?.id)]
+            }
+          }
+          working = updateStepInData(working, step.id, {
+            status: 'completed',
+            output: serializeOutput(planGapAnalysis)
+          })
+        }
+
+        if (type === 'context_budget_selection_delta') {
+          if (job.contextSource === 'prompt_snapshot') {
+            if (!snapshot) throw new Error('Prompt 上下文快照已丢失，请重新构建上下文。')
+            budgetProfile = snapshot.budgetProfile
+            budgetSelection = snapshot.contextSelectionResult
+            working = updateStepInData(working, step.id, {
+              status: 'completed',
+              output: serializeOutput({
+                profile: budgetProfile,
+                selection: budgetSelection,
+                explanation: ContextBudgetManager.explainSelection(budgetSelection),
+                deltaFromPreviousSelection: {
+                  addedCharacterIds: [],
+                  addedForeshadowingIds: [],
+                  addedTimelineEventIds: [],
+                  addedChapterIds: [],
+                  addedStageSummaryIds: []
+                },
+                warning: 'Prompt 快照模式已跳过计划后二次补选，正文将继续使用快照上下文。'
+              })
+            })
+          } else {
+            const previousSelection = budgetSelection
+            const activeNeedPlan = contextNeedPlanFromPlan ?? contextNeedPlan
+            if (!activeNeedPlan) throw new Error('缺少上下文需求计划，无法进行计划后补选。')
+            budgetProfile = createContextBudgetProfile(project.id, options.budgetMode, options.budgetMaxTokens, `第 ${options.targetChapterOrder} 章计划后预算`)
+            budgetSelection = selectBudgetContext(project, working, options.targetChapterOrder, budgetProfile, {
+              characterIds: uniqueIds(activeNeedPlan.expectedCharacters.map((item) => item.characterId)),
+              foreshadowingIds: activeNeedPlan.requiredForeshadowingIds,
+              chapterTask: pipelineChapterTask(project, options, activeStoryDirectionGuide),
+              contextNeedPlan: activeNeedPlan
+            })
+            const deltaFromPreviousSelection = {
+              addedCharacterIds: diffIds(budgetSelection.selectedCharacterIds, previousSelection?.selectedCharacterIds ?? []),
+              addedForeshadowingIds: diffIds(budgetSelection.selectedForeshadowingIds, previousSelection?.selectedForeshadowingIds ?? []),
+              addedTimelineEventIds: diffIds(budgetSelection.selectedTimelineEventIds, previousSelection?.selectedTimelineEventIds ?? []),
+              addedChapterIds: diffIds(budgetSelection.selectedChapterIds, previousSelection?.selectedChapterIds ?? []),
+              addedStageSummaryIds: diffIds(budgetSelection.selectedStageSummaryIds, previousSelection?.selectedStageSummaryIds ?? [])
+            }
+            working = {
+              ...updateStepInData(working, step.id, {
+                status: 'completed',
+                output: serializeOutput({
+                  profile: budgetProfile,
+                  selection: budgetSelection,
+                  explanation: ContextBudgetManager.explainSelection(budgetSelection),
+                  deltaFromPreviousSelection
+                })
+              }),
+              contextBudgetProfiles: [budgetProfile, ...working.contextBudgetProfiles]
+            }
+          }
+        }
+
+        if (type === 'rebuild_context_with_plan') {
+          let promptBlockOrder: PromptBlockOrderItem[] = []
+          if (job.contextSource === 'prompt_snapshot') {
+            if (!snapshot) throw new Error('Prompt 上下文快照已丢失，请重新构建上下文。')
+            context = snapshot.finalPrompt
+            promptBlockOrder = inferPromptBlockOrderFromPrompt(context, 'prompt_context_snapshot')
+            rebuiltContextFromPlan = true
+          } else {
+            if (!budgetSelection) throw new Error('缺少计划后预算选择，无法重建上下文。')
+            const promptResult = buildPipelineContextResultFromSelection(
+              project,
+              working,
+              options.targetChapterOrder,
+              options.readerEmotionTarget,
+              options.estimatedWordCount,
+              budgetProfile,
+              budgetSelection,
+              contextNeedPlanFromPlan ?? contextNeedPlan,
+              activeStoryDirectionGuide
+            )
+            context = promptResult.finalPrompt
+            promptBlockOrder = promptResult.promptBlockOrder
+            rebuiltContextFromPlan = true
+          }
+          const continuityResult = resolveContinuityBridge({
+            projectId: project.id,
+            chapters: working.chapters.filter((chapter) => chapter.projectId === project.id),
+            bridges: working.chapterContinuityBridges.filter((bridge) => bridge.projectId === project.id),
+            targetChapterOrder: options.targetChapterOrder
+          })
+          if (continuityResult.bridge && !context.includes('上一章结尾衔接')) {
+            const bridgePrompt = formatContinuityBridgeForPrompt(continuityResult.bridge)
+            context = `${context}\n\n## 上一章结尾衔接\n${bridgePrompt}`
+            promptBlockOrder = [
+              ...promptBlockOrder,
+              {
+                id: 'forced-continuity-bridge',
+                title: '上一章结尾衔接',
+                kind: 'continuity_bridge',
+                priority: promptBlockOrder.length + 1,
+                tokenEstimate: TokenEstimator.estimate(bridgePrompt),
+                source: continuityResult.source ?? 'continuity_service',
+                sourceIds: [continuityResult.bridge.id],
+                included: true,
+                compressed: false,
+                forced: true,
+                omittedReason: null,
+                reason: '计划后重建上下文仍缺少上一章衔接时，由流水线作为 forced context 追加。'
+              }
+            ]
+          }
+          const continuityPromptBlock = continuityResult.bridge ? formatContinuityBridgeForPrompt(continuityResult.bridge) : ''
+          const forcedContextBlocks: ForcedContextBlock[] = continuityResult.bridge
+            ? [
+                {
+                  kind: 'continuity_bridge',
+                  sourceId: continuityResult.bridge.id,
+                  sourceType: continuityResult.source,
+                  sourceChapterId: continuityResult.bridge.fromChapterId,
+                  sourceChapterOrder: options.targetChapterOrder > 1 ? options.targetChapterOrder - 1 : null,
+                  title: '上一章结尾衔接',
+                  tokenEstimate: TokenEstimator.estimate(continuityPromptBlock)
+                }
+              ]
+            : []
+          const finalPromptTokenEstimate = TokenEstimator.estimate(context)
+          const selectedCharacterIds = snapshot ? snapshot.selectedCharacterIds : budgetSelection?.selectedCharacterIds ?? []
+          const selectedForeshadowingIds = snapshot ? snapshot.selectedForeshadowingIds : budgetSelection?.selectedForeshadowingIds ?? []
+          const selectedTimelineEventIds = snapshot ? snapshot.contextSelectionResult.selectedTimelineEventIds : budgetSelection?.selectedTimelineEventIds ?? []
+          const treatmentOverrides = snapshot?.foreshadowingTreatmentOverrides ?? {}
+          const activeNeedPlan = contextNeedPlanFromPlan ?? contextNeedPlan
+          const includedCharacterStateFacts = CharacterStateService.getRelevantCharacterStatesForPrompt(
+            selectedCharacterIds,
+            activeNeedPlan,
+            options.targetChapterOrder,
+            working.characterStateFacts.filter((fact) => fact.projectId === project.id)
+          )
+          working = updateStepInData(working, step.id, {
+            status: 'completed',
+            output: serializeOutput({
+              finalPrompt: context,
+              promptBlockOrder,
+              contextNeedPlanId: activeNeedPlan?.id ?? null,
+              selectedCharacterIds,
+              selectedForeshadowingIds,
+              selectedTimelineEventIds,
+              includedCharacterStateFactIds: includedCharacterStateFacts.map((fact) => fact.id),
+              warnings: [...(budgetSelection?.warnings ?? []), ...continuityResult.warnings, ...(planGapAnalysis?.warnings ?? [])]
+            })
+          })
+          working = upsertGenerationRunTrace(working, job, {
+            ...storyDirectionTracePatch,
+            targetChapterOrder: options.targetChapterOrder,
+            promptContextSnapshotId: job.promptContextSnapshotId ?? null,
+            contextSource: job.contextSource,
+            selectedChapterIds: snapshot ? snapshot.contextSelectionResult.selectedChapterIds : budgetSelection?.selectedChapterIds ?? [],
+            selectedStageSummaryIds: snapshot ? snapshot.contextSelectionResult.selectedStageSummaryIds : budgetSelection?.selectedStageSummaryIds ?? [],
+            selectedCharacterIds,
+            selectedForeshadowingIds,
+            selectedTimelineEventIds,
+            foreshadowingTreatmentModes: buildForeshadowingTreatmentModes(working.foreshadowings, selectedForeshadowingIds, treatmentOverrides),
+            foreshadowingTreatmentOverrides: treatmentOverrides,
+            omittedContextItems: budgetSelection?.omittedItems ?? [],
+            contextWarnings: [
+              ...(budgetSelection?.warnings ?? []),
+              ...continuityResult.warnings,
+              ...(planGapAnalysis?.warnings ?? []),
+              ...(snapshot && snapshot.targetChapterOrder !== options.targetChapterOrder
+                ? [`快照目标为第 ${snapshot.targetChapterOrder} 章，流水线目标为第 ${options.targetChapterOrder} 章。`]
+                : [])
+            ],
+            contextTokenEstimate: Math.max(0, finalPromptTokenEstimate - estimateForcedContextTokens(forcedContextBlocks)),
+            forcedContextBlocks,
+            compressionRecords: budgetSelection?.compressionRecords ?? [],
+            promptBlockOrder,
+            finalPromptTokenEstimate,
+            continuityBridgeId: continuityResult.bridge?.id ?? null,
+            continuitySource: continuityResult.source,
+            continuityWarnings: continuityResult.warnings,
+            contextNeedPlanId: activeNeedPlan?.id ?? null,
+            requiredCharacterCardFields: activeNeedPlan?.requiredCharacterCardFields ?? {},
+            requiredStateFactCategories: activeNeedPlan?.requiredStateFactCategories ?? {},
+            contextNeedPlanWarnings: activeNeedPlan?.warnings ?? [],
+            contextNeedPlanMatchedItems: [
+              ...(activeNeedPlan?.expectedCharacters.map((item) => item.characterId) ?? []),
+              ...(activeNeedPlan?.requiredForeshadowingIds ?? []),
+              ...(activeNeedPlan?.requiredTimelineEventIds ?? [])
+            ],
+            contextNeedPlanOmittedItems: (budgetSelection?.omittedItems ?? []).filter((item) =>
+              activeNeedPlan
+                ? activeNeedPlan.expectedCharacters.some((character) => character.characterId === item.id) ||
+                  activeNeedPlan.requiredForeshadowingIds.includes(item.id ?? '') ||
+                  activeNeedPlan.requiredTimelineEventIds.includes(item.id ?? '')
+                : false
+            ),
+            includedCharacterStateFactIds: includedCharacterStateFacts.map((fact) => fact.id),
+            characterStateWarnings: includedCharacterStateFacts.length
+              ? []
+              : activeNeedPlan
+                ? ['上下文需求计划要求角色状态类别，但本章没有匹配的状态账本事实。']
+                : [],
+            characterStateIssueIds: []
+          })
+        }
+
         if (type === 'generate_chapter_draft') {
           if (!plan) throw new Error('缺少章节任务书，无法生成正文')
+          if (job.contextSource !== 'prompt_snapshot' && !rebuiltContextFromPlan) throw new Error('缺少计划后重建上下文，无法生成正文。')
           let result = await aiService.generateChapterDraft(plan, context, {
             mode: options.pipelineMode,
             estimatedWordCount: options.estimatedWordCount,

@@ -15,7 +15,9 @@ import type {
   QualityGateIssue,
   RevisionGenerationRequest,
   RevisionResult,
-  StageSummary
+  StageSummary,
+  StoryDirectionGenerationResult,
+  StoryDirectionPolishResult
 } from '../shared/types'
 import type { QualityGateEvaluation } from './QualityGateService'
 import { AIClient } from './ai/AIClient'
@@ -23,12 +25,14 @@ import { ChapterReviewAI } from './ai/ChapterReviewAI'
 import { GenerationPipelineAI } from './ai/GenerationPipelineAI'
 import { QualityGateAI } from './ai/QualityGateAI'
 import { RevisionAI } from './ai/RevisionAI'
+import { StoryDirectionAI, type GenerateStoryDirectionGuideInput, type PolishStoryDirectionIdeaInput } from './ai/StoryDirectionAI'
 
 export class AIService {
   private readonly chapterReviewAI: ChapterReviewAI
   private readonly generationPipelineAI: GenerationPipelineAI
   private readonly qualityGateAI: QualityGateAI
   private readonly revisionAI: RevisionAI
+  private readonly storyDirectionAI: StoryDirectionAI
 
   constructor(settings?: AppSettings) {
     const client = new AIClient(settings)
@@ -36,6 +40,7 @@ export class AIService {
     this.generationPipelineAI = new GenerationPipelineAI(client)
     this.qualityGateAI = new QualityGateAI(client)
     this.revisionAI = new RevisionAI(client)
+    this.storyDirectionAI = new StoryDirectionAI(client)
   }
 
   generateChapterReview(chapterText: string, context: string): Promise<AIResult<ChapterReviewDraft>> {
@@ -120,6 +125,14 @@ export class AIService {
 
   compressPacing(chapterText: string, context: string): Promise<AIResult<RevisionResult>> {
     return this.revisionAI.compressPacing(chapterText, context)
+  }
+
+  polishStoryDirectionIdea(input: PolishStoryDirectionIdeaInput): Promise<AIResult<StoryDirectionPolishResult>> {
+    return this.storyDirectionAI.polishUserStoryDirectionIdea(input)
+  }
+
+  generateStoryDirectionGuide(input: GenerateStoryDirectionGuideInput): Promise<AIResult<StoryDirectionGenerationResult>> {
+    return this.storyDirectionAI.generateStoryDirectionGuide(input)
   }
 
   async buildNextChapterPrompt(context: string): Promise<string> {
