@@ -1,4 +1,5 @@
 import type { ChapterGenerationJob, GeneratedChapterDraft, MemoryUpdateCandidate, PromptContextSnapshot, QualityGateReport, ConsistencyReviewReport } from '../../../../shared/types'
+import { QUALITY_GATE_HUMAN_REVIEW_SCORE, QualityGateService } from '../../../../services/QualityGateService'
 
 export function PipelineRiskBanner({
   job,
@@ -25,6 +26,7 @@ export function PipelineRiskBanner({
 
   if (job?.status === 'failed') risks.push(job.errorMessage || '流水线失败，请查看失败步骤。')
   if (qualityReport && !qualityReport.pass) risks.push(`质量门禁未通过：总分 ${qualityReport.overallScore}。建议先修订。`)
+  else if (qualityReport && QualityGateService.shouldRequireHumanReview(qualityReport)) risks.push(`质量门禁已通过但低于人工确认线 ${QUALITY_GATE_HUMAN_REVIEW_SCORE} 分或存在关键维度风险：总分 ${qualityReport.overallScore}。接受前请人工确认。`)
   if (highConsistencyCount > 0) risks.push(`存在 ${highConsistencyCount} 个 high severity 一致性问题。`)
   if (snapshot && snapshot.targetChapterOrder !== targetChapterOrder) risks.push('Prompt 快照目标章节与当前目标章节不一致。')
   if (pendingCandidates > 0) risks.push(`${pendingCandidates} 条长期记忆候选等待确认，未确认不会写入。`)

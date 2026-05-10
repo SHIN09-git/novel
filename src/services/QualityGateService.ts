@@ -22,7 +22,8 @@ export type QualityGateEvaluation = Pick<
   'overallScore' | 'pass' | 'dimensions' | 'issues' | 'requiredFixes' | 'optionalSuggestions'
 >
 
-export const QUALITY_GATE_PASS_SCORE = 80
+export const QUALITY_GATE_PASS_SCORE = 50
+export const QUALITY_GATE_HUMAN_REVIEW_SCORE = 80
 
 interface QualityGateAI {
   generateQualityGateReport(
@@ -478,13 +479,16 @@ export class QualityGateService {
       optionalSuggestions: evaluation.optionalSuggestions,
       createdAt: new Date().toISOString()
     }
-    report.pass = report.pass && !this.shouldRequireHumanReview(report)
+    report.pass =
+      report.overallScore >= QUALITY_GATE_PASS_SCORE &&
+      !report.issues.some((issue) => issue.severity === 'high')
     return report
   }
 
   static shouldRequireHumanReview(report: QualityGateReport): boolean {
     return (
-      report.overallScore < QUALITY_GATE_PASS_SCORE ||
+      !report.pass ||
+      report.overallScore < QUALITY_GATE_HUMAN_REVIEW_SCORE ||
       report.dimensions.characterConsistency < 70 ||
       report.dimensions.characterStateConsistency < 70 ||
       report.dimensions.foreshadowingControl < 70 ||

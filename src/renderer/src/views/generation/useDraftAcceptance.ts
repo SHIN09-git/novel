@@ -12,6 +12,7 @@ import {
   applyChapterCommitBundleToAppData,
   buildAcceptedDraftCommitBundle
 } from '../../../../services/ChapterCommitBundleService'
+import { QUALITY_GATE_HUMAN_REVIEW_SCORE, QualityGateService } from '../../../../services/QualityGateService'
 import type { ConfirmFn } from '../../components/ConfirmDialog'
 import { newId, now } from '../../utils/format'
 import { projectData } from '../../utils/projectData'
@@ -45,21 +46,25 @@ export function useDraftAcceptance({
   async function acceptDraft(draft: GeneratedChapterDraft) {
     if (draft.status !== 'draft') return
     const report = qualityGateReports.find((item) => item.draftId === draft.id) ?? null
-    if (report && !report.pass) {
+    if (report && QualityGateService.shouldRequireHumanReview(report)) {
       const forced = await confirmAction({
-        title: '质量门禁未通过',
-        message: `质量门禁未通过（${report.overallScore} 分）。确认仍要进入章节草稿吗？`,
+        title: report.pass ? '需要人工确认' : '质量门禁未通过',
+        message: report.pass
+          ? `质量门禁已通过（${report.overallScore} 分），但低于人工确认线 ${QUALITY_GATE_HUMAN_REVIEW_SCORE} 分或存在关键维度风险。确认仍要接受草稿吗？`
+          : `质量门禁未通过（${report.overallScore} 分）。确认仍要进入章节草稿吗？`,
         confirmLabel: '继续',
-        tone: 'danger'
+        tone: report.pass ? 'default' : 'danger'
       })
       if (!forced) return
-      const doubleConfirmed = await confirmAction({
-        title: '再次确认',
-        message: '低分草稿可能导致后续复盘和记忆候选质量下降。是否强制接受？',
-        confirmLabel: '强制接受',
-        tone: 'danger'
-      })
-      if (!doubleConfirmed) return
+      if (!report.pass) {
+        const doubleConfirmed = await confirmAction({
+          title: '再次确认',
+          message: '低分草稿可能导致后续复盘和记忆候选质量下降。是否强制接受？',
+          confirmLabel: '强制接受',
+          tone: 'danger'
+        })
+        if (!doubleConfirmed) return
+      }
     }
 
     const targetOrder = selectedJob?.targetChapterOrder ?? targetChapterOrder

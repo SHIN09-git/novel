@@ -284,10 +284,12 @@ async function main() {
 
   checks.push(
     assert(
-      qualitySource.includes('score < 80') &&
-        normalizerSource.includes('overallScore >= 80') &&
-        (await readFile(join(root, 'src', 'services', 'QualityGateService.ts'), 'utf-8')).includes('QUALITY_GATE_PASS_SCORE = 80'),
-      'quality gate pass threshold is consistently set to 80'
+      qualitySource.includes('score < 50') &&
+        qualitySource.includes('score < 80') &&
+        normalizerSource.includes('overallScore >= 50') &&
+        (await readFile(join(root, 'src', 'services', 'QualityGateService.ts'), 'utf-8')).includes('QUALITY_GATE_PASS_SCORE = 50') &&
+        (await readFile(join(root, 'src', 'services', 'QualityGateService.ts'), 'utf-8')).includes('QUALITY_GATE_HUMAN_REVIEW_SCORE = 80'),
+      'quality gate pass threshold is 50 and human review threshold is 80'
     )
   )
 

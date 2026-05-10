@@ -1,4 +1,5 @@
 import type { ChapterGenerationJob, GeneratedChapterDraft, PipelineContextSource, PromptContextSnapshot, QualityGateReport } from '../../../../shared/types'
+import { QualityGateService } from '../../../../services/QualityGateService'
 import { StatusBadge } from '../UI'
 
 function jobStatusTone(status: ChapterGenerationJob['status'] | 'empty') {
@@ -10,6 +11,7 @@ function jobStatusTone(status: ChapterGenerationJob['status'] | 'empty') {
 
 function qualityStatus(report: QualityGateReport | null) {
   if (!report) return { label: '未生成', tone: 'neutral' as const }
+  if (report.pass && QualityGateService.shouldRequireHumanReview(report)) return { label: '需确认', tone: 'accent' as const }
   return report.pass ? { label: '通过', tone: 'success' as const } : { label: '未通过', tone: 'danger' as const }
 }
 
