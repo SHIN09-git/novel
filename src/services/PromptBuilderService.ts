@@ -33,6 +33,7 @@ import { TokenEstimator } from './TokenEstimator'
 import { CharacterStateService } from './CharacterStateService'
 import { StoryDirectionService } from './StoryDirectionService'
 import { StageSummaryService } from './StageSummaryService'
+import { HardCanonPackService } from './HardCanonPackService'
 
 const PLACEHOLDER_PATTERNS = [
   /待补充/i,
@@ -845,7 +846,7 @@ export class PromptBuilderService {
 
     const styleLimit = input.budgetProfile?.styleSampleMaxChars ?? styleSampleLimit(config.mode)
     const styleSample = bible?.styleSample ? truncateText(bible.styleSample, styleLimit) : ''
-    const hardCanonText = formatHardCanonPack(project, bible)
+    const hardCanonPrompt = HardCanonPackService.compressHardCanonPackForPrompt(workingInput.hardCanonPack ?? null)
     const styleEnvelopeText = formatStyleEnvelope(project, bible, styleSample)
 
     const latestProgress =
@@ -920,6 +921,17 @@ export class PromptBuilderService {
         enabled: true,
         body: priorityRuleText(),
         reason: '先声明上下文权威顺序，防止低优先级设定或风格覆盖章节执行。'
+      },
+      {
+        id: 'hard-canon-pack',
+        title: '1. 不可违背设定 HardCanonPack',
+        kind: 'hard_canon',
+        priority: 1,
+        source: 'hard_canon_packs',
+        sourceIds: hardCanonPrompt.includedItemIds,
+        enabled: hardCanonPrompt.itemCount > 0,
+        body: hardCanonPrompt.body,
+        reason: '用户维护的不可违背硬设定，高于普通摘要、旧章节回顾和模型临时发挥；不得静默覆盖上一章衔接、本章任务、角色硬状态和伏笔规则。'
       },
       {
         id: 'writing-task',
@@ -1034,14 +1046,15 @@ export class PromptBuilderService {
         reason: '时间线只作为校验参考，不能覆盖更高优先级的章节任务和角色硬状态。'
       },
       {
-        id: 'hard-canon-pack',
+        id: 'legacy-story-bible-hard-canon',
         title: '10. 最小硬设定 HardCanonPack',
-        kind: 'hard_canon',
+        kind: 'story_bible_reference',
         priority: 10,
         source: 'story_bible',
         sourceIds: bible ? [bible.projectId] : [],
-        enabled: config.modules.bible,
-        body: hardCanonText,
+        enabled: false,
+        body: '',
+        omittedReason: '硬设定已迁移到用户可维护的 HardCanonPack；普通 Story Bible 不再整块进入正文 prompt。',
         reason: '只保留不可违背规则和本章强相关硬设定，避免大段世界观置顶诱导重复解释。'
       },
       {
@@ -1112,6 +1125,7 @@ export class PromptBuilderService {
       chapterTask: config.task,
       contextNeedPlan,
       storyDirectionGuide,
+      hardCanonPrompt,
       continuityBridge: continuity.bridge,
       continuitySource: continuity.source,
       compressionRecords: budgetSelection?.compressionRecords ?? [],

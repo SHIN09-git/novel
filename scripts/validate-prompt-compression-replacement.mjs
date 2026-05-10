@@ -45,6 +45,7 @@ async function loadModules() {
     'src/services/ContextCompressionService.ts',
     'src/services/ContextBudgetManager.ts',
     'src/services/StoryDirectionService.ts',
+    'src/services/HardCanonPackService.ts',
     'src/services/PromptBuilderService.ts'
   ])
   const contextBudget = await import(`${pathToFileURL(join(outDir, 'src/services/ContextBudgetManager.mjs')).href}?t=${Date.now()}`)

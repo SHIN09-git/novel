@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import type {
   AppData,
+  ChapterCommitBundle,
   ConsistencyReviewIssue,
   ConsistencyReviewReport,
   ContextBudgetProfile,
@@ -8,6 +9,7 @@ import type {
   ContextNeedPlan,
   ContextSelectionResult,
   ForcedContextBlock,
+  GenerationRunBundle,
   GeneratedChapterDraft,
   GenerationRunTrace,
   ID,
@@ -25,6 +27,7 @@ import type {
 } from '../../../shared/types'
 import { AIService } from '../../../services/AIService'
 import { safeParseJson } from '../../../services/AIJsonParser'
+import { buildRunTraceAuthorSummary, upsertRunTraceAuthorSummaryToAppData } from '../../../services/RunTraceAuthorSummaryService'
 import { TokenEstimator } from '../../../services/TokenEstimator'
 import { useConfirm } from '../components/ConfirmDialog'
 import { Header } from '../components/Layout'
@@ -54,6 +57,8 @@ interface ProjectProps {
   data: AppData
   project: Project
   saveData: (next: SaveDataInput) => Promise<void>
+  saveGenerationRunBundle?: (next: SaveDataInput, bundle: GenerationRunBundle) => Promise<void>
+  saveChapterCommitBundle?: (buildCommit: (currentData: AppData) => { next: AppData; bundle: ChapterCommitBundle }) => Promise<void>
   onOpenRevision?: (prefill: { chapterId: ID | null; draftId: ID | null; requestId: ID }) => void
   initialSnapshotId?: ID | null
   onInitialSnapshotConsumed?: () => void
@@ -101,6 +106,8 @@ export function GenerationPipelineView({
   data,
   project,
   saveData,
+  saveGenerationRunBundle,
+  saveChapterCommitBundle,
   onOpenRevision,
   initialSnapshotId,
   onInitialSnapshotConsumed
@@ -167,6 +174,11 @@ export function GenerationPipelineView({
   const selectedQualityReports = selectedJob ? scoped.qualityGateReports.filter((report) => report.jobId === selectedJob.id) : []
   const selectedRevisionCandidates = selectedJob ? scoped.revisionCandidates.filter((candidate) => candidate.jobId === selectedJob.id) : []
   const selectedTrace = selectedJob ? scoped.generationRunTraces.find((trace) => trace.jobId === selectedJob.id) ?? null : null
+  const selectedAuthorSummary = selectedTrace
+    ? scoped.runTraceAuthorSummaries.find((summary) => summary.traceId === selectedTrace.id) ??
+      scoped.runTraceAuthorSummaries.find((summary) => summary.jobId === selectedTrace.jobId) ??
+      null
+    : null
   const selectedTraceSnapshot = selectedTrace?.promptContextSnapshotId
     ? scoped.promptContextSnapshots.find((snapshot) => snapshot.id === selectedTrace.promptContextSnapshotId) ?? null
     : null
@@ -208,6 +220,7 @@ export function GenerationPipelineView({
   const draftAcceptance = useDraftAcceptance({
     project,
     saveData,
+    saveChapterCommitBundle,
     selectedJob,
     targetChapterOrder,
     chapters: scoped.chapters,
@@ -477,6 +490,14 @@ export function GenerationPipelineView({
     setPipelineMessage('已复制生成追踪摘要。')
   }
 
+  async function generateAuthorSummary(trace: GenerationRunTrace) {
+    await saveData((current) => {
+      const summary = buildRunTraceAuthorSummary(current, { traceId: trace.id })
+      return upsertRunTraceAuthorSummaryToAppData(current, summary)
+    })
+    setPipelineMessage('已生成章节诊断摘要。')
+  }
+
   function useAutoContext() {
     setContextSource('auto')
     setSelectedSnapshotId(null)
@@ -625,7 +646,13 @@ export function GenerationPipelineView({
                 onRetryStep={retryStep}
                 onSkipStep={skipStep}
               />
-              <PipelineMemoryCandidatesPanel candidates={selectedCandidates} scoped={scoped} onAccept={memoryCandidates.applyCandidate} onReject={memoryCandidates.rejectCandidate} />
+              <PipelineMemoryCandidatesPanel
+                candidates={selectedCandidates}
+                scoped={scoped}
+                onAccept={memoryCandidates.applyCandidate}
+                onAcceptAll={memoryCandidates.applyAllPendingCandidates}
+                onReject={memoryCandidates.rejectCandidate}
+              />
             </>
           )
         }
@@ -657,11 +684,13 @@ export function GenerationPipelineView({
             <PipelineTracePanel
               trace={selectedTrace}
               snapshot={selectedTraceSnapshot}
+              authorSummary={selectedAuthorSummary}
               consistencyReport={traceConsistencyReport}
               qualityReport={traceQualityReport}
               continuityBridge={traceContinuityBridge}
               redundancyReport={traceRedundancyReport}
               onCopy={copyRunTrace}
+              onGenerateAuthorSummary={generateAuthorSummary}
             />
           </>
         }

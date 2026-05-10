@@ -45,6 +45,7 @@ async function loadPromptBuilder() {
     'src/services/ContextCompressionService.ts',
     'src/services/ContextBudgetManager.ts',
     'src/services/StoryDirectionService.ts',
+    'src/services/HardCanonPackService.ts',
     'src/services/PromptBuilderService.ts'
   ])
   return import(`${pathToFileURL(join(outDir, 'src/services/PromptBuilderService.mjs')).href}?t=${Date.now()}`)
@@ -254,12 +255,41 @@ function makeInput(PromptBuilderService) {
     timelineEvents: [],
     stageSummaries: [],
     chapterContinuityBridges: [bridge],
+    hardCanonPack: {
+      id: 'hard-canon-pack-project-priority',
+      projectId: project.id,
+      title: '不可违背设定包',
+      description: '测试硬设定',
+      maxPromptTokens: 500,
+      schemaVersion: 1,
+      createdAt: timestamp,
+      updatedAt: timestamp,
+      items: [
+        {
+          id: 'hard-canon-1',
+          projectId: project.id,
+          category: 'system_rule',
+          title: '副本规则不得临时救命',
+          content: '系统不得临时弹出刚好救命的无代价补充条款。',
+          priority: 'must',
+          status: 'active',
+          sourceType: 'manual',
+          sourceId: null,
+          relatedCharacterIds: [],
+          relatedForeshadowingIds: [],
+          relatedTimelineEventIds: [],
+          createdAt: timestamp,
+          updatedAt: timestamp
+        }
+      ]
+    },
     explicitContextSelection,
     config
   })
 }
 
 function indexOfSection(prompt, title) {
+  if (title.includes('HardCanonPack')) return prompt.indexOf('HardCanonPack')
   return prompt.indexOf(`## ${title}`)
 }
 
@@ -271,8 +301,8 @@ async function main() {
   const frontHalf = prompt.slice(0, Math.floor(prompt.length / 2))
 
   checks.push(assert(prompt.includes('如果上下文之间存在冲突，必须按以下优先级处理'), 'final prose prompt begins with conflict priority declaration'))
-  checks.push(assert(indexOfSection(prompt, '2. 上一章结尾衔接 Bridge') < indexOfSection(prompt, '10. 最小硬设定 HardCanonPack'), 'continuity bridge appears before story bible hard canon'))
-  checks.push(assert(indexOfSection(prompt, '3. 本章任务契约') < indexOfSection(prompt, '10. 最小硬设定 HardCanonPack'), 'chapter task contract appears before story bible hard canon'))
+  checks.push(assert(indexOfSection(prompt, '不可违背设定 HardCanonPack') > indexOfSection(prompt, '0.'), 'HardCanonPack appears immediately after priority rules as a high-priority hard-canon block'))
+  checks.push(assert(indexOfSection(prompt, '不可违背设定 HardCanonPack') < indexOfSection(prompt, '7. 最近章节详细回顾'), 'HardCanonPack appears before ordinary chapter recaps'))
   checks.push(assert(indexOfSection(prompt, '4. 当前角色硬状态') < indexOfSection(prompt, '7. 最近章节详细回顾'), 'character hard state appears before recent chapter recap'))
   checks.push(assert(indexOfSection(prompt, '5. 本章伏笔操作规则') < indexOfSection(prompt, '7. 最近章节详细回顾'), 'foreshadowing operation rules appear before recent chapter recap'))
   checks.push(assert(indexOfSection(prompt, '11. 风格要求 StyleEnvelope') > Math.floor(prompt.length / 2), 'style envelope is placed in the latter half of the prompt'))

@@ -116,6 +116,9 @@ function minimalData(overrides = {}) {
     chapters: [],
     characters: [],
     characterStateLogs: [],
+    characterStateFacts: [],
+    characterStateTransactions: [],
+    characterStateChangeCandidates: [],
     foreshadowings: [],
     timelineEvents: [],
     stageSummaries: [],
@@ -136,6 +139,8 @@ function minimalData(overrides = {}) {
     revisionRequests: [],
     revisionVersions: [],
     chapterVersions: [],
+    chapterCommitBundles: [],
+    revisionCommitBundles: [],
     settings: {
       apiProvider: 'openai',
       apiKey: '',
@@ -210,12 +215,29 @@ async function main() {
   const defaultsPath = await compileTsModule('src/shared/defaults.ts', [
     ["from './foreshadowingTreatment'", `from '${pathToFileURL(treatmentPath).href}'`]
   ])
+  const chapterCommitBundlePath = await compileTsModule('src/services/ChapterCommitBundleService.ts')
+  const generationRunBundlePath = await compileTsModule('src/services/GenerationRunBundleService.ts')
+  const revisionCommitBundlePath = await compileTsModule('src/services/RevisionCommitBundleService.ts')
+  const storageServicePath = await compileTsModule('src/storage/StorageService.ts')
   const storagePath = await compileTsModule('src/storage/JsonStorageService.ts', [
-    ["from '../shared/defaults'", `from '${pathToFileURL(defaultsPath).href}'`]
+    ["from '../shared/defaults'", `from '${pathToFileURL(defaultsPath).href}'`],
+    ["from '../services/ChapterCommitBundleService'", `from '${pathToFileURL(chapterCommitBundlePath).href}'`],
+    ["from '../services/GenerationRunBundleService'", `from '${pathToFileURL(generationRunBundlePath).href}'`],
+    ["from '../services/RevisionCommitBundleService'", `from '${pathToFileURL(revisionCommitBundlePath).href}'`],
+    ["from './StorageService'", `from '${pathToFileURL(storageServicePath).href}'`]
+  ])
+  const sqliteStoragePath = await compileTsModule('src/storage/SqliteStorageService.ts', [
+    ["from '../shared/defaults'", `from '${pathToFileURL(defaultsPath).href}'`],
+    ["from '../services/ChapterCommitBundleService'", `from '${pathToFileURL(chapterCommitBundlePath).href}'`],
+    ["from '../services/GenerationRunBundleService'", `from '${pathToFileURL(generationRunBundlePath).href}'`],
+    ["from '../services/RevisionCommitBundleService'", `from '${pathToFileURL(revisionCommitBundlePath).href}'`],
+    ["from './JsonStorageService'", `from '${pathToFileURL(storagePath).href}'`],
+    ["from './StorageService'", `from '${pathToFileURL(storageServicePath).href}'`]
   ])
   const mergeModule = await loadTsModule('src/main/DataMergeService.ts', [
     ["from '../shared/defaults'", `from '${pathToFileURL(defaultsPath).href}'`],
-    ["from '../storage/JsonStorageService'", `from '${pathToFileURL(storagePath).href}'`]
+    ["from '../storage/JsonStorageService'", `from '${pathToFileURL(storagePath).href}'`],
+    ["from '../storage/SqliteStorageService'", `from '${pathToFileURL(sqliteStoragePath).href}'`]
   ])
 
   const targetOnly = minimalData({ projects: [project('target-project', '目标项目')] })

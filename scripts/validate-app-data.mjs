@@ -21,12 +21,15 @@ const requiredArrays = [
   'contextBudgetProfiles',
   'qualityGateReports',
   'generationRunTraces',
+  'runTraceAuthorSummaries',
   'redundancyReports',
   'revisionCandidates',
   'revisionSessions',
   'revisionRequests',
   'revisionVersions',
-  'chapterVersions'
+  'chapterVersions',
+  'chapterCommitBundles',
+  'revisionCommitBundles'
 ]
 
 const allowedCandidateStatuses = new Set(['pending', 'accepted', 'rejected'])

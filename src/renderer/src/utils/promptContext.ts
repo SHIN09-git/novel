@@ -103,10 +103,11 @@ export function buildPipelineContext(
     characterStateLogs: scoped.characterStateLogs,
     characterStateFacts: scoped.characterStateFacts,
     foreshadowings: scoped.foreshadowings,
-      timelineEvents: scoped.timelineEvents,
-      stageSummaries: scoped.stageSummaries,
-      chapterContinuityBridges: scoped.chapterContinuityBridges,
-      config: {
+    timelineEvents: scoped.timelineEvents,
+    stageSummaries: scoped.stageSummaries,
+    chapterContinuityBridges: scoped.chapterContinuityBridges,
+    hardCanonPack: scoped.hardCanonPacks[0] ?? null,
+    config: {
       projectId: project.id,
       targetChapterOrder,
       mode: 'standard',
@@ -179,6 +180,7 @@ export function buildPipelineContextResultFromSelection(
     chapterContinuityBridges: scoped.chapterContinuityBridges,
     contextNeedPlan: contextNeedPlan ?? null,
     storyDirectionGuide: storyDirectionGuide ?? null,
+    hardCanonPack: scoped.hardCanonPacks[0] ?? null,
     config,
     budgetProfile,
     explicitContextSelection: selection

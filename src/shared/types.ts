@@ -76,6 +76,22 @@ export type ContextRetrievalPriorityType =
   | 'story_bible'
   | 'stage_summary'
   | 'chapter_ending'
+  | 'hard_canon'
+  | 'story_direction'
+  | 'recent_chapter'
+export type ContextNeedPriority = 'must' | 'high' | 'medium' | 'low'
+export type ContextNeedSourceHint =
+  | 'character'
+  | 'character_state'
+  | 'foreshadowing'
+  | 'timeline'
+  | 'stageSummary'
+  | 'hardCanon'
+  | 'storyDirection'
+  | 'chapterEnding'
+  | 'recentChapter'
+  | 'worldbuilding'
+  | 'unknown'
 export type NoveltyAuditSeverity = 'pass' | 'warning' | 'fail'
 export type NoveltyFindingSeverity = 'info' | 'warning' | 'fail'
 export type NoveltyFindingKind =
@@ -88,6 +104,28 @@ export type NoveltyFindingKind =
   | 'suspicious_deus_ex_rule'
   | 'untraced_name'
 export type ChapterGenerationJobStatus = 'idle' | 'running' | 'paused' | 'completed' | 'failed'
+export type HardCanonItemCategory =
+  | 'world_rule'
+  | 'system_rule'
+  | 'character_identity'
+  | 'character_hard_state'
+  | 'timeline_anchor'
+  | 'foreshadowing_rule'
+  | 'relationship_fact'
+  | 'prohibition'
+  | 'style_boundary'
+  | 'other'
+export type HardCanonPriority = 'must' | 'high' | 'medium'
+export type HardCanonStatus = 'active' | 'inactive' | 'deprecated'
+export type HardCanonSourceType =
+  | 'manual'
+  | 'story_bible'
+  | 'character'
+  | 'foreshadowing'
+  | 'timeline'
+  | 'stage_summary'
+  | 'run_trace'
+  | 'imported'
 export type ChapterGenerationStepType =
   | 'context_need_planning'
   | 'context_budget_selection'
@@ -110,7 +148,7 @@ export type MemoryUpdateCandidateStatus = 'pending' | 'accepted' | 'rejected'
 export type ConsistencySeverity = 'low' | 'medium' | 'high'
 export type RevisionCandidateStatus = 'pending' | 'accepted' | 'rejected'
 export type RevisionCandidateContextSource = 'reused_current_job_context' | 'rebuilt_from_explicit_selection' | 'fallback_legacy'
-export type RevisionSessionStatus = 'active' | 'completed' | 'abandoned'
+export type RevisionSessionStatus = 'active' | 'completed' | 'abandoned' | 'cancelled' | 'failed'
 export type RevisionRequestType =
   | 'polish_style'
   | 'reduce_ai_tone'
@@ -132,7 +170,7 @@ export type RevisionRequestType =
   | 'rewrite_section'
   | 'custom'
 export type RevisionScope = 'full' | 'local'
-export type RevisionVersionStatus = 'pending' | 'accepted' | 'rejected'
+export type RevisionVersionStatus = 'pending' | 'draft' | 'accepted' | 'rejected' | 'superseded'
 export type ConsistencyIssueType =
   | 'timeline_conflict'
   | 'worldbuilding_conflict'
@@ -228,6 +266,44 @@ export interface StoryBible {
   narrativeTone: string
   immutableFacts: string
   updatedAt: string
+}
+
+export interface HardCanonItem {
+  id: ID
+  projectId: ID
+  category: HardCanonItemCategory
+  title: string
+  content: string
+  priority: HardCanonPriority
+  status: HardCanonStatus
+  sourceType?: HardCanonSourceType
+  sourceId?: ID | null
+  relatedCharacterIds?: ID[]
+  relatedForeshadowingIds?: ID[]
+  relatedTimelineEventIds?: ID[]
+  createdAt: string
+  updatedAt: string
+}
+
+export interface HardCanonPack {
+  id: ID
+  projectId: ID
+  title: string
+  description?: string
+  items: HardCanonItem[]
+  maxPromptTokens?: number
+  updatedAt: string
+  createdAt: string
+  schemaVersion: number
+}
+
+export interface HardCanonPromptBlockResult {
+  body: string
+  includedItemIds: ID[]
+  truncatedItemIds: ID[]
+  tokenEstimate: number
+  itemCount: number
+  warnings: string[]
 }
 
 export interface Chapter {
@@ -344,6 +420,7 @@ export interface CharacterStateChangeSuggestion {
 export interface CharacterStateChangeCandidate {
   id: ID
   projectId: ID
+  jobId?: ID | null
   characterId: ID
   chapterId: ID | null
   chapterOrder: number | null
@@ -474,6 +551,16 @@ export interface ContextExclusionRule {
   reason: string
 }
 
+export interface ContextNeedItem {
+  id: ID
+  needType: string
+  sourceHint: ContextNeedSourceHint
+  sourceId?: ID | null
+  priority: ContextNeedPriority
+  reason: string
+  uncertain: boolean
+}
+
 export interface ContextNeedPlan {
   id: ID
   projectId: ID
@@ -491,6 +578,7 @@ export interface ContextNeedPlan {
   mustCheckContinuity: ContinuityCheckCategory[]
   retrievalPriorities: RetrievalPriority[]
   exclusionRules: ContextExclusionRule[]
+  contextNeeds: ContextNeedItem[]
   warnings: string[]
   createdAt: string
   updatedAt: string
@@ -622,6 +710,7 @@ export interface BuildPromptResult {
   chapterTask: ChapterTask
   contextNeedPlan: ContextNeedPlan | null
   storyDirectionGuide: StoryDirectionGuide | null
+  hardCanonPrompt: HardCanonPromptBlockResult | null
   continuityBridge: ChapterContinuityBridge | null
   continuitySource: ContinuitySource | null
   compressionRecords: ContextCompressionRecord[]
@@ -705,7 +794,46 @@ export interface ContextSelectionResult {
   estimatedTokens: number
   omittedItems: OmittedContextItem[]
   compressionRecords: ContextCompressionRecord[]
+  contextSelectionTrace: ContextSelectionTrace | null
   warnings: string[]
+}
+
+export interface ContextSelectionTraceBlock {
+  blockType: string
+  sourceId?: ID | null
+  priority: ContextNeedPriority
+  tokenEstimate: number
+  reason: string
+}
+
+export interface ContextSelectionTraceDroppedBlock {
+  blockType: string
+  sourceId?: ID | null
+  priority: ContextNeedPriority
+  tokenEstimate: number
+  dropReason: string
+}
+
+export interface ContextSelectionTraceUnmetNeed {
+  needType: string
+  priority: ContextNeedPriority
+  reason: string
+  sourceId?: ID | null
+}
+
+export interface ContextSelectionTrace {
+  projectId: ID
+  chapterId: ID | null
+  jobId?: ID
+  selectedBlocks: ContextSelectionTraceBlock[]
+  droppedBlocks: ContextSelectionTraceDroppedBlock[]
+  unmetNeeds: ContextSelectionTraceUnmetNeed[]
+  budgetSummary: {
+    totalBudget: number
+    usedTokens: number
+    reservedTokens: number
+    pressure: 'low' | 'medium' | 'high'
+  }
 }
 
 export interface AIResult<T> {
@@ -1030,6 +1158,7 @@ export interface QualityGateDimensionScores {
 export interface RedundancyReport {
   id: ID
   projectId: ID
+  jobId?: ID | null
   chapterId: ID | null
   draftId: ID | null
   repeatedPhrases: string[]
@@ -1040,6 +1169,7 @@ export interface RedundancyReport {
   compressionSuggestions: string[]
   overallRedundancyScore: number
   createdAt: string
+  updatedAt?: string
 }
 
 export interface QualityGateIssue {
@@ -1156,6 +1286,7 @@ export interface GenerationRunTrace {
   omittedContextItems: OmittedContextItem[]
   contextWarnings: string[]
   contextTokenEstimate: number
+  contextSelectionTrace: ContextSelectionTrace | null
   forcedContextBlocks: ForcedContextBlock[]
   compressionRecords: ContextCompressionRecord[]
   promptBlockOrder: PromptBlockOrderItem[]
@@ -1188,8 +1319,167 @@ export interface GenerationRunTrace {
   storyDirectionGuideEndChapterOrder: number | null
   storyDirectionBeatId: ID | null
   storyDirectionAppliedToChapterTask: boolean
+  hardCanonPackItemCount: number
+  hardCanonPackTokenEstimate: number
+  includedHardCanonItemIds: ID[]
+  truncatedHardCanonItemIds: ID[]
   createdAt: string
   updatedAt: string
+}
+
+export type RunTraceAuthorSummaryStatus = 'good' | 'needs_attention' | 'risky' | 'failed' | 'unknown'
+
+export type RunTraceProblemSource =
+  | 'context_missing'
+  | 'context_noise'
+  | 'task_contract'
+  | 'character_state'
+  | 'foreshadowing'
+  | 'novelty_drift'
+  | 'consistency'
+  | 'quality_gate'
+  | 'redundancy'
+  | 'model_output'
+  | 'revision_needed'
+  | 'unknown'
+
+export type RunTraceAuthorActionType =
+  | 'revise_chapter'
+  | 'adjust_context'
+  | 'update_character_state'
+  | 'review_memory_candidate'
+  | 'review_foreshadowing'
+  | 'edit_chapter_task'
+  | 'rerun_generation'
+  | 'ignore'
+
+export interface RunTraceAuthorProblemSource {
+  source: RunTraceProblemSource
+  severity: ConsistencySeverity
+  evidence: string[]
+  recommendation: string
+}
+
+export interface RunTraceAuthorNextAction {
+  label: string
+  actionType: RunTraceAuthorActionType
+  reason: string
+}
+
+export interface RunTraceAuthorSummary {
+  id: ID
+  projectId: ID
+  chapterId: ID | null
+  jobId?: ID
+  traceId?: ID
+  generatedDraftId?: ID | null
+  createdAt: string
+  summaryVersion: number
+  overallStatus: RunTraceAuthorSummaryStatus
+  oneLineDiagnosis: string
+  likelyProblemSources: RunTraceAuthorProblemSource[]
+  contextDiagnosis?: {
+    usedContextCount?: number
+    missingContextHints?: string[]
+    noisyContextHints?: string[]
+    budgetPressure?: 'low' | 'medium' | 'high' | 'unknown'
+  }
+  continuityDiagnosis?: {
+    characterStateIssues?: string[]
+    foreshadowingIssues?: string[]
+    timelineIssues?: string[]
+    newCanonRisks?: string[]
+  }
+  draftDiagnosis?: {
+    qualityGatePassed?: boolean
+    consistencyPassed?: boolean
+    redundancyRisk?: 'low' | 'medium' | 'high' | 'unknown'
+    mainDraftIssues?: string[]
+  }
+  nextActions: RunTraceAuthorNextAction[]
+  sourceRefs: {
+    qualityGateReportId?: ID
+    consistencyReviewReportId?: ID
+    redundancyReportIds?: ID[]
+    noveltyAuditId?: ID
+    generationRunTraceId?: ID
+    contextNeedPlanId?: ID
+  }
+}
+
+export interface GenerationRunBundle {
+  schemaVersion: number
+  jobId: ID
+  projectId: ID
+  chapterId: ID | null
+  updatedAt: string
+  job: ChapterGenerationJob
+  steps: ChapterGenerationStep[]
+  promptContextSnapshot?: PromptContextSnapshot
+  generatedDrafts: GeneratedChapterDraft[]
+  qualityGateReports: QualityGateReport[]
+  consistencyReviewReports: ConsistencyReviewReport[]
+  memoryUpdateCandidates: MemoryUpdateCandidate[]
+  characterStateChangeCandidates: CharacterStateChangeCandidate[]
+  redundancyReports: RedundancyReport[]
+  runTrace?: GenerationRunTrace
+}
+
+export interface ChapterCommitBundle {
+  schemaVersion: number
+  id: ID
+  commitId: ID
+  projectId: ID
+  chapterId: ID
+  jobId?: ID | null
+  generatedDraftId?: ID | null
+  acceptedAt: string
+  acceptedBy: 'user'
+  chapter: Chapter
+  chapterVersion?: ChapterVersion
+  generatedDraft?: GeneratedChapterDraft
+  acceptedMemoryUpdateCandidates?: MemoryUpdateCandidate[]
+  acceptedCharacterStateChangeCandidates?: CharacterStateChangeCandidate[]
+  appliedCharacterStateFacts?: CharacterStateFact[]
+  appliedForeshadowingUpdates?: Foreshadowing[]
+  appliedTimelineEvents?: TimelineEvent[]
+  qualityGateReportId?: ID | null
+  consistencyReviewReportId?: ID | null
+  generationRunTraceId?: ID | null
+  qualityGateReports?: QualityGateReport[]
+  consistencyReviewReports?: ConsistencyReviewReport[]
+  redundancyReports?: RedundancyReport[]
+  generationRunTrace?: GenerationRunTrace
+  commitNote?: string
+}
+
+export interface RevisionCommitBundle {
+  schemaVersion: number
+  id: ID
+  revisionCommitId: ID
+  projectId: ID
+  chapterId: ID
+  baseChapterVersionId?: ID | null
+  newChapterVersionId: ID
+  revisionSessionId?: ID | null
+  revisionVersionId?: ID | null
+  revisedAt: string
+  revisedBy: 'user' | 'ai' | 'user_with_ai'
+  beforeText?: string
+  afterText: string
+  chapter: Chapter
+  chapterVersion: ChapterVersion
+  generatedDraft?: GeneratedChapterDraft
+  revisionSession?: RevisionSession
+  revisionVersion?: RevisionVersion
+  revisionReason?: string
+  revisionNote?: string
+  linkedGenerationRunTraceId?: ID | null
+  linkedChapterCommitId?: ID | null
+  generationRunTrace?: GenerationRunTrace
+  affectedCharacterIds?: ID[]
+  affectedForeshadowingIds?: ID[]
+  affectedTimelineEventIds?: ID[]
 }
 
 export interface RevisionCandidate {
@@ -1257,6 +1547,10 @@ export interface ChapterVersion {
   body: string
   note: string
   createdAt: string
+  linkedRevisionCommitId?: ID | null
+  linkedGenerationRunTraceId?: ID | null
+  linkedChapterCommitId?: ID | null
+  baseChapterVersionId?: ID | null
 }
 
 export interface AppData {
@@ -1275,6 +1569,7 @@ export interface AppData {
   promptVersions: PromptVersion[]
   promptContextSnapshots: PromptContextSnapshot[]
   storyDirectionGuides: StoryDirectionGuide[]
+  hardCanonPacks: HardCanonPack[]
   contextNeedPlans: ContextNeedPlan[]
   chapterContinuityBridges: ChapterContinuityBridge[]
   chapterGenerationJobs: ChapterGenerationJob[]
@@ -1285,12 +1580,15 @@ export interface AppData {
   contextBudgetProfiles: ContextBudgetProfile[]
   qualityGateReports: QualityGateReport[]
   generationRunTraces: GenerationRunTrace[]
+  runTraceAuthorSummaries: RunTraceAuthorSummary[]
   redundancyReports: RedundancyReport[]
   revisionCandidates: RevisionCandidate[]
   revisionSessions: RevisionSession[]
   revisionRequests: RevisionRequest[]
   revisionVersions: RevisionVersion[]
   chapterVersions: ChapterVersion[]
+  chapterCommitBundles: ChapterCommitBundle[]
+  revisionCommitBundles: RevisionCommitBundle[]
   settings: AppSettings
 }
 
@@ -1309,5 +1607,6 @@ export interface PromptBuildInput {
   explicitContextSelection?: ContextSelectionResult
   contextNeedPlan?: ContextNeedPlan | null
   storyDirectionGuide?: StoryDirectionGuide | null
+  hardCanonPack?: HardCanonPack | null
   config: PromptConfig
 }

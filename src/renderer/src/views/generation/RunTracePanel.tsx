@@ -5,7 +5,8 @@ import type {
   ID,
   PromptContextSnapshot,
   QualityGateReport,
-  RedundancyReport
+  RedundancyReport,
+  RunTraceAuthorSummary
 } from '../../../../shared/types'
 import { treatmentPromptRules } from '../../../../shared/foreshadowingTreatment'
 import { formatDate, treatmentModeLabel, weightLabel } from '../../utils/format'
@@ -21,7 +22,9 @@ interface RunTracePanelProps {
   qualityReport: QualityGateReport | null
   continuityBridge: ChapterContinuityBridge | null
   redundancyReport: RedundancyReport | null
+  authorSummary?: RunTraceAuthorSummary | null
   onCopy: (trace: GenerationRunTrace) => void
+  onGenerateAuthorSummary?: (trace: GenerationRunTrace) => void
 }
 
 function contextItemLabel(projectDataSnapshot: ProjectDataSnapshot, type: string, id: ID | null): string {
@@ -70,6 +73,10 @@ export function buildRunTraceSummary(
     storyDirectionGuideHorizon: trace.storyDirectionGuideHorizon,
     storyDirectionBeatId: trace.storyDirectionBeatId,
     storyDirectionAppliedToChapterTask: trace.storyDirectionAppliedToChapterTask,
+    hardCanonPackItemCount: trace.hardCanonPackItemCount,
+    hardCanonPackTokenEstimate: trace.hardCanonPackTokenEstimate,
+    includedHardCanonItemIds: trace.includedHardCanonItemIds,
+    truncatedHardCanonItemIds: trace.truncatedHardCanonItemIds,
     contextNeedPlanWarnings: trace.contextNeedPlanWarnings,
     contextNeedPlanMatchedItems: trace.contextNeedPlanMatchedItems,
     contextNeedPlanOmittedItems: trace.contextNeedPlanOmittedItems,
@@ -128,7 +135,9 @@ export function RunTracePanel({
   qualityReport,
   continuityBridge,
   redundancyReport,
-  onCopy
+  authorSummary,
+  onCopy,
+  onGenerateAuthorSummary
 }: RunTracePanelProps) {
   return (
     <div className="panel run-trace-panel">
@@ -144,6 +153,49 @@ export function RunTracePanel({
         <p className="muted">build_context 完成后会生成追踪记录，用于核对本次实际使用的上下文。</p>
       ) : (
         <>
+          <section className={`author-summary-card status-${authorSummary?.overallStatus ?? 'unknown'}`}>
+            <div className="panel-title-row">
+              <h3>章节生成诊断摘要</h3>
+              {!authorSummary ? (
+                <button className="secondary-button" onClick={() => onGenerateAuthorSummary?.(trace)}>
+                  生成诊断摘要
+                </button>
+              ) : null}
+            </div>
+            {authorSummary ? (
+              <>
+                <p>{authorSummary.oneLineDiagnosis}</p>
+                {authorSummary.likelyProblemSources.length ? (
+                  <div className="budget-columns">
+                    {authorSummary.likelyProblemSources.slice(0, 4).map((source) => (
+                      <article key={source.source} className="candidate-card">
+                        <h3>
+                          {source.source} · {source.severity}
+                        </h3>
+                        <p>{source.recommendation}</p>
+                        <ul className="advice-list">
+                          {source.evidence.slice(0, 3).map((item) => (
+                            <li key={item}>{item}</li>
+                          ))}
+                        </ul>
+                      </article>
+                    ))}
+                  </div>
+                ) : null}
+                {authorSummary.nextActions.length ? (
+                  <ul className="advice-list">
+                    {authorSummary.nextActions.slice(0, 5).map((action) => (
+                      <li key={`${action.actionType}-${action.label}`}>
+                        {action.label}：{action.reason}
+                      </li>
+                    ))}
+                  </ul>
+                ) : null}
+              </>
+            ) : (
+              <p className="muted">作者摘要会把质量门禁、审稿、上下文遗漏、新设定风险和冗余检测整理成可行动建议；原始 JSON 仍保留在高级信息里。</p>
+            )}
+          </section>
           <div className="metric-grid">
             <article>
               <span>上下文来源</span>
@@ -328,7 +380,7 @@ export function RunTracePanel({
             </div>
           </div>
           <details className="snapshot-detail">
-            <summary>查看追踪 JSON 摘要</summary>
+            <summary>高级 / 调试信息：查看追踪 JSON 摘要</summary>
             <pre>{JSON.stringify(buildRunTraceSummary(trace, consistencyReport, qualityReport), null, 2)}</pre>
           </details>
         </>

@@ -20,12 +20,63 @@
   border: 1px solid var(--line);
   border-radius: var(--radius);
   background: var(--surface);
+  text-align: left;
+  color: var(--ink);
 }
 
 .chapters-view .version-history-item p {
   margin: 4px 0 0;
   color: var(--muted);
   font-size: 13px;
+}
+
+.chapters-view .version-history-item.active {
+  border-color: rgba(40, 118, 111, 0.42);
+  background: var(--color-accent-soft);
+}
+
+.chapters-view .version-chain-layout {
+  display: grid;
+  grid-template-columns: minmax(220px, 0.75fr) minmax(0, 1.25fr);
+  gap: var(--space-4);
+  align-items: start;
+}
+
+.chapters-view .version-detail-panel {
+  display: grid;
+  gap: var(--space-3);
+  min-width: 0;
+}
+
+.chapters-view .version-preview-text {
+  max-height: 420px;
+  overflow: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+  padding: var(--space-4);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--surface);
+  color: var(--ink);
+  line-height: 1.8;
+}
+
+.chapters-view .version-links-grid {
+  display: grid;
+  grid-template-columns: minmax(120px, auto) minmax(0, 1fr);
+  gap: var(--space-2) var(--space-3);
+  padding: var(--space-3);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--surface);
+}
+
+.chapters-view .version-links-grid span {
+  color: var(--muted);
+}
+
+.chapters-view .version-links-grid strong {
+  overflow-wrap: anywhere;
 }
 
 .revision-view .revision-studio-layout {

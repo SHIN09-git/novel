@@ -15,6 +15,7 @@ export function projectData(data: AppData, projectId: ID) {
     promptVersions: data.promptVersions.filter((item) => item.projectId === projectId),
     promptContextSnapshots: data.promptContextSnapshots.filter((item) => item.projectId === projectId),
     storyDirectionGuides: (data.storyDirectionGuides ?? []).filter((item) => item.projectId === projectId),
+    hardCanonPacks: (data.hardCanonPacks ?? []).filter((item) => item.projectId === projectId),
     chapterContinuityBridges: data.chapterContinuityBridges.filter((item) => item.projectId === projectId),
     chapterGenerationJobs: data.chapterGenerationJobs.filter((item) => item.projectId === projectId),
     chapterGenerationSteps: data.chapterGenerationSteps,
@@ -24,11 +25,14 @@ export function projectData(data: AppData, projectId: ID) {
     contextBudgetProfiles: data.contextBudgetProfiles.filter((item) => item.projectId === projectId),
     qualityGateReports: data.qualityGateReports.filter((item) => item.projectId === projectId),
     generationRunTraces: data.generationRunTraces.filter((item) => item.projectId === projectId),
+    runTraceAuthorSummaries: data.runTraceAuthorSummaries.filter((item) => item.projectId === projectId),
     redundancyReports: data.redundancyReports.filter((item) => item.projectId === projectId),
     revisionCandidates: data.revisionCandidates.filter((item) => item.projectId === projectId),
     revisionSessions: data.revisionSessions.filter((item) => item.projectId === projectId),
     revisionRequests: data.revisionRequests,
     revisionVersions: data.revisionVersions,
-    chapterVersions: data.chapterVersions.filter((item) => item.projectId === projectId)
+    chapterVersions: data.chapterVersions.filter((item) => item.projectId === projectId),
+    chapterCommitBundles: data.chapterCommitBundles.filter((item) => item.projectId === projectId),
+    revisionCommitBundles: data.revisionCommitBundles.filter((item) => item.projectId === projectId)
   }
 }

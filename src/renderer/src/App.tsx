@@ -12,6 +12,7 @@ import { TimelineView } from './views/TimelineView'
 
 const ChaptersView = lazy(() => import('./views/ChaptersView').then((module) => ({ default: module.ChaptersView })))
 const PromptBuilderView = lazy(() => import('./views/PromptBuilderView').then((module) => ({ default: module.PromptBuilderView })))
+const HardCanonView = lazy(() => import('./views/HardCanonView').then((module) => ({ default: module.HardCanonView })))
 const StoryDirectionView = lazy(() => import('./views/StoryDirectionView').then((module) => ({ default: module.StoryDirectionView })))
 const GenerationPipelineView = lazy(() =>
   import('./views/GenerationPipelineView').then((module) => ({ default: module.GenerationPipelineView }))
@@ -20,7 +21,18 @@ const RevisionStudioView = lazy(() => import('./views/RevisionStudioView').then(
 const SettingsView = lazy(() => import('./views/SettingsView').then((module) => ({ default: module.SettingsView })))
 
 export default function App() {
-  const { data, storagePath, setStoragePath, status, setStatus, saveData, replaceData: replaceStoredData } = useAppData()
+  const {
+    data,
+    storagePath,
+    setStoragePath,
+    status,
+    setStatus,
+    saveData,
+    saveGenerationRunBundle,
+    saveChapterCommitBundle,
+    saveRevisionCommitBundle,
+    replaceData: replaceStoredData
+  } = useAppData()
   const [currentProjectId, setCurrentProjectId] = useState<ID | null>(null)
   const [view, setView] = useState<View>('dashboard')
   const [revisionPrefill, setRevisionPrefill] = useState<{ chapterId: ID | null; draftId: ID | null; requestId: ID } | null>(null)
@@ -53,7 +65,7 @@ export default function App() {
       case 'bible':
         return <BibleView data={activeData} project={activeProject} saveData={saveData} />
       case 'chapters':
-        return <ChaptersView data={activeData} project={activeProject} saveData={saveData} />
+        return <ChaptersView data={activeData} project={activeProject} saveData={saveData} saveRevisionCommitBundle={saveRevisionCommitBundle} />
       case 'characters':
         return <CharactersView data={activeData} project={activeProject} saveData={saveData} />
       case 'foreshadowings':
@@ -62,6 +74,8 @@ export default function App() {
         return <TimelineView data={activeData} project={activeProject} saveData={saveData} />
       case 'stages':
         return <StageSummaryView data={activeData} project={activeProject} saveData={saveData} />
+      case 'hardCanon':
+        return <HardCanonView data={activeData} project={activeProject} saveData={saveData} />
       case 'direction':
         return <StoryDirectionView data={activeData} project={activeProject} saveData={saveData} />
       case 'prompt':
@@ -82,6 +96,8 @@ export default function App() {
             data={activeData}
             project={activeProject}
             saveData={saveData}
+            saveGenerationRunBundle={saveGenerationRunBundle}
+            saveChapterCommitBundle={saveChapterCommitBundle}
             initialSnapshotId={pipelineSnapshotId}
             onInitialSnapshotConsumed={() => setPipelineSnapshotId(null)}
             onOpenRevision={(prefill) => {
@@ -96,6 +112,7 @@ export default function App() {
             data={activeData}
             project={activeProject}
             saveData={saveData}
+            saveRevisionCommitBundle={saveRevisionCommitBundle}
             prefill={revisionPrefill}
             onPrefillConsumed={() => setRevisionPrefill(null)}
           />

@@ -189,9 +189,9 @@ async function main() {
 
   checks.push(
     assert(
-      draftAcceptanceSource.includes('createChapterVersionBeforeAcceptDraft(currentExisting, project.id, timestamp)') &&
-        draftAcceptanceSource.includes('generatedChapterDrafts: current.generatedChapterDrafts.map') &&
-        draftAcceptanceSource.includes('await saveData((current) =>') &&
+      draftAcceptanceSource.includes('buildAcceptedDraftCommitBundle') &&
+        draftAcceptanceSource.includes('applyChapterCommitBundleToAppData') &&
+        draftAcceptanceSource.includes('saveChapterCommitBundle(buildCommit)') &&
         pipelineSource.includes('draftAcceptance.acceptDraft'),
       'acceptDraft 覆盖已有章节时会写入 chapterVersions'
     )
@@ -199,9 +199,10 @@ async function main() {
 
   checks.push(
     assert(
-      pipelineRunnerSource.includes('mergePipelineWorking(current, next)') &&
-        pipelineRunnerSource.includes('chapterGenerationJobs: working.chapterGenerationJobs'),
-      'pipeline step persistence is merged through functional saveData'
+      pipelineRunnerSource.includes('saveGenerationRunBundle') &&
+        pipelineRunnerSource.includes('buildGenerationRunBundle') &&
+        pipelineRunnerSource.includes('applyGenerationRunBundleToAppData'),
+      'pipeline step persistence is merged through functional saveData and GenerationRunBundle'
     )
   )
 

@@ -23,12 +23,16 @@ import type {
   MigrationMergePreviewResult,
   OpenStorageFolderResult,
   ResetStoragePathRequest,
+  SaveChapterCommitBundleRequest,
+  SaveGenerationRunBundleRequest,
+  SaveRevisionCommitBundleRequest,
   SaveFileResult,
   SaveMarkdownFileRequest,
   SaveTextFileRequest,
   SelectStoragePathResult,
   StorageGetResult,
-  StorageSaveResult
+  StorageSaveResult,
+  StorageWriteResult
 } from '../../shared/ipc/ipcTypes'
 import type { AppData } from '../../shared/types'
 import { AppConfigService } from '../AppConfigService'
@@ -38,16 +42,16 @@ import {
   createMigrationMergePreview
 } from '../DataMergeService'
 import { SecureCredentialService } from '../SecureCredentialService'
-import { JsonStorageService } from '../../storage/JsonStorageService'
+import type { StorageService } from '../../storage/StorageService'
+import { SQLITE_DATA_FILE_NAME } from '../../storage/StorageService'
+import { createStorageService } from '../../storage/SqliteStorageService'
 import { safeIpcHandler } from './safeIpcHandler'
-
-const DATA_FILE_NAME = 'novel-director-data.json'
 
 interface IpcHandlerContext {
   appConfig: AppConfigService
   credentialService: SecureCredentialService
-  getStorage: () => JsonStorageService
-  setStorage: (storage: JsonStorageService) => void
+  getStorage: () => StorageService
+  setStorage: (storage: StorageService) => void
 }
 
 function sanitizeAiErrorText(text: string, apiKey?: string): string {
@@ -70,13 +74,15 @@ async function resolveDataStoragePath(rawPath: string): Promise<string> {
 
   try {
     const info = await stat(absolutePath)
-    if (info.isDirectory()) return join(absolutePath, DATA_FILE_NAME)
+    if (info.isDirectory()) return join(absolutePath, SQLITE_DATA_FILE_NAME)
   } catch {
-    // Non-existing paths are allowed if they end with .json; otherwise treat them as folders.
+    // Non-existing paths are allowed if they end with a known local-data extension; otherwise treat them as folders.
   }
 
-  if (extname(absolutePath).toLowerCase() === '.json') return absolutePath
-  return join(absolutePath, DATA_FILE_NAME)
+  const extension = extname(absolutePath).toLowerCase()
+  if (extension === '.sqlite' || extension === '.db') return absolutePath
+  if (extension === '.json') return absolutePath
+  return join(absolutePath, SQLITE_DATA_FILE_NAME)
 }
 
 async function backupExistingSourceData(sourcePath: string): Promise<string | null> {
@@ -173,15 +179,16 @@ async function migrateStoragePath(
     await mkdir(dirname(targetPath), { recursive: true })
     const backupPath = await backupExistingSourceData(oldPath)
     const targetBackupPath = targetAlreadyExists ? await backupFileForOverwrite(targetPath) : null
-    const nextStorage = new JsonStorageService(targetPath)
+    const nextStorage = createStorageService(targetPath)
     await nextStorage.save(secured.data)
     await nextStorage.load()
-    await context.appConfig.setStoragePath(targetPath)
+    const activeStoragePath = nextStorage.getStoragePath()
+    await context.appConfig.setStoragePath(activeStoragePath)
     context.setStorage(nextStorage)
 
     return {
       ok: true,
-      storagePath: targetPath,
+      storagePath: activeStoragePath,
       backupPath: backupPath ?? undefined,
       targetBackupPath: targetBackupPath ?? undefined
     }
@@ -223,6 +230,30 @@ export function registerIpcHandlers(context: IpcHandlerContext): void {
         storagePath: storage.getStoragePath(),
         credentialWarning: secured.credentialWarning
       }
+    })
+  )
+
+  ipcMain.handle(
+    IPC_CHANNELS.DATA_SAVE_GENERATION_RUN_BUNDLE,
+    safeIpcHandler(async (_event, request: SaveGenerationRunBundleRequest): Promise<StorageWriteResult> => {
+      const storage = context.getStorage()
+      return storage.saveGenerationRunBundle(request.bundle)
+    })
+  )
+
+  ipcMain.handle(
+    IPC_CHANNELS.DATA_SAVE_CHAPTER_COMMIT_BUNDLE,
+    safeIpcHandler(async (_event, request: SaveChapterCommitBundleRequest): Promise<StorageWriteResult> => {
+      const storage = context.getStorage()
+      return storage.saveChapterCommitBundle(request.bundle)
+    })
+  )
+
+  ipcMain.handle(
+    IPC_CHANNELS.DATA_SAVE_REVISION_COMMIT_BUNDLE,
+    safeIpcHandler(async (_event, request: SaveRevisionCommitBundleRequest): Promise<StorageWriteResult> => {
+      const storage = context.getStorage()
+      return storage.saveRevisionCommitBundle(request.bundle)
     })
   )
 
@@ -282,7 +313,7 @@ export function registerIpcHandlers(context: IpcHandlerContext): void {
       const result = await dialog.showOpenDialog({
         title: '选择数据保存位置',
         properties: ['openFile', 'openDirectory', 'promptToCreate'],
-        filters: [{ name: 'JSON 数据文件', extensions: ['json'] }]
+        filters: [{ name: '本地数据文件', extensions: ['sqlite', 'db', 'json'] }]
       })
 
       if (result.canceled || !result.filePaths[0]) return { canceled: true }
@@ -316,13 +347,14 @@ export function registerIpcHandlers(context: IpcHandlerContext): void {
       const sourcePath = await resolveDataStoragePath(request.sourcePath)
       const targetPath = await resolveDataStoragePath(request.targetPath)
       const result = await confirmMigrationMerge(sourcePath, targetPath)
-      const nextStorage = new JsonStorageService(targetPath)
+      const nextStorage = createStorageService(targetPath)
       await nextStorage.load()
-      await context.appConfig.setStoragePath(targetPath)
+      const activeStoragePath = nextStorage.getStoragePath()
+      await context.appConfig.setStoragePath(activeStoragePath)
       context.setStorage(nextStorage)
       return {
         ok: true,
-        storagePath: targetPath,
+        storagePath: activeStoragePath,
         data: result.data,
         preview: result.preview,
         sourceBackupPath: result.sourceBackupPath,

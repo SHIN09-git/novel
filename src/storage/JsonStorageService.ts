@@ -1,13 +1,12 @@
 import { copyFile, mkdir, readFile, rename, stat, writeFile } from 'node:fs/promises'
 import { dirname } from 'node:path'
-import type { AppData } from '../shared/types'
+import type { AppData, ChapterCommitBundle, GenerationRunBundle, RevisionCommitBundle } from '../shared/types'
+import type { StorageWriteResult } from '../shared/ipc/ipcTypes'
 import { EMPTY_APP_DATA, normalizeAppData, sanitizeAppDataForPersistence } from '../shared/defaults'
-
-export interface StorageService {
-  load(): Promise<AppData>
-  save(data: AppData): Promise<void>
-  getStoragePath(): string
-}
+import { applyChapterCommitBundleToAppData } from '../services/ChapterCommitBundleService'
+import { applyGenerationRunBundleToAppData } from '../services/GenerationRunBundleService'
+import { applyRevisionCommitBundleToAppData } from '../services/RevisionCommitBundleService'
+import type { StorageService } from './StorageService'
 
 export class JsonStorageService implements StorageService {
   constructor(private readonly storagePath: string) {}
@@ -61,5 +60,79 @@ export class JsonStorageService implements StorageService {
     }
 
     await rename(tmpPath, this.storagePath)
+  }
+
+  async saveGenerationRunBundle(bundle: GenerationRunBundle): Promise<StorageWriteResult> {
+    const current = await this.load()
+    const next = applyGenerationRunBundleToAppData(current, bundle)
+    await this.save(next)
+    const updatedAt = new Date().toISOString()
+    return {
+      ok: true,
+      storagePath: this.storagePath,
+      revision: updatedAt,
+      updatedAt,
+      savedCollections: [
+        'chapterGenerationJobs',
+        'chapterGenerationSteps',
+        'generatedChapterDrafts',
+        'qualityGateReports',
+        'consistencyReviewReports',
+        'memoryUpdateCandidates',
+        'characterStateChangeCandidates',
+        'redundancyReports',
+        'generationRunTraces'
+      ]
+    }
+  }
+
+  async saveChapterCommitBundle(bundle: ChapterCommitBundle): Promise<StorageWriteResult> {
+    const current = await this.load()
+    const next = applyChapterCommitBundleToAppData(current, bundle)
+    await this.save(next)
+    const updatedAt = new Date().toISOString()
+    return {
+      ok: true,
+      storagePath: this.storagePath,
+      revision: updatedAt,
+      updatedAt,
+      savedCollections: [
+        'chapters',
+        'chapterVersions',
+        'generatedChapterDrafts',
+        'qualityGateReports',
+        'consistencyReviewReports',
+        'redundancyReports',
+        'memoryUpdateCandidates',
+        'characterStateChangeCandidates',
+        'characterStateFacts',
+        'foreshadowings',
+        'timelineEvents',
+        'generationRunTraces',
+        'chapterCommitBundles'
+      ]
+    }
+  }
+
+  async saveRevisionCommitBundle(bundle: RevisionCommitBundle): Promise<StorageWriteResult> {
+    const current = await this.load()
+    const next = applyRevisionCommitBundleToAppData(current, bundle)
+    await this.save(next)
+    const updatedAt = new Date().toISOString()
+    return {
+      ok: true,
+      storagePath: this.storagePath,
+      revision: updatedAt,
+      updatedAt,
+      savedCollections: [
+        'chapters',
+        'chapterVersions',
+        'generatedChapterDrafts',
+        'revisionSessions',
+        'revisionVersions',
+        'generationRunTraces',
+        'revisionCommitBundles'
+      ]
+    }
   }
 }

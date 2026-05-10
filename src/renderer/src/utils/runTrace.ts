@@ -47,6 +47,7 @@ export function createEmptyGenerationRunTrace(job: ChapterGenerationJob): Genera
     omittedContextItems: [],
     contextWarnings: [],
     contextTokenEstimate: 0,
+    contextSelectionTrace: null,
     forcedContextBlocks: [],
     compressionRecords: [],
     promptBlockOrder: [],
@@ -79,6 +80,10 @@ export function createEmptyGenerationRunTrace(job: ChapterGenerationJob): Genera
     storyDirectionGuideEndChapterOrder: null,
     storyDirectionBeatId: null,
     storyDirectionAppliedToChapterTask: false,
+    hardCanonPackItemCount: 0,
+    hardCanonPackTokenEstimate: 0,
+    includedHardCanonItemIds: [],
+    truncatedHardCanonItemIds: [],
     createdAt: timestamp,
     updatedAt: timestamp
   }

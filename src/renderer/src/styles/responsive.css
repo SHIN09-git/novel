@@ -24,7 +24,8 @@
   .character-state-grid,
   .revision-studio-layout,
   .revision-compare,
-  .revision-diff-replace {
+  .revision-diff-replace,
+  .version-chain-layout {
     grid-template-columns: 1fr;
   }
 

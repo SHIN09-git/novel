@@ -1,18 +1,21 @@
 import { useEffect, useRef, useState } from 'react'
 import { EMPTY_APP_DATA } from '../../../shared/defaults'
-import type { AppData } from '../../../shared/types'
+import type { AppData, ChapterCommitBundle, GenerationRunBundle, RevisionCommitBundle } from '../../../shared/types'
 import { getUserFriendlyError } from '../../../shared/errorUtils'
-import type { StorageSaveResult } from '../../../shared/ipc/ipcTypes'
+import type { StorageSaveResult, StorageWriteResult } from '../../../shared/ipc/ipcTypes'
 import { createSaveQueue, type SaveQueue } from '../utils/saveQueue'
 import { resolveSaveDataInput, type SaveDataInput } from '../utils/saveDataState'
 
 export type { SaveDataInput }
 
+export type ChapterCommitSaveInput = (currentData: AppData) => { next: AppData; bundle: ChapterCommitBundle }
+export type RevisionCommitSaveInput = (currentData: AppData) => { next: AppData; bundle: RevisionCommitBundle }
+
 export function useAppData() {
   const [data, setData] = useState<AppData | null>(null)
   const [storagePath, setStoragePath] = useState('')
   const [status, setStatus] = useState('')
-  const saveQueueRef = useRef<SaveQueue<AppData, StorageSaveResult> | null>(null)
+  const saveQueueRef = useRef<SaveQueue<() => Promise<StorageSaveResult | StorageWriteResult>, StorageSaveResult | StorageWriteResult> | null>(null)
   const latestDataRef = useRef<AppData>(EMPTY_APP_DATA)
 
   useEffect(() => {
@@ -36,11 +39,11 @@ export function useAppData() {
     document.documentElement.dataset.theme = data.settings.theme
   }, [data])
 
-  function enqueueSave(next: AppData): Promise<StorageSaveResult> {
+  function enqueueStorageWrite(operation: () => Promise<StorageSaveResult | StorageWriteResult>): Promise<StorageSaveResult | StorageWriteResult> {
     if (!saveQueueRef.current) {
-      saveQueueRef.current = createSaveQueue((queuedData) => window.novelDirector.data.save(queuedData))
+      saveQueueRef.current = createSaveQueue((queuedOperation) => queuedOperation())
     }
-    return saveQueueRef.current.enqueue(next)
+    return saveQueueRef.current.enqueue(operation)
   }
 
   async function saveData(nextInput: SaveDataInput) {
@@ -49,11 +52,83 @@ export function useAppData() {
     setData(next)
     setStatus('保存中...')
     try {
-      const result = await enqueueSave(next)
+      const result = await enqueueStorageWrite(() => window.novelDirector.data.save(next))
       setStoragePath(result.storagePath)
       setStatus(result.credentialWarning || `已保存 ${new Date().toLocaleTimeString('zh-CN')}`)
     } catch (error) {
       setStatus(`保存失败：${getUserFriendlyError(error)}`)
+    }
+  }
+
+  async function saveGenerationRunBundle(nextInput: SaveDataInput, bundle: GenerationRunBundle) {
+    const next = resolveSaveDataInput(latestDataRef.current, nextInput)
+    latestDataRef.current = next
+    setData(next)
+    setStatus('淇濆瓨鐢熸垚杩愯璁板綍涓?..')
+    try {
+      const result = await enqueueStorageWrite(async () => {
+        if (window.novelDirector.data.saveGenerationRunBundle) {
+          try {
+            return await window.novelDirector.data.saveGenerationRunBundle(bundle)
+          } catch (error) {
+            console.warn('GenerationRunBundle save failed; falling back to full AppData save.', error)
+          }
+        }
+        return window.novelDirector.data.save(next)
+      })
+      setStoragePath(result.storagePath)
+      setStatus(result.credentialWarning || `宸蹭繚瀛?${new Date().toLocaleTimeString('zh-CN')}`)
+    } catch (error) {
+      setStatus(`鐢熸垚杩愯璁板綍淇濆瓨澶辫触锛?{getUserFriendlyError(error)}`)
+      throw error
+    }
+  }
+
+  async function saveChapterCommitBundle(buildCommit: ChapterCommitSaveInput) {
+    const { next, bundle } = buildCommit(latestDataRef.current)
+    latestDataRef.current = next
+    setData(next)
+    setStatus('正在提交正式章节...')
+    try {
+      const result = await enqueueStorageWrite(async () => {
+        if (window.novelDirector.data.saveChapterCommitBundle) {
+          try {
+            return await window.novelDirector.data.saveChapterCommitBundle(bundle)
+          } catch (error) {
+            console.warn('ChapterCommitBundle save failed; falling back to full AppData save.', error)
+          }
+        }
+        return window.novelDirector.data.save(next)
+      })
+      setStoragePath(result.storagePath)
+      setStatus(result.credentialWarning || `正式章节已提交 ${new Date().toLocaleTimeString('zh-CN')}`)
+    } catch (error) {
+      setStatus(`提交正式章节失败：${getUserFriendlyError(error)}`)
+      throw error
+    }
+  }
+
+  async function saveRevisionCommitBundle(buildCommit: RevisionCommitSaveInput) {
+    const { next, bundle } = buildCommit(latestDataRef.current)
+    latestDataRef.current = next
+    setData(next)
+    setStatus('正在提交正式修订...')
+    try {
+      const result = await enqueueStorageWrite(async () => {
+        if (window.novelDirector.data.saveRevisionCommitBundle) {
+          try {
+            return await window.novelDirector.data.saveRevisionCommitBundle(bundle)
+          } catch (error) {
+            console.warn('RevisionCommitBundle save failed; falling back to full AppData save.', error)
+          }
+        }
+        return window.novelDirector.data.save(next)
+      })
+      setStoragePath(result.storagePath)
+      setStatus(result.credentialWarning || `正式修订已提交 ${new Date().toLocaleTimeString('zh-CN')}`)
+    } catch (error) {
+      setStatus(`提交正式修订失败：${getUserFriendlyError(error)}`)
+      throw error
     }
   }
 
@@ -71,6 +146,9 @@ export function useAppData() {
     status,
     setStatus,
     saveData,
+    saveGenerationRunBundle,
+    saveChapterCommitBundle,
+    saveRevisionCommitBundle,
     replaceData
   }
 }

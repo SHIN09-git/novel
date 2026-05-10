@@ -6,6 +6,7 @@ export type View =
   | 'foreshadowings'
   | 'timeline'
   | 'stages'
+  | 'hardCanon'
   | 'direction'
   | 'prompt'
   | 'pipeline'
@@ -20,6 +21,7 @@ export const viewLabels: Record<View, string> = {
   foreshadowings: '伏笔',
   timeline: '时间线',
   stages: '阶段摘要',
+  hardCanon: '硬设定包',
   direction: '剧情导向',
   prompt: 'Prompt 构建器',
   pipeline: '生产流水线',

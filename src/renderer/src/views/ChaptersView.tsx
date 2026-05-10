@@ -20,9 +20,12 @@ import type {
   ForeshadowingStatusChangeSuggestion,
   ID,
   NextChapterSuggestions,
-  Project
+  Project,
+  RevisionCommitBundle
 } from '../../../shared/types'
 import { AIService } from '../../../services/AIService'
+import { buildRestoreRevisionCommitBundle, getChapterVersionChain, type ChapterVersionChainEntry } from '../../../services/ChapterVersionChainService'
+import { applyRevisionCommitBundleToAppData } from '../../../services/RevisionCommitBundleService'
 import { normalizeTreatmentMode } from '../../../shared/foreshadowingTreatment'
 import { ExportService } from '../../../services/ExportService'
 import { useConfirm } from '../components/ConfirmDialog'
@@ -42,6 +45,7 @@ interface ProjectProps {
   data: AppData
   project: Project
   saveData: (next: SaveDataInput) => Promise<void>
+  saveRevisionCommitBundle?: (buildCommit: (currentData: AppData) => { next: AppData; bundle: RevisionCommitBundle }) => Promise<void>
 }
 
 function updateProjectTimestamp(data: AppData, projectId: ID): Project[] {
@@ -60,7 +64,7 @@ const emptyBridgeSuggestion: ChapterContinuityBridgeSuggestion = {
   openMicroTensions: ''
 }
 
-export function ChaptersView({ data, project, saveData }: ProjectProps) {
+export function ChaptersView({ data, project, saveData, saveRevisionCommitBundle }: ProjectProps) {
   const confirmAction = useConfirm()
   const scoped = projectData(data, project.id)
   const chapters = [...scoped.chapters].sort((a, b) => a.order - b.order)
@@ -226,34 +230,67 @@ export function ChaptersView({ data, project, saveData }: ProjectProps) {
     setSelectedId(null)
   }
 
-  async function restoreChapterVersion(version: ChapterVersion) {
-    if (!selected) return
+  async function restoreChapterVersionEntry(entry: ChapterVersionChainEntry) {
+    if (!selected || !entry.version || entry.isCurrent) return
+    if (entry.body === selected.body && bodyDraft === selected.body) {
+      setAiMessage('该历史版本已经是当前正文，无需重复恢复。')
+      return
+    }
+    if (bodyDraft !== selected.body) {
+      const saveFirst = await confirmAction({
+        title: '存在未保存修改',
+        message: '当前编辑区有未保存修改。恢复历史版本前，建议先保存当前正文；保存后系统仍会把恢复动作写成新的版本提交。',
+        confirmLabel: '保存并继续'
+      })
+      if (!saveFirst) return
+      await flushBody()
+    }
     const confirmed = await confirmAction({
       title: '恢复历史版本',
-      message: '确定恢复这个历史版本吗？当前正文会先保存为一个新历史版本。',
-      confirmLabel: '恢复版本'
+      message: '系统会创建一个新的“历史版本恢复”提交；当前正文不会被永久删除，之后仍可以从版本链恢复回来。',
+      confirmLabel: '创建恢复版本'
     })
     if (!confirmed) return
     const timestamp = now()
-    const snapshot: ChapterVersion = {
-      id: newId(),
-      projectId: project.id,
-      chapterId: selected.id,
-      source: 'restore_before',
-      title: selected.title,
-      body: bodyDraft,
-      note: `恢复 ${formatDate(version.createdAt)} 版本前自动保存`,
-      createdAt: timestamp
+    const buildCommit = (current: AppData): { next: AppData; bundle: RevisionCommitBundle } => {
+      const bundle = buildRestoreRevisionCommitBundle({
+        appData: current,
+        projectId: project.id,
+        chapterId: selected.id,
+        sourceVersionId: entry.version?.id ?? '',
+        revisionCommitId: newId(),
+        newChapterVersionId: newId(),
+        restoredAt: timestamp,
+        note: `从 ${formatDate(entry.createdAt)} 的历史版本恢复`
+      })
+      return {
+        next: applyRevisionCommitBundleToAppData(current, bundle),
+        bundle
+      }
     }
-    await saveData((current) => ({
-      ...current,
-      projects: updateProjectTimestamp(current, project.id),
-      chapters: current.chapters.map((chapter) =>
-        chapter.id === selected.id ? { ...chapter, title: version.title, body: version.body, updatedAt: timestamp } : chapter
-      ),
-      chapterVersions: [snapshot, ...current.chapterVersions]
-    }))
-    setBodyDraft(version.body)
+    try {
+      if (saveRevisionCommitBundle) {
+        await saveRevisionCommitBundle(buildCommit)
+      } else {
+        await saveData((current) => buildCommit(current).next)
+      }
+      setBodyDraft(entry.body)
+      setAiMessage('已创建新的恢复版本，原版本链已保留。')
+    } catch (error) {
+      setAiMessage(error instanceof Error ? error.message : '恢复历史版本失败。')
+    }
+  }
+
+  async function deleteChapterVersionEntry(entry: ChapterVersionChainEntry) {
+    if (!entry.version) return
+    await deleteChapterVersion(entry.version)
+  }
+
+  async function copyChapterVersionEntry(entry: ChapterVersionChainEntry) {
+    const base = selected ?? chapters.find((chapter) => chapter.id === entry.chapterId)
+    if (!base) return
+    await window.novelDirector.clipboard.writeText(ExportService.formatChapterAsText({ ...base, title: entry.title, body: entry.body }))
+    setAiMessage('已复制历史版本正文')
   }
 
   async function deleteChapterVersion(version: ChapterVersion) {
@@ -567,9 +604,7 @@ export function ChaptersView({ data, project, saveData }: ProjectProps) {
     }
   }
 
-  const selectedChapterVersions = selected
-    ? [...scoped.chapterVersions].filter((version) => version.chapterId === selected.id).sort((a, b) => b.createdAt.localeCompare(a.createdAt))
-    : []
+  const selectedChapterVersionChain = selected ? getChapterVersionChain(data, selected.id) : []
   const bodyCharacterCount = bodyDraft.replace(/\s/g, '').length
   const paragraphCount = bodyDraft.trim() ? bodyDraft.split(/\n+/).filter((line) => line.trim()).length : 0
   const reviewFilledCount = selected
@@ -619,14 +654,15 @@ export function ChaptersView({ data, project, saveData }: ProjectProps) {
                 loadingAction={loadingAction}
                 aiMessage={aiMessage}
                 showVersionHistory={showVersionHistory}
-                versionCount={selectedChapterVersions.length}
+                versionCount={Math.max(0, selectedChapterVersionChain.length - 1)}
                 versionHistory={
                   <ChapterVersionHistoryPanel
+                    data={data}
                     selected={selected}
-                    versions={selectedChapterVersions}
-                    onCopyVersion={copyChapterVersion}
-                    onRestoreVersion={restoreChapterVersion}
-                    onDeleteVersion={deleteChapterVersion}
+                    entries={selectedChapterVersionChain}
+                    onCopyVersion={copyChapterVersionEntry}
+                    onRestoreVersion={restoreChapterVersionEntry}
+                    onDeleteVersion={deleteChapterVersionEntry}
                   />
                 }
                 onUpdateChapter={(patch) => {

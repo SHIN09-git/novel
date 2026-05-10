@@ -4,7 +4,8 @@ import type {
   GenerationRunTrace,
   PromptContextSnapshot,
   QualityGateReport,
-  RedundancyReport
+  RedundancyReport,
+  RunTraceAuthorSummary
 } from '../../../../shared/types'
 import { formatDate } from '../../utils/format'
 import { buildRunTraceSummary } from '../../views/generation/RunTracePanel'
@@ -16,7 +17,9 @@ export function PipelineTracePanel({
   qualityReport,
   continuityBridge,
   redundancyReport,
-  onCopy
+  authorSummary,
+  onCopy,
+  onGenerateAuthorSummary
 }: {
   trace: GenerationRunTrace | null
   snapshot: PromptContextSnapshot | null
@@ -24,7 +27,9 @@ export function PipelineTracePanel({
   qualityReport: QualityGateReport | null
   continuityBridge: ChapterContinuityBridge | null
   redundancyReport: RedundancyReport | null
+  authorSummary: RunTraceAuthorSummary | null
   onCopy: (trace: GenerationRunTrace) => void
+  onGenerateAuthorSummary?: (trace: GenerationRunTrace) => void
 }) {
   if (!trace) {
     return (
@@ -62,6 +67,31 @@ export function PipelineTracePanel({
       <p className="muted">
         质量问题 {issueCount} · 修订 {trace.revisionSessionIds.length} · 接受记忆 {trace.acceptedMemoryCandidateIds.length} · 拒绝记忆 {trace.rejectedMemoryCandidateIds.length}
       </p>
+      {authorSummary ? (
+        <div className={`author-summary-card status-${authorSummary.overallStatus}`}>
+          <div className="pipeline-card-title">
+            <h4>作者诊断摘要</h4>
+            <span>{authorSummary.overallStatus}</span>
+          </div>
+          <p>{authorSummary.oneLineDiagnosis}</p>
+          {authorSummary.likelyProblemSources.length ? (
+            <ul className="advice-list">
+              {authorSummary.likelyProblemSources.slice(0, 4).map((source) => (
+                <li key={source.source}>
+                  {source.source} · {source.severity}：{source.recommendation}
+                </li>
+              ))}
+            </ul>
+          ) : null}
+          {authorSummary.nextActions.length ? (
+            <p className="muted">建议动作：{authorSummary.nextActions.slice(0, 3).map((action) => action.label).join(' / ')}</p>
+          ) : null}
+        </div>
+      ) : (
+        <button className="secondary-button" onClick={() => onGenerateAuthorSummary?.(trace)}>
+          生成诊断摘要
+        </button>
+      )}
       {trace.compressionRecords.length ? (
         <details>
           <summary>上下文压缩 {trace.compressionRecords.length} 条</summary>
@@ -85,7 +115,7 @@ export function PipelineTracePanel({
         </details>
       ) : null}
       <details>
-        <summary>查看追踪 JSON 摘要</summary>
+        <summary>高级 / 调试信息：查看追踪 JSON 摘要</summary>
         <pre>{JSON.stringify(buildRunTraceSummary(trace, consistencyReport, qualityReport), null, 2).slice(0, 2200)}</pre>
       </details>
       {continuityBridge ? <p className="muted">章节衔接：{continuityBridge.immediateNextBeat || continuityBridge.mustContinueFrom}</p> : null}

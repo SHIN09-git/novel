@@ -4,6 +4,7 @@ import type {
   ID,
   Project,
   QualityGateIssue,
+  RevisionCommitBundle,
   RevisionRequest,
   RevisionRequestType,
   RevisionSession,
@@ -17,6 +18,7 @@ import { ActionToolbar, SectionCard } from '../components/UI'
 import { newId, now, statusLabel, weightLabel } from '../utils/format'
 import { projectData } from '../utils/projectData'
 import { upsertGenerationRunTraceByJobId } from '../utils/runTrace'
+import { applyRevisionCommitBundleToAppData, buildRevisionCommitBundle } from '../../../services/RevisionCommitBundleService'
 import { LocalRevisionMergeError, looksLikeFullChapterRevision, mergeLocalRevisionSafely } from '../utils/revisionMerge'
 import { applyAcceptedRevisionWriteback, resolveDraftLinkedChapter } from '../utils/revisionWriteback'
 import type { SaveDataInput } from '../utils/saveDataState'
@@ -26,6 +28,7 @@ interface ProjectProps {
   data: AppData
   project: Project
   saveData: (next: SaveDataInput) => Promise<void>
+  saveRevisionCommitBundle?: (buildCommit: (currentData: AppData) => { next: AppData; bundle: RevisionCommitBundle }) => Promise<void>
   prefill?: { chapterId: ID | null; draftId: ID | null; requestId: ID } | null
   onPrefillConsumed?: () => void
 }
@@ -70,7 +73,7 @@ function issueToRevisionType(issue: QualityGateIssue): RevisionRequestType {
   return 'custom'
 }
 
-export function RevisionStudioView({ data, project, saveData, prefill, onPrefillConsumed }: ProjectProps) {
+export function RevisionStudioView({ data, project, saveData, saveRevisionCommitBundle, prefill, onPrefillConsumed }: ProjectProps) {
   const confirmAction = useConfirm()
   const scoped = projectData(data, project.id)
   const chapters = [...scoped.chapters].sort((a, b) => a.order - b.order)
@@ -311,7 +314,7 @@ export function RevisionStudioView({ data, project, saveData, prefill, onPrefill
   }
 
   async function acceptVersion(version: RevisionVersion) {
-    if (version.status !== 'pending') return
+    if (version.status !== 'pending' && version.status !== 'draft') return
     if (sourceKind === 'chapter' && !selectedChapter) return
     if (sourceKind === 'draft' && !selectedDraft) {
       setMessage('请先选择一个草稿。')
@@ -341,19 +344,65 @@ export function RevisionStudioView({ data, project, saveData, prefill, onPrefill
     if (!confirmed) return
     const timestamp = now()
     let writebackMessage = ''
-    await saveData((current) => {
+    const createRevisionCommit = (current: AppData): { next: AppData; bundle: RevisionCommitBundle } | null => {
       const currentScoped = projectData(current, project.id)
       const currentDraft = selectedDraft ? currentScoped.generatedChapterDrafts.find((draft) => draft.id === selectedDraft.id) ?? selectedDraft : null
       const currentLinkedDraftChapter = sourceKind === 'draft' ? resolveDraftLinkedChapter(currentDraft, currentScoped.chapters) : null
       const currentChapter = selectedChapter ? currentScoped.chapters.find((chapter) => chapter.id === selectedChapter.id) ?? selectedChapter : null
-      if (sourceKind === 'chapter' && !currentChapter) {
+      const targetChapter = sourceKind === 'draft' ? currentLinkedDraftChapter : currentChapter
+      if (!targetChapter) {
+        writebackMessage = '无法提交修订：目标章节不存在。'
+        return null
+      }
+
+      const bundle = buildRevisionCommitBundle({
+        appData: current,
+        projectId: project.id,
+        chapterId: targetChapter.id,
+        revisionCommitId: newId(),
+        newChapterVersionId: newId(),
+        revisionSessionId: version.sessionId,
+        revisionVersionId: version.id,
+        revisedAt: timestamp,
+        revisedBy: 'user_with_ai',
+        afterText: version.body,
+        revisionReason: version.title,
+        revisionNote: sourceKind === 'draft' ? '接受草稿修订版本。' : '接受章节修订版本。'
+      })
+
+      writebackMessage =
+        sourceKind === 'draft'
+          ? '已接受草稿修订版本，同步更新草稿与关联章节，并记录正式修订提交。'
+          : '已接受修订版本，并记录正式修订提交。'
+      return {
+        next: applyRevisionCommitBundleToAppData(current, bundle),
+        bundle
+      }
+    }
+
+    if (!(sourceKind === 'draft' && !linkedDraftChapter)) {
+      if (saveRevisionCommitBundle) {
+        await saveRevisionCommitBundle((current) => {
+          const result = createRevisionCommit(current)
+          if (!result) throw new Error(writebackMessage || '无法提交修订。')
+          return result
+        })
+      } else {
+        await saveData((current) => createRevisionCommit(current)?.next ?? current)
+      }
+      setMessage(writebackMessage)
+      return
+    }
+
+    await saveData((current) => {
+      const currentScoped = projectData(current, project.id)
+      const currentDraft = selectedDraft ? currentScoped.generatedChapterDrafts.find((draft) => draft.id === selectedDraft.id) ?? selectedDraft : null
+      const currentLinkedDraftChapter = sourceKind === 'draft' ? resolveDraftLinkedChapter(currentDraft, currentScoped.chapters) : null
+      if (!currentDraft) {
         writebackMessage = '章节已不存在，无法写回修订版本。'
         return current
       }
-      const currentWritebackSource =
-        sourceKind === 'draft' && currentDraft
-          ? { kind: 'draft' as const, draft: currentDraft, linkedChapter: currentLinkedDraftChapter }
-          : { kind: 'chapter' as const, chapter: currentChapter! }
+      const currentWritebackSource = { kind: 'draft' as const, draft: currentDraft, linkedChapter: currentLinkedDraftChapter }
       const writeback = applyAcceptedRevisionWriteback(current, project.id, currentWritebackSource, version, timestamp)
       writebackMessage = writeback.message
       let nextData: AppData = writeback.data

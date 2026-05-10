@@ -99,12 +99,15 @@ export function HomeView({
         contextBudgetProfiles: current.contextBudgetProfiles.filter((item) => item.projectId !== project.id),
         qualityGateReports: current.qualityGateReports.filter((item) => item.projectId !== project.id),
         generationRunTraces: current.generationRunTraces.filter((item) => item.projectId !== project.id),
+        runTraceAuthorSummaries: current.runTraceAuthorSummaries.filter((item) => item.projectId !== project.id),
         redundancyReports: current.redundancyReports.filter((item) => item.projectId !== project.id),
         revisionCandidates: current.revisionCandidates.filter((item) => item.projectId !== project.id),
         revisionSessions: current.revisionSessions.filter((item) => item.projectId !== project.id),
         revisionRequests: current.revisionRequests.filter((item) => !projectRevisionSessionIds.has(item.sessionId)),
         revisionVersions: current.revisionVersions.filter((item) => !projectRevisionSessionIds.has(item.sessionId)),
-        chapterVersions: current.chapterVersions.filter((item) => item.projectId !== project.id)
+        chapterVersions: current.chapterVersions.filter((item) => item.projectId !== project.id),
+        chapterCommitBundles: current.chapterCommitBundles.filter((item) => item.projectId !== project.id),
+        revisionCommitBundles: current.revisionCommitBundles.filter((item) => item.projectId !== project.id)
       }
     })
   }

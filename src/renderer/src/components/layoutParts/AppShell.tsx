@@ -74,6 +74,13 @@ function NavIcon({ view }: { view: View }) {
           <path d="m4 16 8 4 8-4" />
         </IconSvg>
       )
+    case 'hardCanon':
+      return (
+        <IconSvg>
+          <path d="M12 3.5 19 6v5.4c0 4.4-2.8 7.5-7 9.1-4.2-1.6-7-4.7-7-9.1V6l7-2.5Z" />
+          <path d="M8.5 12.2 11 14.6l4.8-5.2" />
+        </IconSvg>
+      )
     case 'direction':
       return (
         <IconSvg>

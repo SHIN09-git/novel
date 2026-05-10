@@ -1,6 +1,9 @@
 export const IPC_CHANNELS = {
   STORAGE_GET: 'storage:get',
   STORAGE_SAVE: 'storage:save',
+  DATA_SAVE_GENERATION_RUN_BUNDLE: 'data:save-generation-run-bundle',
+  DATA_SAVE_CHAPTER_COMMIT_BUNDLE: 'data:save-chapter-commit-bundle',
+  DATA_SAVE_REVISION_COMMIT_BUNDLE: 'data:save-revision-commit-bundle',
   STORAGE_EXPORT: 'storage:export',
   STORAGE_IMPORT: 'storage:import',
 

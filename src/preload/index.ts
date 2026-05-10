@@ -16,11 +16,12 @@ import type {
   MigrationMergePreviewResult,
   OpenStorageFolderResult,
   SaveFileResult,
+  StorageWriteResult,
   SelectStoragePathResult,
   StorageGetResult,
   StorageSaveResult
 } from '../shared/ipc/ipcTypes'
-import type { AppData } from '../shared/types'
+import type { AppData, ChapterCommitBundle, GenerationRunBundle, RevisionCommitBundle } from '../shared/types'
 
 function isIpcFailure(value: unknown): value is IpcFailure {
   return Boolean(
@@ -47,6 +48,12 @@ const novelDirector = {
   data: {
     load: () => invokeOrThrow<StorageGetResult>(IPC_CHANNELS.STORAGE_GET),
     save: (data: AppData) => invokeOrThrow<StorageSaveResult>(IPC_CHANNELS.STORAGE_SAVE, data),
+    saveGenerationRunBundle: (bundle: GenerationRunBundle) =>
+      invokeOrThrow<StorageWriteResult>(IPC_CHANNELS.DATA_SAVE_GENERATION_RUN_BUNDLE, { bundle }),
+    saveChapterCommitBundle: (bundle: ChapterCommitBundle) =>
+      invokeOrThrow<StorageWriteResult>(IPC_CHANNELS.DATA_SAVE_CHAPTER_COMMIT_BUNDLE, { bundle }),
+    saveRevisionCommitBundle: (bundle: RevisionCommitBundle) =>
+      invokeOrThrow<StorageWriteResult>(IPC_CHANNELS.DATA_SAVE_REVISION_COMMIT_BUNDLE, { bundle }),
     export: (data: AppData) => invokeOrThrow<ExportDataResult>(IPC_CHANNELS.STORAGE_EXPORT, data),
     import: () => invokeOrThrow<ImportDataResult>(IPC_CHANNELS.STORAGE_IMPORT)
   },
@@ -115,6 +122,9 @@ const novelDirector = {
 const novelAPI = {
   getData: novelDirector.data.load,
   saveData: novelDirector.data.save,
+  saveGenerationRunBundle: novelDirector.data.saveGenerationRunBundle,
+  saveChapterCommitBundle: novelDirector.data.saveChapterCommitBundle,
+  saveRevisionCommitBundle: novelDirector.data.saveRevisionCommitBundle,
   exportData: novelDirector.data.export,
   importData: novelDirector.data.import,
   getDataStoragePath: novelDirector.app.getStoragePath,

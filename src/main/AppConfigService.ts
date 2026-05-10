@@ -1,5 +1,6 @@
 import { copyFile, mkdir, readFile, rename, stat, writeFile } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
+import { SQLITE_DATA_FILE_NAME } from '../storage/StorageService'
 
 interface AppConfig {
   storagePath?: string
@@ -13,7 +14,7 @@ export class AppConfigService {
   }
 
   getDefaultStoragePath(): string {
-    return join(this.userDataPath, 'novel-director-data.json')
+    return join(this.userDataPath, SQLITE_DATA_FILE_NAME)
   }
 
   async getStoragePath(): Promise<string> {

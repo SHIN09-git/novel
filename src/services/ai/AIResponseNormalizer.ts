@@ -488,7 +488,7 @@ export function ensureQualityGateEvaluation(value: unknown): QualityGateEvaluati
   const issues = Array.isArray(obj.issues) ? obj.issues.map(ensureQualityGateIssue) : []
   return {
     overallScore,
-    pass: typeof obj.pass === 'boolean' ? obj.pass : overallScore >= 75 && !issues.some((issue) => issue.severity === 'high'),
+    pass: typeof obj.pass === 'boolean' ? obj.pass : overallScore >= 80 && !issues.some((issue) => issue.severity === 'high'),
     dimensions,
     issues,
     requiredFixes: asStringArray(obj.requiredFixes),

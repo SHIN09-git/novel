@@ -12,7 +12,9 @@ import type {
   ContextBudgetProfile,
   ContextNeedPlan,
   ContextSelectionResult,
+  ContextSelectionTrace,
   ForcedContextBlock,
+  GenerationRunBundle,
   PlanContextGapAnalysisResult,
   PromptBlockOrderItem,
   GeneratedChapterDraft,
@@ -41,6 +43,11 @@ import { analyzeRedundancy } from '../../../../services/RedundancyService'
 import { NoveltyDetector } from '../../../../services/NoveltyDetector'
 import { PlanContextGapAnalyzerService } from '../../../../services/PlanContextGapAnalyzerService'
 import { StoryDirectionService } from '../../../../services/StoryDirectionService'
+import {
+  appendMissingGenerationRunRelatedItems,
+  applyGenerationRunBundleToAppData,
+  buildGenerationRunBundle
+} from '../../../../services/GenerationRunBundleService'
 import { newId, now } from '../../utils/format'
 import { createContextBudgetProfile, selectBudgetContext, buildPipelineContextResultFromSelection } from '../../utils/promptContext'
 import { releasePipelineRunLock, tryAcquirePipelineRunLock } from '../../utils/pipelineRunLock'
@@ -61,6 +68,7 @@ interface UsePipelineRunnerArgs {
     stageSummaries: AppData['stageSummaries']
   }
   saveData: (next: SaveDataInput) => Promise<void>
+  saveGenerationRunBundle?: (next: SaveDataInput, bundle: GenerationRunBundle) => Promise<void>
   targetChapterOrder: number
   pipelineMode: PipelineMode
   estimatedWordCount: string
@@ -130,6 +138,97 @@ function uniqueIds(ids: ID[]): ID[] {
 function diffIds(next: ID[] = [], previous: ID[] = []): ID[] {
   const previousSet = new Set(previous)
   return uniqueIds(next.filter((id) => !previousSet.has(id)))
+}
+
+function enrichContextSelectionTrace(
+  baseTrace: ContextSelectionTrace | null | undefined,
+  args: {
+    jobId: ID
+    contextNeedPlan: ContextNeedPlan | null
+    includedCharacterStateFacts: CharacterStateFact[]
+    hardCanonTrace: { itemCount: number; tokenEstimate: number; includedItemIds: ID[]; truncatedItemIds: ID[] }
+    finalPromptTokenEstimate: number
+  }
+): ContextSelectionTrace | null {
+  if (!baseTrace) return null
+  const selectedBlocks = [...baseTrace.selectedBlocks]
+  const droppedBlocks = [...baseTrace.droppedBlocks]
+  const unmetNeeds = [...baseTrace.unmetNeeds]
+
+  for (const fact of args.includedCharacterStateFacts) {
+    selectedBlocks.push({
+      blockType: 'character_state_fact',
+      sourceId: fact.id,
+      priority: fact.trackingLevel === 'hard' ? 'must' : 'high',
+      tokenEstimate: TokenEstimator.estimate([fact.label, fact.value, fact.evidence].filter(Boolean).join('\n')),
+      reason: `角色状态账本事实「${fact.label || fact.key}」进入 prompt，约束本章连续性。`
+    })
+  }
+
+  const hardCanonToken = args.hardCanonTrace.includedItemIds.length
+    ? Math.max(1, Math.round(args.hardCanonTrace.tokenEstimate / args.hardCanonTrace.includedItemIds.length))
+    : 0
+  for (const itemId of args.hardCanonTrace.includedItemIds) {
+    selectedBlocks.push({
+      blockType: 'hard_canon',
+      sourceId: itemId,
+      priority: 'must',
+      tokenEstimate: hardCanonToken,
+      reason: 'HardCanonPack 条目进入 prompt，作为不可违背硬设定。'
+    })
+  }
+  for (const itemId of args.hardCanonTrace.truncatedItemIds) {
+    droppedBlocks.push({
+      blockType: 'hard_canon',
+      sourceId: itemId,
+      priority: 'must',
+      tokenEstimate: hardCanonToken,
+      dropReason: 'HardCanonPack 超出预算，被压缩或截断。'
+    })
+    unmetNeeds.push({
+      needType: 'hard_canon',
+      priority: 'must',
+      reason: 'HardCanonPack 有 must/high 条目未完整进入 prompt。',
+      sourceId: itemId
+    })
+  }
+
+  const factsByCharacterId = new Set(args.includedCharacterStateFacts.map((fact) => fact.characterId))
+  for (const [characterId, categories] of Object.entries(args.contextNeedPlan?.requiredStateFactCategories ?? {})) {
+    if (categories.length > 0 && !factsByCharacterId.has(characterId)) {
+      unmetNeeds.push({
+        needType: 'character_state',
+        priority: 'must',
+        reason: `本章需求计划要求角色状态类别 ${categories.join(', ')}，但 prompt 未找到匹配状态事实。`,
+        sourceId: characterId
+      })
+    }
+  }
+
+  const seenUnmet = new Set<string>()
+  return {
+    ...baseTrace,
+    jobId: args.jobId,
+    selectedBlocks,
+    droppedBlocks,
+    unmetNeeds: unmetNeeds.filter((item) => {
+      const key = `${item.needType}:${item.sourceId ?? ''}:${item.priority}`
+      if (seenUnmet.has(key)) return false
+      seenUnmet.add(key)
+      return true
+    }),
+    budgetSummary: {
+      ...baseTrace.budgetSummary,
+      usedTokens: args.finalPromptTokenEstimate,
+      reservedTokens: Math.max(0, baseTrace.budgetSummary.totalBudget - args.finalPromptTokenEstimate),
+      pressure:
+        args.finalPromptTokenEstimate >= baseTrace.budgetSummary.totalBudget * 0.9 || droppedBlocks.length >= 12
+          ? 'high'
+          : args.finalPromptTokenEstimate >= baseTrace.budgetSummary.totalBudget * 0.7 || droppedBlocks.length >= 4
+            ? 'medium'
+            : 'low'
+    }
+  }
 }
 
 function summarizeSnapshot(snapshot: PromptContextSnapshot) {
@@ -248,28 +347,12 @@ function noveltyAdjustedConfidence(audit: NoveltyAuditResult | null, base: numbe
   return base
 }
 
-function mergePipelineWorking(current: AppData, working: AppData): AppData {
-  return {
-    ...current,
-    projects: working.projects,
-    chapterGenerationJobs: working.chapterGenerationJobs,
-    chapterGenerationSteps: working.chapterGenerationSteps,
-    generatedChapterDrafts: working.generatedChapterDrafts,
-    memoryUpdateCandidates: working.memoryUpdateCandidates,
-    consistencyReviewReports: working.consistencyReviewReports,
-    qualityGateReports: working.qualityGateReports,
-    contextBudgetProfiles: working.contextBudgetProfiles,
-    contextNeedPlans: working.contextNeedPlans,
-    generationRunTraces: working.generationRunTraces,
-    redundancyReports: working.redundancyReports
-  }
-}
-
 export function usePipelineRunner({
   data,
   project,
   scoped,
   saveData,
+  saveGenerationRunBundle,
   targetChapterOrder,
   pipelineMode,
   estimatedWordCount,
@@ -300,25 +383,27 @@ export function usePipelineRunner({
     }))
   }
 
-  function mergePipelineWorking(current: AppData, working: AppData): AppData {
+  function mergePipelineWorking(current: AppData, working: AppData, jobId?: ID): AppData {
+    const next = jobId ? applyGenerationRunBundleToAppData(current, buildGenerationRunBundle(working, jobId)) : current
     return {
-      ...current,
-      projects: working.projects,
-      chapterGenerationJobs: working.chapterGenerationJobs,
-      chapterGenerationSteps: working.chapterGenerationSteps,
-      generatedChapterDrafts: working.generatedChapterDrafts,
-      memoryUpdateCandidates: working.memoryUpdateCandidates,
-      consistencyReviewReports: working.consistencyReviewReports,
-      qualityGateReports: working.qualityGateReports,
-      contextBudgetProfiles: working.contextBudgetProfiles,
-      contextNeedPlans: working.contextNeedPlans,
-      generationRunTraces: working.generationRunTraces,
-      redundancyReports: working.redundancyReports
+      ...next,
+      contextBudgetProfiles: appendMissingGenerationRunRelatedItems(next.contextBudgetProfiles, working.contextBudgetProfiles),
+      contextNeedPlans: appendMissingGenerationRunRelatedItems(next.contextNeedPlans, working.contextNeedPlans),
+      characterStateChangeCandidates: appendMissingGenerationRunRelatedItems(
+        next.characterStateChangeCandidates,
+        working.characterStateChangeCandidates
+      ),
+      redundancyReports: appendMissingGenerationRunRelatedItems(next.redundancyReports, working.redundancyReports)
     }
   }
 
-  async function persistWorking(next: AppData, statusMessage?: string): Promise<AppData> {
-    await saveData((current) => mergePipelineWorking(current, next))
+  async function persistWorking(next: AppData, jobId?: ID, statusMessage?: string): Promise<AppData> {
+    if (jobId && saveGenerationRunBundle) {
+      const bundle = buildGenerationRunBundle(next, jobId)
+      await saveGenerationRunBundle((current) => mergePipelineWorking(current, next, jobId), bundle)
+    } else {
+      await saveData((current) => mergePipelineWorking(current, next, jobId))
+    }
     if (statusMessage) {
       // saveData owns the visible status; this keeps the call sites readable.
       void statusMessage
@@ -379,7 +464,7 @@ export function usePipelineRunner({
       chapterGenerationJobs: [job, ...data.chapterGenerationJobs],
       chapterGenerationSteps: [...data.chapterGenerationSteps, ...steps]
     }
-    await persistWorking(working)
+    await persistWorking(working, job.id)
     setSelectedJobId(job.id)
     await runPipelineFromStep(working, job.id, 'context_need_planning', {
       targetChapterOrder,
@@ -524,7 +609,7 @@ export function usePipelineRunner({
         { status: 'running', inputSnapshot: serializeOutput(options), errorMessage: '' },
         { status: 'running', currentStep: type, errorMessage: '' }
       )
-      await persistWorking(working)
+      await persistWorking(working, jobId)
 
       try {
         if (type === 'context_need_planning') {
@@ -608,6 +693,7 @@ export function usePipelineRunner({
 
         if (type === 'build_context') {
           let promptBlockOrder: PromptBlockOrderItem[] = []
+          let hardCanonTrace = { itemCount: 0, tokenEstimate: 0, includedItemIds: [] as ID[], truncatedItemIds: [] as ID[] }
           if (job.contextSource === 'prompt_snapshot') {
             if (!snapshot) throw new Error('Prompt 上下文快照已丢失，请重新构建上下文。')
             context = snapshot.finalPrompt
@@ -632,6 +718,12 @@ export function usePipelineRunner({
             )
             context = promptResult.finalPrompt
             promptBlockOrder = promptResult.promptBlockOrder
+            hardCanonTrace = {
+              itemCount: promptResult.hardCanonPrompt?.itemCount ?? 0,
+              tokenEstimate: promptResult.hardCanonPrompt?.tokenEstimate ?? 0,
+              includedItemIds: promptResult.hardCanonPrompt?.includedItemIds ?? [],
+              truncatedItemIds: promptResult.hardCanonPrompt?.truncatedItemIds ?? []
+            }
           }
           const continuityResult = resolveContinuityBridge({
             projectId: project.id,
@@ -698,6 +790,16 @@ export function usePipelineRunner({
             options.targetChapterOrder,
             working.characterStateFacts.filter((fact) => fact.projectId === project.id)
           )
+          const contextSelectionTrace = enrichContextSelectionTrace(
+            snapshot?.contextSelectionResult.contextSelectionTrace ?? budgetSelection?.contextSelectionTrace,
+            {
+              jobId: job.id,
+              contextNeedPlan,
+              includedCharacterStateFacts,
+              hardCanonTrace,
+              finalPromptTokenEstimate
+            }
+          )
           working = upsertGenerationRunTrace(working, job, {
             ...storyDirectionTracePatch,
             targetChapterOrder: options.targetChapterOrder,
@@ -748,7 +850,12 @@ export function usePipelineRunner({
               : contextNeedPlan
                 ? ['上下文需求计划要求角色状态类别，但本章没有匹配的状态账本事实。']
                 : [],
-            characterStateIssueIds: []
+            characterStateIssueIds: [],
+            hardCanonPackItemCount: hardCanonTrace.itemCount,
+            hardCanonPackTokenEstimate: hardCanonTrace.tokenEstimate,
+            includedHardCanonItemIds: hardCanonTrace.includedItemIds,
+            truncatedHardCanonItemIds: hardCanonTrace.truncatedItemIds,
+            contextSelectionTrace
           })
         }
 
@@ -858,6 +965,7 @@ export function usePipelineRunner({
 
         if (type === 'rebuild_context_with_plan') {
           let promptBlockOrder: PromptBlockOrderItem[] = []
+          let hardCanonTrace = { itemCount: 0, tokenEstimate: 0, includedItemIds: [] as ID[], truncatedItemIds: [] as ID[] }
           if (job.contextSource === 'prompt_snapshot') {
             if (!snapshot) throw new Error('Prompt 上下文快照已丢失，请重新构建上下文。')
             context = snapshot.finalPrompt
@@ -878,6 +986,12 @@ export function usePipelineRunner({
             )
             context = promptResult.finalPrompt
             promptBlockOrder = promptResult.promptBlockOrder
+            hardCanonTrace = {
+              itemCount: promptResult.hardCanonPrompt?.itemCount ?? 0,
+              tokenEstimate: promptResult.hardCanonPrompt?.tokenEstimate ?? 0,
+              includedItemIds: promptResult.hardCanonPrompt?.includedItemIds ?? [],
+              truncatedItemIds: promptResult.hardCanonPrompt?.truncatedItemIds ?? []
+            }
             rebuiltContextFromPlan = true
           }
           const continuityResult = resolveContinuityBridge({
@@ -932,6 +1046,16 @@ export function usePipelineRunner({
             activeNeedPlan,
             options.targetChapterOrder,
             working.characterStateFacts.filter((fact) => fact.projectId === project.id)
+          )
+          const contextSelectionTrace = enrichContextSelectionTrace(
+            snapshot?.contextSelectionResult.contextSelectionTrace ?? budgetSelection?.contextSelectionTrace,
+            {
+              jobId: job.id,
+              contextNeedPlan: activeNeedPlan,
+              includedCharacterStateFacts,
+              hardCanonTrace,
+              finalPromptTokenEstimate
+            }
           )
           working = updateStepInData(working, step.id, {
             status: 'completed',
@@ -997,7 +1121,12 @@ export function usePipelineRunner({
               : activeNeedPlan
                 ? ['上下文需求计划要求角色状态类别，但本章没有匹配的状态账本事实。']
                 : [],
-            characterStateIssueIds: []
+            characterStateIssueIds: [],
+            hardCanonPackItemCount: hardCanonTrace.itemCount,
+            hardCanonPackTokenEstimate: hardCanonTrace.tokenEstimate,
+            includedHardCanonItemIds: hardCanonTrace.includedItemIds,
+            truncatedHardCanonItemIds: hardCanonTrace.truncatedItemIds,
+            contextSelectionTrace
           })
         }
 
@@ -1049,6 +1178,8 @@ export function usePipelineRunner({
             draftId: draft.id,
             body: result.data.body
           })
+          redundancyReport.jobId = jobId
+          redundancyReport.updatedAt = redundancyReport.createdAt
           draftRecord = draft
           working = {
             ...updateStepInData(working, step.id, { status: 'completed', output: serializeOutput(result.data) }),
@@ -1144,6 +1275,7 @@ export function usePipelineRunner({
             return {
               id: newId(),
               projectId: project.id,
+              jobId,
               characterId: suggestion.characterId,
               chapterId: null,
               chapterOrder: options.targetChapterOrder,
@@ -1317,11 +1449,11 @@ export function usePipelineRunner({
           working = updateStepInData(working, step.id, { status: 'completed', output: '等待用户确认章节草稿和记忆更新候选。' }, { status: 'completed', currentStep: type })
         }
 
-        await persistWorking(working)
+        await persistWorking(working, jobId)
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error)
         working = updateStepInData(working, step.id, { status: 'failed', errorMessage: message }, { status: 'failed', errorMessage: message })
-        await persistWorking(working)
+        await persistWorking(working, jobId)
         break
       }
     }

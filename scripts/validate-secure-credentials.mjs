@@ -31,12 +31,13 @@ async function main() {
   const handlers = await read('src/main/ipc/registerIpcHandlers.ts')
   const defaults = await read('src/shared/defaults.ts')
   const storage = await read('src/storage/JsonStorageService.ts')
+  const sqliteStorage = await read('src/storage/SqliteStorageService.ts')
   const dataMerge = await read('src/main/DataMergeService.ts')
   const settingsView = await read('src/renderer/src/views/SettingsView.tsx')
   const aiClient = await read('src/services/ai/AIClient.ts')
   const fixtureData = await readJson(rcDataPath)
   const migratedData = await readJson(migratedDataPath)
-  const combinedSource = [secureService, handlers, defaults, storage, dataMerge, settingsView, aiClient].join('\n')
+  const combinedSource = [secureService, handlers, defaults, storage, sqliteStorage, dataMerge, settingsView, aiClient].join('\n')
 
   checks.push(
     assert(
@@ -83,8 +84,9 @@ async function main() {
     assert(
       defaults.includes('sanitizeAppDataForPersistence') &&
         defaults.includes("apiKey: ''") &&
-        storage.includes('sanitizeAppDataForPersistence(data)'),
-      'normal AppData persistence strips plaintext settings.apiKey before writing JSON'
+        storage.includes('sanitizeAppDataForPersistence(data)') &&
+        sqliteStorage.includes('sanitizeAppDataForPersistence(data)'),
+      'normal AppData persistence strips plaintext settings.apiKey before writing local data files'
     )
   )
 
@@ -120,8 +122,8 @@ async function main() {
     assert(
       dataMerge.includes('const sanitizedMergedData = sanitizeAppDataForPersistence(mergedData)') &&
         dataMerge.includes('mergedSummary: summarizeDataFile(sanitizedMergedData)') &&
-        dataMerge.includes('await storage.save(mergedData)'),
-      'DataMergeService sanitizes merged AppData and writes through JsonStorageService'
+        dataMerge.includes('await saveDataFile(targetPath, mergedData)'),
+      'DataMergeService sanitizes merged AppData and writes through the active storage backend'
     )
   )
 

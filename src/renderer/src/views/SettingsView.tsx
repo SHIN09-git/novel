@@ -322,7 +322,7 @@ export function SettingsView({
           <code>{defaultStoragePath || '读取中'}</code>
         </div>
         <div className="form-grid compact">
-          <TextInput label="新数据保存路径（文件夹或 .json 文件）" value={pendingStoragePath} onChange={setPendingStoragePath} />
+          <TextInput label="新数据保存路径（文件夹或本地数据文件）" value={pendingStoragePath} onChange={setPendingStoragePath} />
         </div>
         {storageMessage ? <div className="notice">{storageMessage}</div> : null}
         {mergePreview ? (

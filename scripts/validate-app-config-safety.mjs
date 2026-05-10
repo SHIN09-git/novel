@@ -12,9 +12,10 @@ function assert(condition, message, details = {}) {
   return condition ? { ok: true, message } : { ok: false, message, details }
 }
 
-async function compileTsModule(relativePath) {
+async function compileTsModulePath(relativePath, replacements = []) {
   const sourcePath = join(root, relativePath)
-  const source = await readFile(sourcePath, 'utf-8')
+  let source = await readFile(sourcePath, 'utf-8')
+  for (const [from, to] of replacements) source = source.replace(from, to)
   const compiled = ts.transpileModule(source, {
     compilerOptions: {
       module: ts.ModuleKind.ES2022,
@@ -25,6 +26,11 @@ async function compileTsModule(relativePath) {
   await mkdir(outDir, { recursive: true })
   const outPath = join(outDir, `${relativePath.replace(/[\\/.:]/g, '-')}.mjs`)
   await writeFile(outPath, compiled.outputText, 'utf-8')
+  return outPath
+}
+
+async function compileTsModule(relativePath, replacements = []) {
+  const outPath = await compileTsModulePath(relativePath, replacements)
   return import(`${pathToFileURL(outPath).href}?t=${Date.now()}`)
 }
 
@@ -37,7 +43,10 @@ async function main() {
   await mkdir(userDataDir, { recursive: true })
 
   const checks = []
-  const { AppConfigService } = await compileTsModule('src/main/AppConfigService.ts')
+  const storageServicePath = await compileTsModulePath('src/storage/StorageService.ts')
+  const { AppConfigService } = await compileTsModule('src/main/AppConfigService.ts', [
+    ["from '../storage/StorageService'", `from '${pathToFileURL(storageServicePath).href}'`]
+  ])
   const service = new AppConfigService(userDataDir)
   const configPath = await service.getConfigPath()
   const defaultStoragePath = service.getDefaultStoragePath()

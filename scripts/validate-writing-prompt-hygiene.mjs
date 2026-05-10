@@ -45,6 +45,7 @@ async function loadPromptBuilder() {
     'src/services/ContextCompressionService.ts',
     'src/services/ContextBudgetManager.ts',
     'src/services/StoryDirectionService.ts',
+    'src/services/HardCanonPackService.ts',
     'src/services/PromptBuilderService.ts'
   ])
   return import(`${pathToFileURL(join(outDir, 'src/services/PromptBuilderService.mjs')).href}?t=${Date.now()}`)

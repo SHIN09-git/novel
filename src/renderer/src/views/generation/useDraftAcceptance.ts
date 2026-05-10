@@ -1,5 +1,6 @@
 import type {
   AppData,
+  ChapterCommitBundle,
   Chapter,
   ChapterGenerationJob,
   GeneratedChapterDraft,
@@ -7,8 +8,11 @@ import type {
   Project,
   QualityGateReport
 } from '../../../../shared/types'
+import {
+  applyChapterCommitBundleToAppData,
+  buildAcceptedDraftCommitBundle
+} from '../../../../services/ChapterCommitBundleService'
 import type { ConfirmFn } from '../../components/ConfirmDialog'
-import { createChapterVersionBeforeAcceptDraft } from '../../utils/draftAcceptance'
 import { newId, now } from '../../utils/format'
 import { projectData } from '../../utils/projectData'
 import type { SaveDataInput } from '../../utils/saveDataState'
@@ -16,6 +20,7 @@ import type { SaveDataInput } from '../../utils/saveDataState'
 interface UseDraftAcceptanceArgs {
   project: Project
   saveData: (next: SaveDataInput) => Promise<void>
+  saveChapterCommitBundle?: (buildCommit: (currentData: AppData) => { next: AppData; bundle: ChapterCommitBundle }) => Promise<void>
   selectedJob: ChapterGenerationJob | null
   targetChapterOrder: number
   chapters: Chapter[]
@@ -30,6 +35,7 @@ function updateProjectTimestamp(data: AppData, projectId: ID): Project[] {
 export function useDraftAcceptance({
   project,
   saveData,
+  saveChapterCommitBundle,
   selectedJob,
   targetChapterOrder,
   chapters,
@@ -71,59 +77,33 @@ export function useDraftAcceptance({
       if (!overwrite) return
     }
 
-    await saveData((current) => {
+    const buildCommit = (current: AppData) => {
       const currentScoped = projectData(current, project.id)
       const currentExisting = currentScoped.chapters.find((chapter) => chapter.order === targetOrder)
-      const currentChapterId = currentExisting?.id ?? chapterId
-      const currentChapterVersions = currentExisting
-        ? [createChapterVersionBeforeAcceptDraft(currentExisting, project.id, timestamp), ...current.chapterVersions]
-        : current.chapterVersions
-      const currentChapters = currentExisting
-        ? current.chapters.map((chapter) =>
-            chapter.id === currentExisting.id
-              ? { ...chapter, title: draft.title, body: draft.body, updatedAt: timestamp }
-              : chapter
-          )
-        : [
-            ...current.chapters,
-            {
-              id: currentChapterId,
-              projectId: project.id,
-              order: targetOrder,
-              title: draft.title,
-              body: draft.body,
-              summary: draft.summary,
-              newInformation: '',
-              characterChanges: '',
-              newForeshadowing: '',
-              resolvedForeshadowing: '',
-              endingHook: '',
-              riskWarnings: '',
-              includedInStageSummary: false,
-              createdAt: timestamp,
-              updatedAt: timestamp
-            }
-          ]
-
-      return {
-        ...current,
-        projects: updateProjectTimestamp(current, project.id),
-        chapters: currentChapters,
-        chapterVersions: currentChapterVersions,
-        generatedChapterDrafts: current.generatedChapterDrafts.map((item) =>
-          item.id === draft.id ? { ...item, chapterId: currentChapterId, status: 'accepted', updatedAt: timestamp } : item
-        ),
-        consistencyReviewReports: current.consistencyReviewReports.map((report) =>
-          report.jobId === draft.jobId ? { ...report, chapterId: currentChapterId } : report
-        ),
-        qualityGateReports: current.qualityGateReports.map((report) =>
-          report.jobId === draft.jobId ? { ...report, chapterId: currentChapterId, draftId: draft.id } : report
-        ),
-        redundancyReports: current.redundancyReports.map((report) =>
-          report.draftId === draft.id ? { ...report, chapterId: currentChapterId } : report
-        )
+      const bundle = buildAcceptedDraftCommitBundle({
+        appData: current,
+        projectId: project.id,
+        draftId: draft.id,
+        targetChapterOrder: targetOrder,
+        commitId: newId(),
+        chapterId: currentExisting?.id ?? chapterId,
+        acceptedAt: timestamp,
+        chapterVersionId: currentExisting ? newId() : null,
+        commitNote: '接受 AI 草稿为正式章节。'
+      })
+      const next = {
+        ...applyChapterCommitBundleToAppData(current, bundle),
+        projects: updateProjectTimestamp(current, project.id)
       }
-    })
+      return { next, bundle }
+    }
+
+    if (saveChapterCommitBundle) {
+      await saveChapterCommitBundle(buildCommit)
+      return
+    }
+
+    await saveData((current) => buildCommit(current).next)
   }
 
   async function rejectDraft(draft: GeneratedChapterDraft) {

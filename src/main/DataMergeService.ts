@@ -10,6 +10,7 @@ import type {
   ID
 } from '../shared/types'
 import { JsonStorageService } from '../storage/JsonStorageService'
+import { SqliteStorageService } from '../storage/SqliteStorageService'
 
 type AppDataArrayKey = {
   [K in keyof AppData]: AppData[K] extends Array<unknown> ? K : never
@@ -43,7 +44,9 @@ const PROJECT_SCOPED_COLLECTIONS: AppDataArrayKey[] = [
   'redundancyReports',
   'revisionCandidates',
   'revisionSessions',
-  'chapterVersions'
+  'chapterVersions',
+  'chapterCommitBundles',
+  'revisionCommitBundles'
 ]
 
 const DEPENDENT_COLLECTIONS: AppDataArrayKey[] = ['chapterGenerationSteps', 'revisionRequests', 'revisionVersions']
@@ -468,10 +471,23 @@ export function mergeAppData(
   return { mergedData: sanitizedMergedData, preview }
 }
 
+function isSqliteDataPath(path: string): boolean {
+  return /\.(sqlite|db)$/i.test(path)
+}
+
 async function loadDataFile(path: string): Promise<AppData> {
+  if (isSqliteDataPath(path)) {
+    return new SqliteStorageService(path).load()
+  }
   const raw = await readFile(path, 'utf-8')
   const parsed = JSON.parse(raw) as AppData
   return normalizeAppData(parsed)
+}
+
+async function saveDataFile(path: string, data: AppData): Promise<AppData> {
+  const storage = isSqliteDataPath(path) ? new SqliteStorageService(path) : new JsonStorageService(path)
+  await storage.save(data)
+  return storage.load()
 }
 
 export async function createMigrationMergePreview(sourcePath: string, targetPath: string): Promise<DataMergePreview> {
@@ -521,9 +537,7 @@ export async function confirmMigrationMerge(sourcePath: string, targetPath: stri
     throw new Error('合并预览存在未解决冲突，已阻止自动合并。')
   }
   const backups = await backupBeforeMerge(sourcePath, targetPath)
-  const storage = new JsonStorageService(targetPath)
-  await storage.save(mergedData)
-  const savedData = await storage.load()
+  const savedData = await saveDataFile(targetPath, mergedData)
   return {
     data: savedData,
     preview,

@@ -2,10 +2,11 @@ import { app, BrowserWindow, shell } from 'electron'
 import { join } from 'node:path'
 import { AppConfigService } from './AppConfigService'
 import { SecureCredentialService } from './SecureCredentialService'
-import { JsonStorageService } from '../storage/JsonStorageService'
+import type { StorageService } from '../storage/StorageService'
+import { createStorageService } from '../storage/SqliteStorageService'
 import { registerIpcHandlers } from './ipc/registerIpcHandlers'
 
-let storage: JsonStorageService
+let storage: StorageService
 let appConfig: AppConfigService
 let credentialService: SecureCredentialService
 const isSmokeTest = process.env.NOVEL_DIRECTOR_SMOKE_TEST === '1'
@@ -86,7 +87,11 @@ app.whenReady().then(async () => {
   app.setAppUserModelId('com.novel-director.mvp')
   appConfig = new AppConfigService(app.getPath('userData'))
   credentialService = new SecureCredentialService(app.getPath('userData'))
-  storage = new JsonStorageService(await appConfig.getStoragePath())
+  const configuredStoragePath = await appConfig.getStoragePath()
+  storage = createStorageService(configuredStoragePath)
+  if (storage.getStoragePath() !== configuredStoragePath) {
+    await appConfig.setStoragePath(storage.getStoragePath())
+  }
   registerIpcHandlers({
     appConfig,
     credentialService,

@@ -7,6 +7,9 @@ import type {
   CharacterRoleInChapter,
   CharacterStateFact,
   ContextNeedPlan,
+  ContextNeedItem,
+  ContextNeedPriority,
+  ContextNeedSourceHint,
   ContextNeedPlanSource,
   ContextRetrievalPriorityType,
   ContinuityCheckCategory,
@@ -85,12 +88,57 @@ function unique<T>(items: T[]): T[] {
   return [...new Set(items)]
 }
 
+function uniqueByKey<T>(items: T[], keyOf: (item: T) => string): T[] {
+  const seen = new Set<string>()
+  return items.filter((item) => {
+    const key = keyOf(item)
+    if (seen.has(key)) return false
+    seen.add(key)
+    return true
+  })
+}
+
 function clampPriority(value: number): number {
   return Math.max(0, Math.min(100, Math.round(value)))
 }
 
+function priorityLevel(score: number): ContextNeedPriority {
+  if (score >= 86) return 'must'
+  if (score >= 70) return 'high'
+  if (score >= 45) return 'medium'
+  return 'low'
+}
+
+function contextNeed(
+  needType: string,
+  sourceHint: ContextNeedSourceHint,
+  sourceId: ID | null,
+  priority: ContextNeedPriority,
+  reason: string,
+  uncertain = false
+): ContextNeedItem {
+  return {
+    id: `need-item-${needType}-${sourceId ?? sourceHint}-${Math.abs(reason.length * 17)}`,
+    needType,
+    sourceHint,
+    sourceId,
+    priority,
+    reason,
+    uncertain
+  }
+}
+
 function inferSceneType(task: Partial<ChapterTask>, continuityBridge: ChapterContinuityBridge | null): ExpectedSceneType {
   const text = `${combinedTaskText(task)}\n${continuityBridge?.immediateNextBeat ?? ''}\n${continuityBridge?.openMicroTensions ?? ''}`
+  if (containsAny(text, ['战斗', '追击', '逃亡', '搏斗', '突围', '袭击', '行动'])) return 'action'
+  if (containsAny(text, ['对话', '谈判', '质问', '争吵', '审问', '坦白'])) return 'dialogue'
+  if (containsAny(text, ['调查', '线索', '推理', '搜索', '查找', '侦查', '解谜'])) return 'investigation'
+  if (containsAny(text, ['关系', '信任', '怀疑', '告白', '背叛', '和解', '情感'])) return 'relationship'
+  if (containsAny(text, ['揭露', '真相', '秘密', '反转', '曝光'])) return 'reveal'
+  if (containsAny(text, ['回收', '兑现', '揭底', 'payoff'])) return 'payoff'
+  if (containsAny(text, ['休整', '恢复', '疗伤', '余波'])) return 'recovery'
+  if (containsAny(text, ['铺垫', '建立', '引入', '设定'])) return 'setup'
+  if (containsAny(text, ['转场', '过渡', '抵达', '离开'])) return 'transition'
   if (containsAny(text, ['战斗', '追逐', '逃亡', '搏斗', '突围', '袭击', '行动'])) return 'action'
   if (containsAny(text, ['对话', '谈判', '质问', '争吵', '审问', '坦白'])) return 'dialogue'
   if (containsAny(text, ['调查', '线索', '推理', '搜索', '查找', '侦查', '解谜'])) return 'investigation'
@@ -221,6 +269,93 @@ export class ContextNeedPlannerService {
       }))
     ]
 
+    const contextNeeds = uniqueByKey(
+      [
+        contextNeed(
+          'previous_chapter_ending',
+          'chapterEnding',
+          input.previousChapter?.id ?? null,
+          input.continuityBridge ? 'must' : 'high',
+          input.continuityBridge ? '本章必须直接承接上一章结尾 Bridge。' : '缺少已保存 Bridge，至少需要上一章结尾片段辅助衔接。',
+          !input.continuityBridge
+        ),
+        contextNeed('hard_canon', 'hardCanon', input.project.id, 'must', '硬设定包用于约束不可违背世界规则、角色身份和系统规则。'),
+        ...(storyDirectionText
+          ? [
+              contextNeed(
+                'story_direction',
+                'storyDirection',
+                input.storyDirectionGuide?.id ?? null,
+                'medium',
+                '中期剧情导向用于选择本章推进方向，但不能覆盖硬状态和伏笔规则。'
+              )
+            ]
+          : []),
+        ...expectedCharacters.flatMap((character) => [
+          contextNeed(
+            'character_card',
+            'character',
+            character.characterId,
+            character.expectedPresence === 'onstage' ? 'high' : 'medium',
+            character.reason,
+            character.expectedPresence !== 'onstage'
+          ),
+          contextNeed(
+            'character_state',
+            'character_state',
+            character.characterId,
+            character.expectedPresence === 'onstage' ? 'must' : 'high',
+            `本章需要核对该角色的状态账本类别：${(requiredStateFactCategories[character.characterId] ?? []).join('、') || 'status'}。`
+          )
+        ]),
+        ...unique(requiredForeshadowingIds).map((id) => {
+          const item = input.foreshadowing.find((candidate) => candidate.id === id)
+          const score = retrievalPriorities.find((priority) => priority.type === 'foreshadowing' && priority.id === id)?.priority ?? 70
+          return contextNeed(
+            'foreshadowing',
+            'foreshadowing',
+            id,
+            item?.treatmentMode === 'payoff' || item?.weight === 'payoff' ? 'must' : priorityLevel(score),
+            item ? `本章需要按 treatmentMode=${item.treatmentMode} 处理伏笔「${item.title}」。` : '本章任务要求处理该伏笔。'
+          )
+        }),
+        ...unique(requiredTimelineEventIds).map((id) =>
+          contextNeed(
+            'timeline_anchor',
+            'timeline',
+            id,
+            'high',
+            '本章涉及已发生事件或出场角色的时间线锚点，需要防止顺序与因果错位。'
+          )
+        ),
+        ...requiredWorldbuildingKeys.map((key) =>
+          contextNeed(
+            'world_rule',
+            'worldbuilding',
+            key,
+            key === 'immutableFacts' ? 'must' : 'high',
+            `本章任务涉及 ${key}，需要最小硬设定约束。`
+          )
+        ),
+        ...(input.stageSummaries.length
+          ? [
+              contextNeed(
+                'remote_stage_summary',
+                'stageSummary',
+                null,
+                'low',
+                '远期阶段摘要只用于压缩旧剧情背景，预算不足时可以优先压缩或省略。',
+                true
+              )
+            ]
+          : []),
+        ...(input.previousChapter
+          ? [contextNeed('recent_chapter_recap', 'recentChapter', input.previousChapter.id, 'medium', '近期章节回顾用于补充 Bridge 未覆盖的差异事实。')]
+          : [])
+      ],
+      (item) => `${item.needType}:${item.sourceId ?? item.sourceHint}`
+    )
+
     return {
       id: newId(),
       projectId: input.project.id,
@@ -243,6 +378,7 @@ export class ContextNeedPlannerService {
         reason: '本章需求计划要求隐藏、暂停或禁止推进该伏笔。'
       })),
       warnings: input.previousChapter ? [] : ['缺少上一章，无法完整规划章节衔接需求。'],
+      contextNeeds,
       createdAt: timestamp,
       updatedAt: timestamp
     }

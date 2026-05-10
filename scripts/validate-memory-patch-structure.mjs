@@ -82,6 +82,16 @@ async function main() {
 
   checks.push(
     assert(
+      memorySource.includes('applyAllPendingCandidates') &&
+        memorySource.includes('confirmQualityGateBypass') &&
+        memoryPanelSource.includes('onAcceptAll') &&
+        memoryPanelSource.includes('一键通过待确认'),
+      'memory candidate panel supports one-click accepting pending structured candidates with the same confirmation guard'
+    )
+  )
+
+  checks.push(
+    assert(
       (uiSource.includes('renderMemoryPatchDetails') &&
         uiSource.includes("patch.kind === 'character_state_update'") &&
         uiSource.includes("patch.kind === 'foreshadowing_create'") &&
@@ -192,7 +202,7 @@ async function main() {
   checks.push(
     assert(
       memorySource.includes('记忆候选类型与补丁类型不匹配') &&
-        memorySource.includes('已阻止应用') &&
+        memorySource.includes('已跳过') &&
         memorySource.includes("patch.kind === 'legacy_raw'"),
       'legacy_raw failures and type/kind mismatches are blocked before applying'
     )

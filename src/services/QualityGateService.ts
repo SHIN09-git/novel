@@ -22,6 +22,8 @@ export type QualityGateEvaluation = Pick<
   'overallScore' | 'pass' | 'dimensions' | 'issues' | 'requiredFixes' | 'optionalSuggestions'
 >
 
+export const QUALITY_GATE_PASS_SCORE = 80
+
 interface QualityGateAI {
   generateQualityGateReport(
     chapterDraft: ChapterDraftResult | GeneratedChapterDraft,
@@ -243,7 +245,7 @@ function fallbackEvaluation(
   const overallScore = average(dimensions)
   return {
     overallScore,
-    pass: overallScore >= 75 && !issues.some((issue) => issue.severity === 'high'),
+    pass: overallScore >= QUALITY_GATE_PASS_SCORE && !issues.some((issue) => issue.severity === 'high'),
     dimensions,
     issues,
     requiredFixes: issues.filter((issue) => issue.severity === 'high').map((issue) => issue.suggestedFix),
@@ -325,7 +327,7 @@ function applyConsistencyFindings(
   return {
     ...evaluation,
     overallScore,
-    pass: evaluation.pass && highIssues.length === 0 && overallScore >= 75,
+    pass: evaluation.pass && highIssues.length === 0 && overallScore >= QUALITY_GATE_PASS_SCORE,
     dimensions,
     issues,
     requiredFixes: [...new Set(requiredFixes)]
@@ -385,7 +387,11 @@ function applyNoveltyAudit(evaluation: QualityGateEvaluation, audit: NoveltyAudi
   return {
     ...evaluation,
     overallScore,
-    pass: evaluation.pass && audit.severity !== 'fail' && !issues.some((issue) => issue.severity === 'high') && overallScore >= 75,
+    pass:
+      evaluation.pass &&
+      audit.severity !== 'fail' &&
+      !issues.some((issue) => issue.severity === 'high') &&
+      overallScore >= QUALITY_GATE_PASS_SCORE,
     dimensions,
     issues,
     requiredFixes: [...new Set([...evaluation.requiredFixes, ...highFixes])],
@@ -478,7 +484,7 @@ export class QualityGateService {
 
   static shouldRequireHumanReview(report: QualityGateReport): boolean {
     return (
-      report.overallScore < 75 ||
+      report.overallScore < QUALITY_GATE_PASS_SCORE ||
       report.dimensions.characterConsistency < 70 ||
       report.dimensions.characterStateConsistency < 70 ||
       report.dimensions.foreshadowingControl < 70 ||

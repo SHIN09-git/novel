@@ -186,6 +186,7 @@ export function PromptBuilderView({ data, project, saveData, onSendToPipeline }:
       budgetProfile,
       contextNeedPlan,
       storyDirectionGuide: activeStoryDirectionGuide,
+      hardCanonPack: scoped.hardCanonPacks[0] ?? null,
       config: {
         projectId: project.id,
         targetChapterOrder,

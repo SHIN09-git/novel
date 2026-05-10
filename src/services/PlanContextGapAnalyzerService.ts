@@ -1,6 +1,7 @@
 import type {
   Character,
   CharacterStateFact,
+  ContextNeedItem,
   ContextNeedPlan,
   ExpectedCharacterNeed,
   Foreshadowing,
@@ -45,6 +46,16 @@ function stableHash(text: string): string {
 
 function unique<T>(items: T[]): T[] {
   return [...new Set(items.filter(Boolean))]
+}
+
+function uniqueByKey<T>(items: T[], keyOf: (item: T) => string): T[] {
+  const seen = new Set<string>()
+  return items.filter((item) => {
+    const key = keyOf(item)
+    if (seen.has(key)) return false
+    seen.add(key)
+    return true
+  })
 }
 
 function textValue(value: unknown): string {
@@ -110,6 +121,7 @@ function emptyPlan(project: Project, targetChapterOrder: number, planText: strin
     mustCheckContinuity: [],
     retrievalPriorities: [],
     exclusionRules: [],
+    contextNeeds: [],
     warnings: [],
     createdAt: now,
     updatedAt: now
@@ -260,6 +272,51 @@ export class PlanContextGapAnalyzerService {
         .map((character) => expectedCharacterNeed(character, '章节任务书补全阶段识别到该角色。'))
     ]
 
+    const contextNeeds: ContextNeedItem[] = uniqueByKey(
+      [
+        ...(base.contextNeeds ?? []),
+        ...newlyRequiredCharacterIds.flatMap((id) => [
+          {
+            id: `need-plan-character-card-${id}`,
+            needType: 'character_card',
+            sourceHint: 'character' as const,
+            sourceId: id,
+            priority: 'high' as const,
+            reason: '章节计划生成后明确提到该角色，需要补充角色卡切片。',
+            uncertain: false
+          },
+          {
+            id: `need-plan-character-state-${id}`,
+            needType: 'character_state',
+            sourceHint: 'character_state' as const,
+            sourceId: id,
+            priority: 'must' as const,
+            reason: '章节计划生成后明确提到该角色，需要补充当前硬状态。',
+            uncertain: false
+          }
+        ]),
+        ...newlyRequiredForeshadowingIds.map((id) => ({
+          id: `need-plan-foreshadowing-${id}`,
+          needType: 'foreshadowing',
+          sourceHint: 'foreshadowing' as const,
+          sourceId: id,
+          priority: 'must' as const,
+          reason: '章节计划生成后明确要求使用该伏笔。',
+          uncertain: false
+        })),
+        ...newlyRequiredTimelineEventIds.map((id) => ({
+          id: `need-plan-timeline-${id}`,
+          needType: 'timeline_anchor',
+          sourceHint: 'timeline' as const,
+          sourceId: id,
+          priority: 'high' as const,
+          reason: '章节计划生成后明确提到该时间线事件。',
+          uncertain: false
+        }))
+      ],
+      (item) => `${item.needType}:${item.sourceId ?? item.sourceHint}`
+    )
+
     const derivedContextNeedPlan: ContextNeedPlan = {
       ...base,
       id: `context-need-plan-plan-${input.project.id}-${input.targetChapterOrder}-${stableHash(`${base.id}:${planText}`)}`,
@@ -275,6 +332,7 @@ export class PlanContextGapAnalyzerService {
       requiredTimelineEventIds: unique([...base.requiredTimelineEventIds, ...newlyRequiredTimelineEventIds]),
       requiredStateFactCategories,
       retrievalPriorities,
+      contextNeeds,
       warnings: unique([...base.warnings, ...warnings]),
       createdAt: timestamp(),
       updatedAt: timestamp()

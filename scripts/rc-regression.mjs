@@ -800,6 +800,7 @@ function makeRcData() {
         updatedAt: now(30)
       }
     ],
+    runTraceAuthorSummaries: [],
     redundancyReports: [
       {
         id: redundancyReportId,
@@ -865,6 +866,8 @@ function makeRcData() {
         createdAt: now(29)
       }
     ],
+    chapterCommitBundles: [],
+    revisionCommitBundles: [],
     settings: {
       apiProvider: 'openai',
       apiKey: '',

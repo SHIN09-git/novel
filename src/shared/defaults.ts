@@ -1,6 +1,7 @@
 import type {
   AppData,
   AppSettings,
+  ChapterCommitBundle,
   ChapterTask,
   ChapterContinuityBridge,
   ChapterGenerationJob,
@@ -22,7 +23,11 @@ import type {
   ContinuityCheckCategory,
   ContextBudgetProfile,
   ContextExclusionRule,
+  ContextNeedItem,
   ContextNeedPlan,
+  ContextNeedPriority,
+  ContextNeedSourceHint,
+  ContextSelectionTrace,
   ExpectedCharacterNeed,
   ExpectedPresence,
   ExpectedSceneType,
@@ -38,6 +43,11 @@ import type {
   ForeshadowingWeight,
   ForcedContextBlock,
   GenerationRunTrace,
+  HardCanonItem,
+  HardCanonItemCategory,
+  HardCanonPack,
+  HardCanonPriority,
+  HardCanonStatus,
   MemoryUpdateCandidate,
   MemoryUpdateCandidateType,
   MemoryUpdatePatch,
@@ -47,10 +57,13 @@ import type {
   NoveltyFindingKind,
   QualityGateReport,
   RedundancyReport,
+  RevisionCommitBundle,
+  RunTraceAuthorSummary,
   PromptMode,
   PromptModuleSelection,
   PromptContextSnapshot,
   PromptBlockOrderItem,
+  Project,
   RetrievalPriority,
   StateFactCategory,
   StageSummary,
@@ -94,6 +107,7 @@ export const EMPTY_APP_DATA: AppData = {
   promptVersions: [],
   promptContextSnapshots: [],
   storyDirectionGuides: [],
+  hardCanonPacks: [],
   contextNeedPlans: [],
   chapterContinuityBridges: [],
   chapterGenerationJobs: [],
@@ -104,12 +118,15 @@ export const EMPTY_APP_DATA: AppData = {
   contextBudgetProfiles: [],
   qualityGateReports: [],
   generationRunTraces: [],
+  runTraceAuthorSummaries: [],
   redundancyReports: [],
   revisionCandidates: [],
   revisionSessions: [],
   revisionRequests: [],
   revisionVersions: [],
   chapterVersions: [],
+  chapterCommitBundles: [],
+  revisionCommitBundles: [],
   settings: DEFAULT_SETTINGS
 }
 
@@ -127,6 +144,21 @@ export function createEmptyBible(projectId: string): StoryBible {
     narrativeTone: '',
     immutableFacts: '',
     updatedAt: new Date().toISOString()
+  }
+}
+
+export function createEmptyHardCanonPack(projectId: string): HardCanonPack {
+  const timestamp = new Date().toISOString()
+  return {
+    id: `hard-canon-pack-${projectId}`,
+    projectId,
+    title: '不可违背设定包',
+    description: '这里放不能被 AI 改写的硬设定。不要放长篇剧情回顾。',
+    items: [],
+    maxPromptTokens: 900,
+    createdAt: timestamp,
+    updatedAt: timestamp,
+    schemaVersion: 1
   }
 }
 
@@ -424,6 +456,56 @@ export function normalizeMemoryUpdateCandidate(value: MemoryUpdateCandidate | Re
   }
 }
 
+function normalizeContextSelectionTrace(value: unknown): ContextSelectionTrace | null {
+  if (!value || typeof value !== 'object') return null
+  const trace = objectOrEmpty(value)
+  const normalizeBlock = (entry: unknown, fallbackReason: string) => {
+    const block = objectOrEmpty(entry)
+    return {
+      blockType: stringValue(block.blockType) || 'unknown',
+      sourceId: stringValue(block.sourceId) || null,
+      priority: normalizeContextNeedPriority(block.priority),
+      tokenEstimate: typeof block.tokenEstimate === 'number' && Number.isFinite(block.tokenEstimate) ? Math.max(0, block.tokenEstimate) : 0,
+      reason: stringValue(block.reason) || fallbackReason
+    }
+  }
+  const normalizeDropped = (entry: unknown) => {
+    const block = objectOrEmpty(entry)
+    return {
+      blockType: stringValue(block.blockType) || 'unknown',
+      sourceId: stringValue(block.sourceId) || null,
+      priority: normalizeContextNeedPriority(block.priority),
+      tokenEstimate: typeof block.tokenEstimate === 'number' && Number.isFinite(block.tokenEstimate) ? Math.max(0, block.tokenEstimate) : 0,
+      dropReason: stringValue(block.dropReason) || stringValue(block.reason) || '预算不足或相关性较低。'
+    }
+  }
+  const normalizeUnmet = (entry: unknown) => {
+    const item = objectOrEmpty(entry)
+    return {
+      needType: stringValue(item.needType) || 'unknown',
+      priority: normalizeContextNeedPriority(item.priority),
+      reason: stringValue(item.reason) || '上下文需求未被最终选择满足。',
+      sourceId: stringValue(item.sourceId) || null
+    }
+  }
+  const summary = objectOrEmpty(trace.budgetSummary)
+  const pressure = summary.pressure === 'low' || summary.pressure === 'medium' || summary.pressure === 'high' ? summary.pressure : 'low'
+  return {
+    projectId: stringValue(trace.projectId),
+    chapterId: stringValue(trace.chapterId) || null,
+    jobId: stringValue(trace.jobId) || undefined,
+    selectedBlocks: arrayOrEmpty(trace.selectedBlocks).map((entry) => normalizeBlock(entry, '已进入最终上下文。')),
+    droppedBlocks: arrayOrEmpty(trace.droppedBlocks).map(normalizeDropped),
+    unmetNeeds: arrayOrEmpty(trace.unmetNeeds).map(normalizeUnmet),
+    budgetSummary: {
+      totalBudget: typeof summary.totalBudget === 'number' ? Math.max(0, summary.totalBudget) : 0,
+      usedTokens: typeof summary.usedTokens === 'number' ? Math.max(0, summary.usedTokens) : 0,
+      reservedTokens: typeof summary.reservedTokens === 'number' ? Math.max(0, summary.reservedTokens) : 0,
+      pressure
+    }
+  }
+}
+
 function normalizeContextSelectionResult(value: unknown): ContextSelectionResult {
   const selection = objectOrEmpty(value)
   return {
@@ -436,6 +518,7 @@ function normalizeContextSelectionResult(value: unknown): ContextSelectionResult
     estimatedTokens: typeof selection.estimatedTokens === 'number' ? selection.estimatedTokens : 0,
     omittedItems: Array.isArray(selection.omittedItems) ? (selection.omittedItems as ContextSelectionResult['omittedItems']) : [],
     compressionRecords: normalizeContextCompressionRecords(selection.compressionRecords),
+    contextSelectionTrace: normalizeContextSelectionTrace(selection.contextSelectionTrace),
     warnings: stringArrayValue(selection.warnings)
   }
 }
@@ -730,12 +813,50 @@ function normalizeRetrievalPriority(value: unknown): RetrievalPriority {
       type === 'timeline' ||
       type === 'story_bible' ||
       type === 'stage_summary' ||
-      type === 'chapter_ending'
+      type === 'chapter_ending' ||
+      type === 'hard_canon' ||
+      type === 'story_direction' ||
+      type === 'recent_chapter'
         ? type
         : 'story_bible',
     id: stringValue(item.id),
     priority: typeof item.priority === 'number' ? Math.max(0, Math.min(100, item.priority)) : 50,
     reason: stringValue(item.reason)
+  }
+}
+
+function normalizeContextNeedPriority(value: unknown): ContextNeedPriority {
+  return value === 'must' || value === 'high' || value === 'medium' || value === 'low' ? value : 'medium'
+}
+
+function normalizeContextNeedSourceHint(value: unknown): ContextNeedSourceHint {
+  const hint = stringValue(value)
+  const allowed: ContextNeedSourceHint[] = [
+    'character',
+    'character_state',
+    'foreshadowing',
+    'timeline',
+    'stageSummary',
+    'hardCanon',
+    'storyDirection',
+    'chapterEnding',
+    'recentChapter',
+    'worldbuilding',
+    'unknown'
+  ]
+  return allowed.includes(hint as ContextNeedSourceHint) ? (hint as ContextNeedSourceHint) : 'unknown'
+}
+
+function normalizeContextNeedItem(value: unknown, index = 0): ContextNeedItem {
+  const item = objectOrEmpty(value)
+  return {
+    id: stringValue(item.id) || `context-need-${index}`,
+    needType: stringValue(item.needType) || 'unknown',
+    sourceHint: normalizeContextNeedSourceHint(item.sourceHint),
+    sourceId: stringValue(item.sourceId) || null,
+    priority: normalizeContextNeedPriority(item.priority),
+    reason: stringValue(item.reason) || '旧数据缺少上下文需求原因。',
+    uncertain: typeof item.uncertain === 'boolean' ? item.uncertain : false
   }
 }
 
@@ -774,6 +895,7 @@ function normalizeContextNeedPlan(value: ContextNeedPlan | Record<string, unknow
     mustCheckContinuity: normalizeRecordArray(plan.mustCheckContinuity, CONTINUITY_CHECK_CATEGORIES),
     retrievalPriorities: arrayOrEmpty(plan.retrievalPriorities).map(normalizeRetrievalPriority),
     exclusionRules: arrayOrEmpty(plan.exclusionRules).map(normalizeContextExclusionRule),
+    contextNeeds: arrayOrEmpty(plan.contextNeeds).map(normalizeContextNeedItem),
     warnings: stringArrayValue(plan.warnings),
     createdAt: stringValue(plan.createdAt) || timestamp,
     updatedAt: stringValue(plan.updatedAt) || timestamp
@@ -1026,6 +1148,81 @@ function normalizeRedundancyReport(value: RedundancyReport | Record<string, unkn
     compressionSuggestions: stringArrayValue(report.compressionSuggestions),
     overallRedundancyScore: typeof report.overallRedundancyScore === 'number' ? report.overallRedundancyScore : 0,
     createdAt: stringValue(report.createdAt) || new Date().toISOString()
+  }
+}
+
+function normalizeHardCanonCategory(value: unknown): HardCanonItemCategory {
+  const allowed: HardCanonItemCategory[] = [
+    'world_rule',
+    'system_rule',
+    'character_identity',
+    'character_hard_state',
+    'timeline_anchor',
+    'foreshadowing_rule',
+    'relationship_fact',
+    'prohibition',
+    'style_boundary',
+    'other'
+  ]
+  return allowed.includes(value as HardCanonItemCategory) ? (value as HardCanonItemCategory) : 'other'
+}
+
+function normalizeHardCanonPriority(value: unknown): HardCanonPriority {
+  return value === 'must' || value === 'high' || value === 'medium' ? value : 'medium'
+}
+
+function normalizeHardCanonStatus(value: unknown): HardCanonStatus {
+  return value === 'active' || value === 'inactive' || value === 'deprecated' ? value : 'active'
+}
+
+function normalizeHardCanonItem(value: HardCanonItem | Record<string, unknown>, projectIdHint = ''): HardCanonItem {
+  const item = objectOrEmpty(value)
+  const timestamp = new Date().toISOString()
+  const projectId = stringValue(item.projectId) || projectIdHint
+  return {
+    ...(value as HardCanonItem),
+    id: stringValue(item.id) || `hard-canon-item-${timestamp}`,
+    projectId,
+    category: normalizeHardCanonCategory(item.category),
+    title: stringValue(item.title) || stringValue(item.content).slice(0, 32) || 'Hard canon item',
+    content: stringValue(item.content),
+    priority: normalizeHardCanonPriority(item.priority),
+    status: normalizeHardCanonStatus(item.status),
+    sourceType:
+      item.sourceType === 'manual' ||
+      item.sourceType === 'story_bible' ||
+      item.sourceType === 'character' ||
+      item.sourceType === 'foreshadowing' ||
+      item.sourceType === 'timeline' ||
+      item.sourceType === 'stage_summary' ||
+      item.sourceType === 'run_trace' ||
+      item.sourceType === 'imported'
+        ? item.sourceType
+        : 'manual',
+    sourceId: stringValue(item.sourceId) || null,
+    relatedCharacterIds: stringArrayValue(item.relatedCharacterIds),
+    relatedForeshadowingIds: stringArrayValue(item.relatedForeshadowingIds),
+    relatedTimelineEventIds: stringArrayValue(item.relatedTimelineEventIds),
+    createdAt: stringValue(item.createdAt) || timestamp,
+    updatedAt: stringValue(item.updatedAt) || timestamp
+  }
+}
+
+function normalizeHardCanonPack(value: HardCanonPack | Record<string, unknown>): HardCanonPack {
+  const pack = objectOrEmpty(value)
+  const timestamp = new Date().toISOString()
+  const projectId = stringValue(pack.projectId)
+  return {
+    ...(value as HardCanonPack),
+    id: stringValue(pack.id) || `hard-canon-pack-${projectId || timestamp}`,
+    projectId,
+    title: stringValue(pack.title) || '不可违背设定包',
+    description: stringValue(pack.description),
+    items: arrayOrEmpty<HardCanonItem>(pack.items).map((item) => normalizeHardCanonItem(item, projectId)),
+    maxPromptTokens: typeof pack.maxPromptTokens === 'number' && pack.maxPromptTokens > 0 ? pack.maxPromptTokens : 900,
+    createdAt: stringValue(pack.createdAt) || timestamp,
+    updatedAt: stringValue(pack.updatedAt) || timestamp,
+    schemaVersion: typeof pack.schemaVersion === 'number' ? pack.schemaVersion : 1
   }
 }
 
@@ -1310,6 +1507,7 @@ function normalizeGenerationRunTrace(value: GenerationRunTrace | Record<string, 
     omittedContextItems: Array.isArray(trace.omittedContextItems) ? (trace.omittedContextItems as GenerationRunTrace['omittedContextItems']) : [],
     contextWarnings: stringArrayValue(trace.contextWarnings),
     contextTokenEstimate: typeof trace.contextTokenEstimate === 'number' ? trace.contextTokenEstimate : 0,
+    contextSelectionTrace: normalizeContextSelectionTrace(trace.contextSelectionTrace),
     forcedContextBlocks: normalizeForcedContextBlocks(trace.forcedContextBlocks),
     compressionRecords: normalizeContextCompressionRecords(trace.compressionRecords),
     promptBlockOrder: normalizePromptBlockOrder(trace.promptBlockOrder),
@@ -1347,8 +1545,122 @@ function normalizeGenerationRunTrace(value: GenerationRunTrace | Record<string, 
     storyDirectionGuideEndChapterOrder: typeof trace.storyDirectionGuideEndChapterOrder === 'number' ? trace.storyDirectionGuideEndChapterOrder : null,
     storyDirectionBeatId: stringValue(trace.storyDirectionBeatId) || null,
     storyDirectionAppliedToChapterTask: typeof trace.storyDirectionAppliedToChapterTask === 'boolean' ? trace.storyDirectionAppliedToChapterTask : false,
+    hardCanonPackItemCount: typeof trace.hardCanonPackItemCount === 'number' ? trace.hardCanonPackItemCount : 0,
+    hardCanonPackTokenEstimate: typeof trace.hardCanonPackTokenEstimate === 'number' ? trace.hardCanonPackTokenEstimate : 0,
+    includedHardCanonItemIds: stringArrayValue(trace.includedHardCanonItemIds),
+    truncatedHardCanonItemIds: stringArrayValue(trace.truncatedHardCanonItemIds),
     createdAt: stringValue(trace.createdAt) || timestamp,
     updatedAt: stringValue(trace.updatedAt) || timestamp
+  }
+}
+
+function normalizeRunTraceAuthorSummaryStatus(value: unknown): RunTraceAuthorSummary['overallStatus'] {
+  return value === 'good' || value === 'needs_attention' || value === 'risky' || value === 'failed' || value === 'unknown' ? value : 'unknown'
+}
+
+function normalizeRunTraceProblemSource(value: unknown): RunTraceAuthorSummary['likelyProblemSources'][number]['source'] {
+  const raw = stringValue(value)
+  const allowed: RunTraceAuthorSummary['likelyProblemSources'][number]['source'][] = [
+    'context_missing',
+    'context_noise',
+    'task_contract',
+    'character_state',
+    'foreshadowing',
+    'novelty_drift',
+    'consistency',
+    'quality_gate',
+    'redundancy',
+    'model_output',
+    'revision_needed',
+    'unknown'
+  ]
+  return allowed.includes(raw as RunTraceAuthorSummary['likelyProblemSources'][number]['source'])
+    ? (raw as RunTraceAuthorSummary['likelyProblemSources'][number]['source'])
+    : 'unknown'
+}
+
+function normalizeRunTraceAuthorActionType(value: unknown): RunTraceAuthorSummary['nextActions'][number]['actionType'] {
+  const raw = stringValue(value)
+  const allowed: RunTraceAuthorSummary['nextActions'][number]['actionType'][] = [
+    'revise_chapter',
+    'adjust_context',
+    'update_character_state',
+    'review_memory_candidate',
+    'review_foreshadowing',
+    'edit_chapter_task',
+    'rerun_generation',
+    'ignore'
+  ]
+  return allowed.includes(raw as RunTraceAuthorSummary['nextActions'][number]['actionType'])
+    ? (raw as RunTraceAuthorSummary['nextActions'][number]['actionType'])
+    : 'ignore'
+}
+
+function normalizeBudgetPressure(value: unknown): NonNullable<RunTraceAuthorSummary['contextDiagnosis']>['budgetPressure'] {
+  return value === 'low' || value === 'medium' || value === 'high' || value === 'unknown' ? value : 'unknown'
+}
+
+function normalizeRunTraceAuthorSummary(value: unknown): RunTraceAuthorSummary {
+  const summary = objectOrEmpty(value)
+  const contextDiagnosis = objectOrEmpty(summary.contextDiagnosis)
+  const continuityDiagnosis = objectOrEmpty(summary.continuityDiagnosis)
+  const draftDiagnosis = objectOrEmpty(summary.draftDiagnosis)
+  const sourceRefs = objectOrEmpty(summary.sourceRefs)
+  const timestamp = new Date().toISOString()
+  return {
+    id: stringValue(summary.id) || `run-trace-author-summary-${stringValue(summary.traceId) || timestamp}`,
+    projectId: stringValue(summary.projectId),
+    chapterId: stringValue(summary.chapterId) || null,
+    jobId: stringValue(summary.jobId) || undefined,
+    traceId: stringValue(summary.traceId) || undefined,
+    generatedDraftId: stringValue(summary.generatedDraftId) || null,
+    createdAt: stringValue(summary.createdAt) || timestamp,
+    summaryVersion: typeof summary.summaryVersion === 'number' ? summary.summaryVersion : 1,
+    overallStatus: normalizeRunTraceAuthorSummaryStatus(summary.overallStatus),
+    oneLineDiagnosis: stringValue(summary.oneLineDiagnosis) || '暂无诊断摘要。',
+    likelyProblemSources: arrayOrEmpty<Record<string, unknown>>(summary.likelyProblemSources).map((item) => {
+      const source = objectOrEmpty(item)
+      return {
+        source: normalizeRunTraceProblemSource(source.source),
+        severity: normalizeConsistencySeverity(source.severity),
+        evidence: stringArrayValue(source.evidence),
+        recommendation: stringValue(source.recommendation)
+      }
+    }),
+    contextDiagnosis: {
+      usedContextCount: typeof contextDiagnosis.usedContextCount === 'number' ? contextDiagnosis.usedContextCount : 0,
+      missingContextHints: stringArrayValue(contextDiagnosis.missingContextHints),
+      noisyContextHints: stringArrayValue(contextDiagnosis.noisyContextHints),
+      budgetPressure: normalizeBudgetPressure(contextDiagnosis.budgetPressure)
+    },
+    continuityDiagnosis: {
+      characterStateIssues: stringArrayValue(continuityDiagnosis.characterStateIssues),
+      foreshadowingIssues: stringArrayValue(continuityDiagnosis.foreshadowingIssues),
+      timelineIssues: stringArrayValue(continuityDiagnosis.timelineIssues),
+      newCanonRisks: stringArrayValue(continuityDiagnosis.newCanonRisks)
+    },
+    draftDiagnosis: {
+      qualityGatePassed: typeof draftDiagnosis.qualityGatePassed === 'boolean' ? draftDiagnosis.qualityGatePassed : undefined,
+      consistencyPassed: typeof draftDiagnosis.consistencyPassed === 'boolean' ? draftDiagnosis.consistencyPassed : undefined,
+      redundancyRisk: normalizeBudgetPressure(draftDiagnosis.redundancyRisk),
+      mainDraftIssues: stringArrayValue(draftDiagnosis.mainDraftIssues)
+    },
+    nextActions: arrayOrEmpty<Record<string, unknown>>(summary.nextActions).map((item) => {
+      const action = objectOrEmpty(item)
+      return {
+        label: stringValue(action.label) || '人工检查',
+        actionType: normalizeRunTraceAuthorActionType(action.actionType),
+        reason: stringValue(action.reason)
+      }
+    }),
+    sourceRefs: {
+      qualityGateReportId: stringValue(sourceRefs.qualityGateReportId) || undefined,
+      consistencyReviewReportId: stringValue(sourceRefs.consistencyReviewReportId) || undefined,
+      redundancyReportIds: stringArrayValue(sourceRefs.redundancyReportIds),
+      noveltyAuditId: stringValue(sourceRefs.noveltyAuditId) || undefined,
+      generationRunTraceId: stringValue(sourceRefs.generationRunTraceId) || undefined,
+      contextNeedPlanId: stringValue(sourceRefs.contextNeedPlanId) || undefined
+    }
   }
 }
 
@@ -1357,6 +1669,13 @@ export function normalizeAppData(input: Partial<AppData>): AppData {
   const rawSettings = recordOrEmpty(raw.settings)
   const legacyApiKey = stringValue(rawSettings.apiKey)
   const hasApiKey = typeof rawSettings.hasApiKey === 'boolean' ? rawSettings.hasApiKey : Boolean(legacyApiKey.trim())
+  const projects = arrayOrEmpty<Project>(raw.projects)
+  const normalizedHardCanonPacks = arrayOrEmpty<HardCanonPack>(raw.hardCanonPacks).map(normalizeHardCanonPack)
+  const hardCanonProjectIds = new Set(normalizedHardCanonPacks.map((pack) => pack.projectId))
+  const hardCanonPacks = [
+    ...normalizedHardCanonPacks,
+    ...projects.filter((project) => !hardCanonProjectIds.has(project.id)).map((project) => createEmptyHardCanonPack(project.id))
+  ]
 
   return {
     ...EMPTY_APP_DATA,
@@ -1368,7 +1687,7 @@ export function normalizeAppData(input: Partial<AppData>): AppData {
       apiKey: legacyApiKey,
       hasApiKey
     },
-    projects: arrayOrEmpty(raw.projects),
+    projects,
     storyBibles: arrayOrEmpty(raw.storyBibles),
     chapters: arrayOrEmpty(raw.chapters),
     characters: arrayOrEmpty(raw.characters),
@@ -1382,6 +1701,7 @@ export function normalizeAppData(input: Partial<AppData>): AppData {
     promptVersions: arrayOrEmpty(raw.promptVersions),
     promptContextSnapshots: arrayOrEmpty<PromptContextSnapshot>(raw.promptContextSnapshots).map(normalizePromptContextSnapshot),
     storyDirectionGuides: arrayOrEmpty<StoryDirectionGuide>(raw.storyDirectionGuides).map(normalizeStoryDirectionGuide),
+    hardCanonPacks,
     contextNeedPlans: arrayOrEmpty<ContextNeedPlan>(raw.contextNeedPlans).map(normalizeContextNeedPlan),
     chapterContinuityBridges: arrayOrEmpty<ChapterContinuityBridge>(raw.chapterContinuityBridges).map(normalizeChapterContinuityBridge),
     chapterGenerationJobs: arrayOrEmpty<ChapterGenerationJob>(raw.chapterGenerationJobs).map(normalizeChapterGenerationJob),
@@ -1392,12 +1712,15 @@ export function normalizeAppData(input: Partial<AppData>): AppData {
     contextBudgetProfiles: arrayOrEmpty(raw.contextBudgetProfiles),
     qualityGateReports: arrayOrEmpty<QualityGateReport>(raw.qualityGateReports).map(normalizeQualityGateReport),
     generationRunTraces: arrayOrEmpty<GenerationRunTrace>(raw.generationRunTraces).map(normalizeGenerationRunTrace),
+    runTraceAuthorSummaries: arrayOrEmpty<RunTraceAuthorSummary>(raw.runTraceAuthorSummaries).map(normalizeRunTraceAuthorSummary),
     redundancyReports: arrayOrEmpty<RedundancyReport>(raw.redundancyReports).map(normalizeRedundancyReport),
     revisionCandidates: arrayOrEmpty(raw.revisionCandidates),
     revisionSessions: arrayOrEmpty(raw.revisionSessions),
     revisionRequests: arrayOrEmpty(raw.revisionRequests),
     revisionVersions: arrayOrEmpty(raw.revisionVersions),
-    chapterVersions: arrayOrEmpty(raw.chapterVersions)
+    chapterVersions: arrayOrEmpty(raw.chapterVersions),
+    chapterCommitBundles: arrayOrEmpty<ChapterCommitBundle>(raw.chapterCommitBundles),
+    revisionCommitBundles: arrayOrEmpty<RevisionCommitBundle>(raw.revisionCommitBundles)
   }
 }
 

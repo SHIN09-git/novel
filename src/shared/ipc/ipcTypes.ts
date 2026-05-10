@@ -1,4 +1,4 @@
-import type { AppData, AppSettings, DataMergePreview } from '../types'
+import type { AppData, AppSettings, ChapterCommitBundle, DataMergePreview, GenerationRunBundle, RevisionCommitBundle } from '../types'
 
 export type IpcResult<T> = { ok: true; data: T } | IpcFailure
 
@@ -18,6 +18,27 @@ export interface StorageSaveResult {
   ok: true
   storagePath: string
   credentialWarning?: string
+}
+
+export interface StorageWriteResult {
+  ok: true
+  storagePath: string
+  revision: string
+  updatedAt: string
+  savedCollections: string[]
+  credentialWarning?: string
+}
+
+export interface SaveGenerationRunBundleRequest {
+  bundle: GenerationRunBundle
+}
+
+export interface SaveChapterCommitBundleRequest {
+  bundle: ChapterCommitBundle
+}
+
+export interface SaveRevisionCommitBundleRequest {
+  bundle: RevisionCommitBundle
 }
 
 export interface ExportDataResult {

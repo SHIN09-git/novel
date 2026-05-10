@@ -12,6 +12,16 @@ function typeLabel(type: MemoryUpdateCandidate['type']) {
   return type
 }
 
+function renderWarnings(warnings?: string[]) {
+  if (!warnings?.length) return null
+  return (
+    <p className="muted">
+      风险提示：
+      {warnings.join('；')}
+    </p>
+  )
+}
+
 function renderMemoryPatchDetails(candidate: MemoryUpdateCandidate, scoped: ProjectDataSnapshot) {
   const patch = candidate.proposedPatch
   if (patch.kind === 'chapter_review_update') {
@@ -24,7 +34,10 @@ function renderMemoryPatchDetails(candidate: MemoryUpdateCandidate, scoped: Proj
         <p><strong>已回收伏笔：</strong>{patch.review.resolvedForeshadowing || '-'}</p>
         <p><strong>结尾钩子：</strong>{patch.review.endingHook || '-'}</p>
         <p><strong>风险提醒：</strong>{patch.review.riskWarnings || '-'}</p>
-        {patch.continuityBridgeSuggestion ? <p><strong>下一章衔接：</strong>{patch.continuityBridgeSuggestion.immediateNextBeat || patch.continuityBridgeSuggestion.mustContinueFrom || '-'}</p> : null}
+        {patch.continuityBridgeSuggestion ? (
+          <p><strong>下一章衔接：</strong>{patch.continuityBridgeSuggestion.immediateNextBeat || patch.continuityBridgeSuggestion.mustContinueFrom || '-'}</p>
+        ) : null}
+        {renderWarnings(patch.warnings)}
       </div>
     )
   }
@@ -37,6 +50,7 @@ function renderMemoryPatchDetails(candidate: MemoryUpdateCandidate, scoped: Proj
         <p><strong>新情绪状态：</strong>{patch.newCurrentEmotionalState || '-'}</p>
         <p><strong>与主角关系：</strong>{patch.newRelationshipWithProtagonist || '-'}</p>
         <p><strong>下一步行动倾向：</strong>{patch.newNextActionTendency || '-'}</p>
+        {renderWarnings(patch.warnings)}
       </div>
     )
   }
@@ -49,6 +63,7 @@ function renderMemoryPatchDetails(candidate: MemoryUpdateCandidate, scoped: Proj
         <p><strong>预期回收：</strong>{patch.candidate.expectedPayoff || '-'}</p>
         <p><strong>相关角色：</strong>{patch.candidate.relatedCharacterIds.map((id) => scoped.characters.find((character) => character.id === id)?.name ?? id).join('、') || '-'}</p>
         <p><strong>备注：</strong>{patch.candidate.notes || '-'}</p>
+        {renderWarnings(patch.warnings)}
       </div>
     )
   }
@@ -61,6 +76,24 @@ function renderMemoryPatchDetails(candidate: MemoryUpdateCandidate, scoped: Proj
         <p><strong>推荐处理方式：</strong>{patch.recommendedTreatmentMode || '-'}</p>
         <p><strong>证据：</strong>{patch.evidenceText || '-'}</p>
         <p><strong>备注：</strong>{patch.notes || '-'}</p>
+        {renderWarnings(patch.warnings)}
+      </div>
+    )
+  }
+  if (patch.kind === 'stage_summary_create') {
+    return (
+      <div className="patch-details">
+        <p><strong>阶段摘要：</strong>{patch.stageSummary.compressedPlotSummary || patch.stageSummary.plotProgress || '-'}</p>
+        {renderWarnings(patch.warnings)}
+      </div>
+    )
+  }
+  if (patch.kind === 'timeline_event_create') {
+    return (
+      <div className="patch-details">
+        <p><strong>事件：</strong>{patch.event.title || '-'}</p>
+        <p><strong>结果：</strong>{patch.event.result || '-'}</p>
+        {renderWarnings(patch.warnings)}
       </div>
     )
   }
@@ -79,11 +112,13 @@ export function PipelineMemoryCandidatesPanel({
   candidates,
   scoped,
   onAccept,
+  onAcceptAll,
   onReject
 }: {
   candidates: MemoryUpdateCandidate[]
   scoped: ProjectDataSnapshot
   onAccept: (candidate: MemoryUpdateCandidate) => void
+  onAcceptAll: (candidates: MemoryUpdateCandidate[]) => void
   onReject: (candidate: MemoryUpdateCandidate) => void
 }) {
   const pending = candidates.filter((candidate) => candidate.status === 'pending')
@@ -100,7 +135,14 @@ export function PipelineMemoryCandidatesPanel({
         <h3>记忆候选</h3>
         <span>{pending.length} 待确认</span>
       </div>
-      <p className="muted">未确认不会写入长期记忆。请先处理高影响角色、伏笔和章节复盘候选。</p>
+      {pending.length ? (
+        <div className="row-actions">
+          <button className="primary-button" onClick={() => onAcceptAll(pending)}>
+            一键通过待确认
+          </button>
+        </div>
+      ) : null}
+      <p className="muted">未确认不会写入长期记忆。批量通过会逐条应用结构化补丁，并跳过无法安全识别的旧格式候选。</p>
       {candidates.length === 0 ? <p className="muted">章节复盘、角色和伏笔候选会在流水线后半段出现。</p> : null}
       {Object.entries(pendingByType).map(([type, items]) => (
         <details key={type} open={type === 'character' || type === 'foreshadowing' || type === 'chapter_review'}>
