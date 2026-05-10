@@ -36,7 +36,7 @@ async function main() {
   const diffViewSource = await readFile(join(root, 'src', 'renderer', 'src', 'views', 'revision', 'RevisionDiffView.tsx'), 'utf-8')
   const studioSource = await readFile(join(root, 'src', 'renderer', 'src', 'views', 'RevisionStudioView.tsx'), 'utf-8')
   const writebackSource = await readFile(join(root, 'src', 'renderer', 'src', 'utils', 'revisionWriteback.ts'), 'utf-8')
-  const packageJson = JSON.parse(await readFile(join(root, 'package.json'), 'utf-8'))
+  const runTests = await readFile(join(root, 'scripts', 'run-tests.mjs'), 'utf-8')
 
   const insertDiff = createTextDiff('林默推开门。\n', '林默推开门。\n门后多了一道冷光。\n')
   checks.push(
@@ -122,7 +122,7 @@ async function main() {
 
   checks.push(
     assert(
-      packageJson.scripts?.test?.includes('validate-revision-diff-view.mjs'),
+      runTests.includes('validate-revision-diff-view.mjs'),
       'npm test includes validate-revision-diff-view.mjs'
     )
   )

@@ -263,7 +263,7 @@ async function main() {
   const ipcSource = await read('src/main/ipc/registerIpcHandlers.ts')
   const hookSource = await read('src/renderer/src/hooks/useAppData.ts')
   const studioSource = await read('src/renderer/src/views/RevisionStudioView.tsx')
-  const packageSource = await read('package.json')
+  const runTestsSource = await read('scripts/run-tests.mjs')
 
   checks.push(
     assert(
@@ -403,7 +403,7 @@ async function main() {
   )
   fullSaveStorage.close()
 
-  checks.push(assert(packageSource.includes('validate-p2c-revision-commit-bundle.mjs'), 'npm test runs the P2C revision commit validation script'))
+  checks.push(assert(runTestsSource.includes('validate-p2c-revision-commit-bundle.mjs'), 'npm test runs the P2C revision commit validation script'))
 
   const failed = checks.filter((check) => !check.ok)
   for (const check of checks) {

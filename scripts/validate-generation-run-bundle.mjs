@@ -212,7 +212,7 @@ async function main() {
   const service = await loadService()
   const runnerSource = await read('src/renderer/src/views/generation/usePipelineRunner.ts')
   const typesSource = await read('src/shared/types.ts')
-  const packageJson = JSON.parse(await read('package.json'))
+  const runTests = await read('scripts/run-tests.mjs')
   const data = fixtureData()
 
   checks.push(
@@ -316,7 +316,7 @@ async function main() {
 
   checks.push(
     assert(
-      packageJson.scripts.test.includes('validate-generation-run-bundle.mjs'),
+      runTests.includes('validate-generation-run-bundle.mjs'),
       'npm test runs validate-generation-run-bundle.mjs'
     )
   )

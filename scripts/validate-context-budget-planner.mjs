@@ -17,7 +17,7 @@ const gapAnalyzer = read('src/services/PlanContextGapAnalyzerService.ts')
 const budget = read('src/services/ContextBudgetManager.ts')
 const runner = read('src/renderer/src/views/generation/usePipelineRunner.ts')
 const authorSummary = read('src/services/RunTraceAuthorSummaryService.ts')
-const packageJson = JSON.parse(read('package.json'))
+const runTests = read('scripts/run-tests.mjs')
 
 assert(types.includes('export interface ContextNeedItem'), 'ContextNeedItem type is missing')
 assert(types.includes('contextNeeds: ContextNeedItem[]'), 'ContextNeedPlan must expose contextNeeds')
@@ -70,6 +70,6 @@ assert(authorSummary.includes('budgetPressure: tracePressure ?? pressure'), 'Aut
 
 assert(!authorSummary.includes('finalPrompt:'), 'Author summary must not copy full prompt text')
 assert(!types.includes('contextSelectionTracePromptText'), 'ContextSelectionTrace must stay structural and avoid prompt/body payload storage')
-assert(packageJson.scripts.test.includes('validate-context-budget-planner.mjs'), 'npm test must run validate-context-budget-planner.mjs')
+assert(runTests.includes('validate-context-budget-planner.mjs'), 'npm test must run validate-context-budget-planner.mjs')
 
 console.log('validate-context-budget-planner: ok')

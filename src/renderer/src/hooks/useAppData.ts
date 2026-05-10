@@ -30,7 +30,7 @@ export function useAppData() {
       .catch((error) => {
         latestDataRef.current = EMPTY_APP_DATA
         setData(EMPTY_APP_DATA)
-        setStatus(`读取失败：${getUserFriendlyError(error)}`)
+        setStatus(`读取数据失败：${getUserFriendlyError(error)}`)
       })
   }, [])
 
@@ -64,7 +64,7 @@ export function useAppData() {
     const next = resolveSaveDataInput(latestDataRef.current, nextInput)
     latestDataRef.current = next
     setData(next)
-    setStatus('淇濆瓨鐢熸垚杩愯璁板綍涓?..')
+    setStatus('正在保存生成运行记录...')
     try {
       const result = await enqueueStorageWrite(async () => {
         if (window.novelDirector.data.saveGenerationRunBundle) {
@@ -77,9 +77,9 @@ export function useAppData() {
         return window.novelDirector.data.save(next)
       })
       setStoragePath(result.storagePath)
-      setStatus(result.credentialWarning || `宸蹭繚瀛?${new Date().toLocaleTimeString('zh-CN')}`)
+      setStatus(result.credentialWarning || `生成运行记录已保存 ${new Date().toLocaleTimeString('zh-CN')}`)
     } catch (error) {
-      setStatus(`鐢熸垚杩愯璁板綍淇濆瓨澶辫触锛?{getUserFriendlyError(error)}`)
+      setStatus(`生成运行记录保存失败：${getUserFriendlyError(error)}`)
       throw error
     }
   }

@@ -35,7 +35,7 @@ async function main() {
   const qualityGateAiSource = await readFile(join(root, 'src', 'services', 'ai', 'QualityGateAI.ts'), 'utf-8')
   const runnerSource = await readFile(join(root, 'src', 'renderer', 'src', 'views', 'generation', 'usePipelineRunner.ts'), 'utf-8')
   const runTraceSource = await readFile(join(root, 'src', 'renderer', 'src', 'views', 'generation', 'RunTracePanel.tsx'), 'utf-8')
-  const packageJson = JSON.parse(await readFile(join(root, 'package.json'), 'utf-8'))
+  const runTests = await readFile(join(root, 'scripts', 'run-tests.mjs'), 'utf-8')
 
   checks.push(assert(typesSource.includes('interface ChapterNoveltyPolicy'), 'ChapterNoveltyPolicy type exists'))
   checks.push(
@@ -220,7 +220,7 @@ async function main() {
 
   checks.push(
     assert(
-      packageJson.scripts.test.includes('validate-novelty-guardrails.mjs'),
+      runTests.includes('validate-novelty-guardrails.mjs'),
       'npm test runs validate-novelty-guardrails.mjs'
     )
   )

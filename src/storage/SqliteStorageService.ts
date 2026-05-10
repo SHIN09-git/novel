@@ -54,6 +54,14 @@ function nowIso(): string {
   return new Date().toISOString()
 }
 
+function assertStaticSql(sql: string, context: string): void {
+  // SAFETY: SQLite schema SQL in this file is static and contains no user input.
+  // All dynamic values must continue to go through prepared statements with placeholders.
+  if (sql.includes('${') || sql.includes('`${')) {
+    throw new Error(`${context}: SQL schema text must not interpolate runtime values.`)
+  }
+}
+
 function arrayCollectionKeys(): AppDataArrayKey[] {
   return Object.keys(EMPTY_APP_DATA).filter((key) =>
     Array.isArray(EMPTY_APP_DATA[key as keyof AppData])
@@ -495,7 +503,7 @@ export class SqliteStorageService implements StorageService {
   }
 
   private ensureSchema(db: SqliteDatabase): void {
-    db.exec(`
+    const schemaSql = `
       CREATE TABLE IF NOT EXISTS meta (
         key TEXT PRIMARY KEY,
         value TEXT NOT NULL
@@ -536,7 +544,9 @@ export class SqliteStorageService implements StorageService {
         ON entities(collection, job_id);
       CREATE INDEX IF NOT EXISTS idx_entities_character
         ON entities(collection, character_id);
-    `)
+    `
+    assertStaticSql(schemaSql, 'SqliteStorageService.ensureSchema')
+    db.exec(schemaSql)
 
     db.prepare(
       `INSERT OR IGNORE INTO schema_migrations (version, applied_at)

@@ -263,7 +263,7 @@ async function main() {
   const mainIpcSource = await read('src/main/ipc/registerIpcHandlers.ts')
   const hookSource = await read('src/renderer/src/hooks/useAppData.ts')
   const draftAcceptanceSource = await read('src/renderer/src/views/generation/useDraftAcceptance.ts')
-  const packageJson = JSON.parse(await read('package.json'))
+  const runTests = await read('scripts/run-tests.mjs')
   const base = makeData(EMPTY_APP_DATA)
   const data = fixture(base)
 
@@ -399,7 +399,7 @@ async function main() {
 
   checks.push(
     assert(
-      packageJson.scripts.test.includes('validate-chapter-commit-bundle.mjs'),
+      runTests.includes('validate-chapter-commit-bundle.mjs'),
       'npm test runs validate-chapter-commit-bundle.mjs'
     )
   )

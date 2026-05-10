@@ -273,7 +273,7 @@ async function main() {
   const sqliteSource = await read('src/storage/SqliteStorageService.ts')
   const jsonSource = await read('src/storage/JsonStorageService.ts')
   const ipcSource = await read('src/main/ipc/registerIpcHandlers.ts')
-  const packageSource = await read('package.json')
+  const runTestsSource = await read('scripts/run-tests.mjs')
 
   checks.push(
     assert(
@@ -427,7 +427,7 @@ async function main() {
       'SQLite/JSON 存储和 JSON 导入导出入口保持存在'
     )
   )
-  checks.push(assert(packageSource.includes('validate-version-chain-restore.mjs'), 'npm test 运行版本链恢复验证脚本'))
+  checks.push(assert(runTestsSource.includes('validate-version-chain-restore.mjs'), 'npm test 运行版本链恢复验证脚本'))
 
   const failed = checks.filter((check) => !check.ok)
   for (const check of checks) {

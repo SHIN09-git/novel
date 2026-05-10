@@ -1,11 +1,20 @@
-import { clipboard, dialog, ipcMain, shell } from 'electron'
+import { app, clipboard, dialog, ipcMain, shell } from 'electron'
 import { copyFile, mkdir, readFile, stat, writeFile } from 'node:fs/promises'
-import { dirname, extname, join, resolve } from 'node:path'
+import { dirname, extname, isAbsolute, join, parse, relative, resolve } from 'node:path'
 import { safeParseJson } from '../../services/AIJsonParser'
 import { normalizeAppData, sanitizeAppDataForPersistence } from '../../shared/defaults'
 import { describeNetworkError as describeSafeNetworkError, getUserFriendlyError, redactSensitiveText } from '../../shared/errorUtils'
 import { IPC_CHANNELS } from '../../shared/ipc/ipcChannels'
+import {
+  ValidationError,
+  validateApiKey,
+  validateFilePath,
+  validateNumber,
+  validateString,
+  validateUrl
+} from '../../shared/validation'
 import type {
+  ChatCompletionResult,
   ChatCompletionRequest,
   ConfirmMigrationMergeRequest,
   ConfirmMigrationMergeResult,
@@ -34,7 +43,7 @@ import type {
   StorageSaveResult,
   StorageWriteResult
 } from '../../shared/ipc/ipcTypes'
-import type { AppData } from '../../shared/types'
+import type { ApiProvider, AppData } from '../../shared/types'
 import { AppConfigService } from '../AppConfigService'
 import {
   backupFileForOverwrite,
@@ -42,6 +51,7 @@ import {
   createMigrationMergePreview
 } from '../DataMergeService'
 import { SecureCredentialService } from '../SecureCredentialService'
+import type { TokenBucketRateLimiter } from '../RateLimiter'
 import type { StorageService } from '../../storage/StorageService'
 import { SQLITE_DATA_FILE_NAME } from '../../storage/StorageService'
 import { createStorageService } from '../../storage/SqliteStorageService'
@@ -52,6 +62,7 @@ interface IpcHandlerContext {
   credentialService: SecureCredentialService
   getStorage: () => StorageService
   setStorage: (storage: StorageService) => void
+  aiRateLimiters: Partial<Record<ApiProvider, TokenBucketRateLimiter>>
 }
 
 function sanitizeAiErrorText(text: string, apiKey?: string): string {
@@ -67,22 +78,77 @@ async function pathExists(path: string): Promise<boolean> {
   }
 }
 
+const localDataFileExtensions = new Set(['.sqlite', '.db', '.json'])
+
+function isPathInsideOrSame(childPath: string, parentPath: string): boolean {
+  const parent = resolve(parentPath)
+  const child = resolve(childPath)
+  const relationship = relative(parent, child)
+  return relationship === '' || (!!relationship && !relationship.startsWith('..') && !isAbsolute(relationship))
+}
+
+function getForbiddenStorageRoots(): string[] {
+  const roots = [
+    process.env.SystemRoot,
+    process.env.WINDIR,
+    process.env.ProgramFiles,
+    process.env['ProgramFiles(x86)'],
+    process.env.ProgramData
+  ]
+
+  if (app.isPackaged) {
+    roots.push(dirname(process.execPath), app.getAppPath())
+  }
+
+  return roots.filter((root): root is string => Boolean(root?.trim()))
+}
+
+function assertSafeDataStoragePath(candidatePath: string): string {
+  const candidate = resolve(candidatePath)
+  const extension = extname(candidate).toLowerCase()
+  if (!localDataFileExtensions.has(extension)) {
+    throw new Error('Data storage path must end with .sqlite, .db, or .json.')
+  }
+
+  const targetDir = dirname(candidate)
+  if (parse(targetDir).root === targetDir) {
+    throw new Error('Data storage path cannot be a filesystem root directory.')
+  }
+
+  for (const forbiddenRoot of getForbiddenStorageRoots()) {
+    if (isPathInsideOrSame(candidate, forbiddenRoot)) {
+      throw new Error('Data storage path cannot be inside a protected system or application directory.')
+    }
+  }
+
+  return candidate
+}
+
 async function resolveDataStoragePath(rawPath: string): Promise<string> {
-  const trimmed = rawPath.trim()
-  if (!trimmed) throw new Error('请选择或输入数据保存路径。')
+  const trimmed = validateFilePath(rawPath, 'Data storage path')
   const absolutePath = resolve(trimmed)
+  let candidatePath = ''
 
   try {
     const info = await stat(absolutePath)
-    if (info.isDirectory()) return join(absolutePath, SQLITE_DATA_FILE_NAME)
+    if (info.isDirectory()) candidatePath = join(absolutePath, SQLITE_DATA_FILE_NAME)
   } catch {
     // Non-existing paths are allowed if they end with a known local-data extension; otherwise treat them as folders.
   }
 
-  const extension = extname(absolutePath).toLowerCase()
-  if (extension === '.sqlite' || extension === '.db') return absolutePath
-  if (extension === '.json') return absolutePath
-  return join(absolutePath, SQLITE_DATA_FILE_NAME)
+  if (!candidatePath) {
+    const extension = extname(absolutePath).toLowerCase()
+    if (extension) {
+      if (!localDataFileExtensions.has(extension)) {
+        throw new Error('Data storage path must end with .sqlite, .db, or .json.')
+      }
+      candidatePath = absolutePath
+    } else {
+      candidatePath = join(absolutePath, SQLITE_DATA_FILE_NAME)
+    }
+  }
+
+  return assertSafeDataStoragePath(candidatePath)
 }
 
 async function backupExistingSourceData(sourcePath: string): Promise<string | null> {
@@ -93,18 +159,85 @@ async function backupExistingSourceData(sourcePath: string): Promise<string | nu
 }
 
 async function saveTextFile(request: SaveTextFileRequest | SaveMarkdownFileRequest, markdown = false): Promise<SaveFileResult> {
-  if (typeof request.content !== 'string') throw new Error('导出内容格式无效。')
-  if (typeof request.defaultFileName !== 'string' || !request.defaultFileName.trim()) throw new Error('导出文件名不能为空。')
+  const content = validateString(request.content, 'Export content', { maxLength: 2_000_000, trim: false })
+  const defaultFileName = validateFilePath(request.defaultFileName, 'Export file name')
 
   const result = await dialog.showSaveDialog({
     title: markdown ? '导出 Markdown 文件' : '导出文本文件',
-    defaultPath: request.defaultFileName,
+    defaultPath: defaultFileName,
     filters: markdown ? [{ name: 'Markdown', extensions: ['md'] }] : [{ name: 'Text', extensions: ['txt'] }]
   })
 
   if (result.canceled || !result.filePath) return { canceled: true }
-  await writeFile(result.filePath, request.content, 'utf-8')
+  await writeFile(result.filePath, content, 'utf-8')
   return { canceled: false, filePath: result.filePath }
+}
+
+const apiProviders = new Set<ApiProvider>(['openai', 'compatible', 'local'])
+const chatMessageRoles = new Set(['system', 'user'])
+
+function validateApiProvider(value: unknown): ApiProvider {
+  if (typeof value !== 'string' || !apiProviders.has(value as ApiProvider)) {
+    throw new ValidationError('AI provider is not supported.')
+  }
+  return value as ApiProvider
+}
+
+function validateChatMessages(messages: unknown): ChatCompletionRequest['messages'] {
+  if (!Array.isArray(messages)) {
+    throw new ValidationError('AI messages must be an array.')
+  }
+  if (!messages.length) {
+    throw new ValidationError('AI messages cannot be empty.')
+  }
+  if (messages.length > 128) {
+    throw new ValidationError('AI messages contain too many entries.')
+  }
+
+  return messages.map((message, index) => {
+    if (!message || typeof message !== 'object' || Array.isArray(message)) {
+      throw new ValidationError(`AI message ${index + 1} must be an object.`)
+    }
+    const record = message as Record<string, unknown>
+    const role = validateString(record.role, `AI message ${index + 1} role`, { minLength: 1, maxLength: 20 })
+    if (!chatMessageRoles.has(role)) {
+      throw new ValidationError(`AI message ${index + 1} role is not supported.`)
+    }
+
+    return {
+      role: role as 'system' | 'user',
+      content: validateString(record.content, `AI message ${index + 1} content`, {
+        minLength: 1,
+        maxLength: 500_000,
+        trim: false
+      })
+    }
+  })
+}
+
+function validateChatCompletionRequest(request: ChatCompletionRequest): ChatCompletionRequest {
+  if (!request || typeof request !== 'object' || Array.isArray(request)) {
+    throw new ValidationError('AI chat request must be an object.')
+  }
+  const record = request as unknown as Record<string, unknown>
+  const settings = record.settings && typeof record.settings === 'object' && !Array.isArray(record.settings)
+    ? (record.settings as Record<string, unknown>)
+    : null
+  if (!settings) {
+    throw new ValidationError('AI settings are required.')
+  }
+
+  return {
+    settings: {
+      ...(request.settings ?? {}),
+      apiProvider: validateApiProvider(settings.apiProvider),
+      baseUrl: validateUrl(settings.baseUrl, 'AI Base URL'),
+      modelName: validateString(settings.modelName, 'AI model name', { minLength: 1, maxLength: 200 }),
+      temperature: validateNumber(settings.temperature, 'AI temperature', { min: 0, max: 2 }),
+      maxTokens: validateNumber(settings.maxTokens, 'AI max tokens', { min: 1, max: 200_000, integer: true })
+    },
+    messages: validateChatMessages(record.messages)
+  }
 }
 
 async function secureAndSanitizeAppData(
@@ -196,7 +329,7 @@ async function migrateStoragePath(
     return {
       ok: false,
       storagePath: oldPath,
-      error: getUserFriendlyError(error)
+      error: redactSensitiveText(getUserFriendlyError(error)).slice(0, 800)
     }
   }
 }
@@ -334,10 +467,14 @@ export function registerIpcHandlers(context: IpcHandlerContext): void {
   ipcMain.handle(
     IPC_CHANNELS.APP_CREATE_MIGRATION_MERGE_PREVIEW,
     safeIpcHandler(
-      async (_event, request: MigrationMergePreviewRequest): Promise<MigrationMergePreviewResult> => ({
-        ok: true,
-        preview: await createMigrationMergePreview(request.sourcePath, request.targetPath)
-      })
+      async (_event, request: MigrationMergePreviewRequest): Promise<MigrationMergePreviewResult> => {
+        const sourcePath = await resolveDataStoragePath(request.sourcePath)
+        const targetPath = await resolveDataStoragePath(request.targetPath)
+        return {
+          ok: true,
+          preview: await createMigrationMergePreview(sourcePath, targetPath)
+        }
+      }
     )
   )
 
@@ -373,7 +510,7 @@ export function registerIpcHandlers(context: IpcHandlerContext): void {
   ipcMain.handle(
     IPC_CHANNELS.APP_OPEN_STORAGE_FOLDER,
     safeIpcHandler(async (_event, storagePath?: string): Promise<OpenStorageFolderResult> => {
-      const target = storagePath || context.getStorage().getStoragePath()
+      const target = storagePath ? await resolveDataStoragePath(storagePath) : context.getStorage().getStoragePath()
       if (await pathExists(target)) {
         shell.showItemInFolder(target)
         return { ok: true }
@@ -396,7 +533,7 @@ export function registerIpcHandlers(context: IpcHandlerContext): void {
   ipcMain.handle(
     IPC_CHANNELS.CLIPBOARD_WRITE_LEGACY,
     safeIpcHandler(async (_event, text: string) => {
-      clipboard.writeText(text)
+      clipboard.writeText(validateString(text, 'Clipboard text', { maxLength: 500_000, trim: false }))
       return { ok: true as const }
     })
   )
@@ -404,7 +541,7 @@ export function registerIpcHandlers(context: IpcHandlerContext): void {
   ipcMain.handle(
     IPC_CHANNELS.CLIPBOARD_WRITE_TEXT,
     safeIpcHandler(async (_event, text: string) => {
-      clipboard.writeText(text)
+      clipboard.writeText(validateString(text, 'Clipboard text', { maxLength: 500_000, trim: false }))
       return { ok: true as const }
     })
   )
@@ -412,7 +549,7 @@ export function registerIpcHandlers(context: IpcHandlerContext): void {
   ipcMain.handle(
     IPC_CHANNELS.CREDENTIALS_SET_API_KEY,
     safeIpcHandler(async (_event, request: CredentialSetApiKeyRequest | string): Promise<CredentialSetApiKeyResult> => {
-      const apiKey = typeof request === 'string' ? request : request.apiKey
+      const apiKey = validateApiKey(typeof request === 'string' ? request : request.apiKey)
       await context.credentialService.setApiKey(apiKey)
       return { ok: true, hasApiKey: true }
     })
@@ -438,24 +575,27 @@ export function registerIpcHandlers(context: IpcHandlerContext): void {
     IPC_CHANNELS.CREDENTIALS_MIGRATE_LEGACY_API_KEY,
     safeIpcHandler(async (_event, apiKey: string): Promise<CredentialMigrateLegacyApiKeyResult> => ({
       ok: true,
-      hasApiKey: await context.credentialService.migrateLegacyApiKey(typeof apiKey === 'string' ? apiKey : '')
+      hasApiKey: await context.credentialService.migrateLegacyApiKey(validateApiKey(apiKey))
     }))
   )
 
   ipcMain.handle(
     IPC_CHANNELS.AI_CHAT_COMPLETION,
-    safeIpcHandler(async (_event, request: ChatCompletionRequest) => {
-      const settings = request.settings
-      const apiKey = settings.apiProvider === 'local' ? '' : await context.credentialService.getApiKey()
-      if (settings.apiProvider !== 'local' && !apiKey.trim()) {
-        return { ok: false as const, error: '未配置 API Key。已跳过远程 AI 调用。' }
-      }
-
+    safeIpcHandler(async (_event, request: ChatCompletionRequest): Promise<ChatCompletionResult> => {
+      let apiKey = ''
       try {
-        const baseUrl = settings.baseUrl.trim().replace(/\/+$/, '')
-        if (!baseUrl) return { ok: false as const, error: 'AI Base URL 为空，请在设置页填写兼容 Chat Completions 的地址。' }
-        const url = `${baseUrl}/chat/completions`
-        new URL(url)
+        const { settings, messages } = validateChatCompletionRequest(request)
+        apiKey = settings.apiProvider === 'local' ? '' : await context.credentialService.getApiKey()
+        if (settings.apiProvider !== 'local' && !apiKey.trim()) {
+          return { ok: false as const, error: '未配置 API Key。已跳过远程 AI 调用。' }
+        }
+
+        const limiter = settings.apiProvider === 'local' ? null : context.aiRateLimiters[settings.apiProvider]
+        if (limiter) {
+          await limiter.acquire()
+        }
+
+        const url = `${settings.baseUrl}/chat/completions`
         const headers: Record<string, string> = {
           'Content-Type': 'application/json'
         }
@@ -465,7 +605,7 @@ export function registerIpcHandlers(context: IpcHandlerContext): void {
 
         const requestBody = {
           model: settings.modelName,
-          messages: request.messages,
+          messages,
           temperature: settings.temperature,
           max_tokens: settings.maxTokens,
           response_format: { type: 'json_object' }
@@ -507,7 +647,10 @@ export function registerIpcHandlers(context: IpcHandlerContext): void {
         if (!content) return { ok: false as const, error: 'AI 返回为空。' }
         return { ok: true as const, content, finishReason: choice?.finish_reason ?? choice?.finishReason }
       } catch (error) {
-        return { ok: false as const, error: `AI 网络请求失败：${sanitizeAiErrorText(describeSafeNetworkError(error), apiKey)}` }
+        const message = error instanceof ValidationError
+          ? getUserFriendlyError(error)
+          : describeSafeNetworkError(error)
+        return { ok: false as const, error: `AI 请求失败：${sanitizeAiErrorText(message, apiKey)}` }
       }
     })
   )

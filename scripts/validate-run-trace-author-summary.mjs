@@ -152,7 +152,7 @@ async function main() {
   const jsonModule = await bundle('src/storage/JsonStorageService.ts', 'json-storage.mjs')
   const panelSource = await read('src/renderer/src/components/pipeline/PipelineTracePanel.tsx')
   const fullPanelSource = await read('src/renderer/src/views/generation/RunTracePanel.tsx')
-  const packageJson = JSON.parse(await read('package.json'))
+  const runTests = await read('scripts/run-tests.mjs')
 
   const data = defaultsModule.normalizeAppData(makeData())
   const summary = serviceModule.buildRunTraceAuthorSummary(data, { traceId: 'trace-1', createdAt: now() })
@@ -204,7 +204,7 @@ async function main() {
 
   checks.push(assert(panelSource.includes('作者诊断摘要') && panelSource.includes('高级 / 调试信息'), 'PipelineTracePanel defaults to author summary and keeps advanced trace details'))
   checks.push(assert(fullPanelSource.includes('章节生成诊断摘要') && fullPanelSource.includes('生成诊断摘要'), 'RunTracePanel exposes manual summary generation'))
-  checks.push(assert(packageJson.scripts.test.includes('validate-run-trace-author-summary.mjs'), 'npm test runs run trace author summary validation'))
+  checks.push(assert(runTests.includes('validate-run-trace-author-summary.mjs'), 'npm test runs run trace author summary validation'))
 
   const failed = checks.filter((check) => !check.ok)
   const report = { ok: failed.length === 0, totalChecks: checks.length, failed }

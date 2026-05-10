@@ -119,32 +119,6 @@ const novelDirector = {
   }
 }
 
-const novelAPI = {
-  getData: novelDirector.data.load,
-  saveData: novelDirector.data.save,
-  saveGenerationRunBundle: novelDirector.data.saveGenerationRunBundle,
-  saveChapterCommitBundle: novelDirector.data.saveChapterCommitBundle,
-  saveRevisionCommitBundle: novelDirector.data.saveRevisionCommitBundle,
-  exportData: novelDirector.data.export,
-  importData: novelDirector.data.import,
-  getDataStoragePath: novelDirector.app.getStoragePath,
-  selectDataStoragePath: novelDirector.app.selectStoragePath,
-  migrateDataStoragePath: novelDirector.app.migrateStoragePath,
-  createMigrationMergePreview: novelDirector.app.createMigrationMergePreview,
-  confirmMigrationMerge: novelDirector.app.confirmMigrationMerge,
-  resetDataStoragePath: novelDirector.app.resetStoragePath,
-  openDataStorageFolder: novelDirector.app.openStorageFolder,
-  saveTextFile: novelDirector.export.saveTextFile,
-  saveMarkdownFile: novelDirector.export.saveMarkdownFile,
-  chatCompletion: novelDirector.ai.chatCompletion,
-  setApiKey: novelDirector.credentials.setApiKey,
-  hasApiKey: novelDirector.credentials.hasApiKey,
-  deleteApiKey: novelDirector.credentials.deleteApiKey,
-  writeClipboard: novelDirector.clipboard.writeText
-}
-
 contextBridge.exposeInMainWorld('novelDirector', novelDirector)
-contextBridge.exposeInMainWorld('novelAPI', novelAPI)
 
 export type NovelDirectorAPI = typeof novelDirector
-export type NovelAPI = typeof novelAPI

@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto'
 import { copyFile, mkdir, readFile, stat } from 'node:fs/promises'
 import { dirname } from 'node:path'
 import { normalizeAppData, sanitizeAppDataForPersistence } from '../shared/defaults'
@@ -85,10 +86,8 @@ const COLLECTION_LABELS: Record<string, string> = {
   chapterVersions: '章节历史版本'
 }
 
-let generatedIdCounter = 0
-
 function clone<T>(value: T): T {
-  return JSON.parse(JSON.stringify(value)) as T
+  return structuredClone(value)
 }
 
 function asEntity(value: unknown): Entity {
@@ -129,8 +128,7 @@ export function deepEqualEntity(a: unknown, b: unknown): boolean {
 }
 
 function makeImportedId(oldId: ID, collection: string): ID {
-  generatedIdCounter += 1
-  return `${oldId}-import-${Date.now().toString(36)}-${collection}-${generatedIdCounter}`
+  return `${oldId}-import-${collection}-${randomUUID()}`
 }
 
 function getRemap(remaps: IdRemaps, collection: AppDataArrayKey): IdMap {

@@ -1,5 +1,5 @@
 import type { IpcMainInvokeEvent } from 'electron'
-import { getUserFriendlyError, logSafeError } from '../../shared/errorUtils'
+import { getUserFriendlyError, logSafeError, redactSensitiveText } from '../../shared/errorUtils'
 import type { IpcFailure } from '../../shared/ipc/ipcTypes'
 
 type AsyncIpcHandler<TArgs extends unknown[], TResult> = (
@@ -17,7 +17,7 @@ export function safeIpcHandler<TArgs extends unknown[], TResult>(
       logSafeError('IPC handler failed', error)
       return {
         ok: false,
-        error: getUserFriendlyError(error)
+        error: redactSensitiveText(getUserFriendlyError(error)).slice(0, 800)
       }
     }
   }

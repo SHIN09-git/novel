@@ -228,8 +228,8 @@ await jsonService.save(normalized)
 const jsonLoaded = await jsonService.load()
 checks.push(assert(jsonLoaded.hardCanonPacks[0]?.items.length === normalized.hardCanonPacks[0].items.length, 'JSON backend round-trips HardCanonPack entities'))
 
-const packageJson = JSON.parse(await read('package.json'))
-checks.push(assert(packageJson.scripts.test.includes('validate-hard-canon-pack.mjs'), 'npm test runs validate-hard-canon-pack.mjs'))
+const runTests = await read('scripts/run-tests.mjs')
+checks.push(assert(runTests.includes('validate-hard-canon-pack.mjs'), 'npm test runs validate-hard-canon-pack.mjs'))
 
 const failed = checks.filter((check) => !check.ok)
 for (const check of checks) {

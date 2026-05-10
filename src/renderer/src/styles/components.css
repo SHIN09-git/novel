@@ -70,6 +70,54 @@ button:disabled {
   font-weight: 700;
 }
 
+.error-boundary {
+  display: grid;
+  gap: 16px;
+  width: min(720px, 100%);
+  margin: 48px auto;
+  padding: 22px;
+  border: 1px solid rgba(182, 83, 83, 0.28);
+  border-radius: var(--radius-lg);
+  background: rgba(255, 254, 250, 0.96);
+  box-shadow: var(--shadow);
+}
+
+.view-error-boundary {
+  min-height: 260px;
+  align-content: center;
+}
+
+.error-boundary h2 {
+  margin: 0 0 8px;
+  font-size: 22px;
+}
+
+.error-boundary p {
+  margin: 0;
+  color: var(--muted);
+  line-height: 1.7;
+}
+
+.error-boundary details {
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: 12px;
+  background: rgba(255, 255, 255, 0.68);
+}
+
+.error-boundary summary {
+  cursor: pointer;
+  font-weight: 700;
+}
+
+.error-boundary pre {
+  max-height: 220px;
+  overflow: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+  color: var(--muted);
+}
+
 .panel + .panel {
   margin-top: 18px;
 }

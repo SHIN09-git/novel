@@ -1,4 +1,4 @@
-import { copyFile, mkdir, readFile, rename, stat, writeFile } from 'node:fs/promises'
+import { copyFile, mkdir, open, readFile, rename, stat, writeFile } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
 import { SQLITE_DATA_FILE_NAME } from '../storage/StorageService'
 
@@ -62,6 +62,7 @@ export class AppConfigService {
     const backupPath = `${this.configPath}.bak`
 
     await writeFile(tmpPath, JSON.stringify(config, null, 2), 'utf-8')
+    await syncFile(tmpPath)
 
     try {
       await stat(this.configPath)
@@ -74,6 +75,7 @@ export class AppConfigService {
     }
 
     await rename(tmpPath, this.configPath)
+    await syncDirectory(dirname(this.configPath))
   }
 }
 
@@ -83,4 +85,30 @@ function errorCode(error: unknown): string {
 
 function errorSummary(error: unknown): string {
   return error instanceof Error ? error.message : String(error)
+}
+
+async function syncFile(path: string): Promise<void> {
+  const handle = await open(path, 'r+')
+  try {
+    await handle.sync()
+  } finally {
+    await handle.close()
+  }
+}
+
+async function syncDirectory(path: string): Promise<void> {
+  let handle: Awaited<ReturnType<typeof open>> | null = null
+  try {
+    handle = await open(path, 'r')
+    await handle.sync()
+  } catch (error) {
+    const code = errorCode(error)
+    if (!['EACCES', 'EINVAL', 'EISDIR', 'ENOTSUP', 'EPERM'].includes(code)) {
+      throw error
+    }
+    // Windows often does not permit directory fsync. The temp-file fsync plus
+    // atomic rename still improves durability; directory sync remains best-effort.
+  } finally {
+    await handle?.close()
+  }
 }

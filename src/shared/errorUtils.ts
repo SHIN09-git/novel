@@ -47,8 +47,13 @@ export function redactSensitiveText(text: string, secrets: Array<string | undefi
     if (trimmed) sanitized = sanitized.split(trimmed).join('[REDACTED]')
   }
   return sanitized
-    .replace(/Bearer\s+[A-Za-z0-9._~+/=-]+/gi, 'Bearer [REDACTED]')
     .replace(/"api[_-]?key"\s*:\s*"[^"]+"/gi, '"apiKey":"[REDACTED]"')
+    .replace(/Authorization\s*:\s*Bearer\s+[^\s"',;]+/gi, 'Authorization: Bearer [REDACTED]')
+    .replace(/\bsk-ant-[A-Za-z0-9_-]{8,}\b/g, 'sk-ant-[REDACTED]')
+    .replace(/\bsk-(?:proj-)?[A-Za-z0-9_-]{8,}\b/g, 'sk-[REDACTED]')
+    .replace(/Bearer\s+[^\s"',;]+/gi, 'Bearer [REDACTED]')
+    .replace(/((?:api[_-]?key|x-api-key|access[_-]?token|token)\s*=)\s*["']?[^"',\s;&]+["']?/gi, '$1[REDACTED]')
+    .replace(/((?:x-api-key|api-key|access-token|token)\s*:)\s*["']?[^"',\s;]+["']?/gi, '$1 [REDACTED]')
 }
 
 export function logSafeError(context: string, error: unknown, secrets: Array<string | undefined | null> = []): void {

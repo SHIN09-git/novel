@@ -1,5 +1,6 @@
 import { lazy, Suspense, useState } from 'react'
 import type { AppData, ID, Project } from '../../shared/types'
+import { ErrorBoundary } from './components/ErrorBoundary'
 import { Shell, type View } from './components/Layout'
 import { useAppData } from './hooks/useAppData'
 import { BibleView } from './views/BibleView'
@@ -136,7 +137,26 @@ export default function App() {
 
   return (
     <Shell project={currentProject} view={view} setView={setView} setProjectId={setCurrentProjectId} status={status}>
-      <Suspense fallback={<div className="view-loading">正在加载页面...</div>}>{renderCurrentView(data, currentProject)}</Suspense>
+      <ErrorBoundary
+        fallback={(error, reset) => (
+          <div className="error-boundary view-error-boundary" role="alert">
+            <div>
+              <p className="eyebrow">页面错误</p>
+              <h2>当前页面加载失败</h2>
+              <p>导航到其他页面或重试当前页面都不会影响本地数据。</p>
+            </div>
+            <details>
+              <summary>技术详情</summary>
+              <pre>{error.stack ?? error.message}</pre>
+            </details>
+            <button className="primary-button" type="button" onClick={reset}>
+              重试当前页面
+            </button>
+          </div>
+        )}
+      >
+        <Suspense fallback={<div className="view-loading">正在加载页面...</div>}>{renderCurrentView(data, currentProject)}</Suspense>
+      </ErrorBoundary>
     </Shell>
   )
 }

@@ -10,10 +10,11 @@
   "scripts": {
     "dev": "electron-vite dev",
     "build": "tsc --noEmit && electron-vite build",
-    "dist:win": "set ELECTRON_BUILDER_CACHE=%CD%\\.electron-builder-cache&& set CSC_IDENTITY_AUTO_DISCOVERY=false&& npm run build && electron-builder --win nsis",
+    "dist:win": "node scripts/run-dist-win.mjs",
     "smoke": "set NOVEL_DIRECTOR_SMOKE_TEST=1&& electron-vite preview",
     "rc:fixture": "node scripts/rc-regression.mjs",
-    "test": "npm run rc:fixture && node scripts/validate-app-data.mjs tmp/rc-regression/novel-director-data.json && node scripts/validate-ai-modules.mjs && node scripts/validate-ai-schema-validator.mjs && node scripts/validate-revision-merge.mjs && node scripts/validate-revision-writeback.mjs && node scripts/validate-revision-contract.mjs && node scripts/validate-revision-diff-view.mjs && node scripts/validate-p0-stability.mjs && node scripts/validate-app-config-safety.mjs && node scripts/validate-context-budget-consistency.mjs && node scripts/validate-context-relevance-scoring.mjs && node scripts/validate-context-need-planner.mjs && node scripts/validate-context-budget-planner.mjs && node scripts/validate-plan-context-gap-closure.mjs && node scripts/validate-generation-run-bundle.mjs && node scripts/validate-chapter-commit-bundle.mjs && node scripts/validate-p2c-revision-commit-bundle.mjs && node scripts/validate-version-chain-restore.mjs && node scripts/validate-run-trace-author-summary.mjs && node scripts/validate-character-state-ledger.mjs && node scripts/validate-story-direction-board.mjs && node scripts/validate-hard-canon-pack.mjs && node scripts/validate-pipeline-context-trace-alignment.mjs && node scripts/validate-revision-candidate-context-source.mjs && node scripts/validate-secure-credentials.mjs && node scripts/validate-memory-patch-structure.mjs && node scripts/validate-storage-migration-merge.mjs && node scripts/validate-sqlite-storage.mjs && node scripts/validate-prompt-compression-replacement.mjs && node scripts/validate-prompt-priority-stack.mjs && node scripts/validate-writing-prompt-hygiene.mjs && node scripts/validate-novelty-guardrails.mjs && node scripts/validate-app-view-rendering-and-styles.mjs && node scripts/validate-functional-save-coverage.mjs && node scripts/validate-lazy-views-and-scoped-styles.mjs && node scripts/validate-public-release-cleanup.mjs",
+    "test": "node scripts/run-tests.mjs",
+    "test:single": "node scripts/run-tests.mjs",
     "typecheck": "tsc --noEmit",
     "preview": "electron-vite preview"
   },
