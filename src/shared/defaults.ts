@@ -8,6 +8,7 @@ import type {
   CharacterStateChangeCandidate,
   CharacterStateChangeSuggestion,
   CharacterStateFact,
+  CharacterStateLog,
   CharacterStateFactStatus,
   CharacterStatePromptPolicy,
   CharacterStateRiskLevel,
@@ -52,6 +53,7 @@ import type {
   PromptBlockOrderItem,
   RetrievalPriority,
   StateFactCategory,
+  StageSummary,
   StoryBible,
   StoryDirectionChapterBeat,
   StoryDirectionGuide,
@@ -577,6 +579,22 @@ function normalizeCharacterStateFact(value: unknown): CharacterStateFact {
   }
 }
 
+function normalizeCharacterStateLog(value: unknown): CharacterStateLog {
+  const log = objectOrEmpty(value)
+  return {
+    id: stringValue(log.id),
+    projectId: stringValue(log.projectId),
+    characterId: stringValue(log.characterId),
+    chapterId: stringValue(log.chapterId) || null,
+    chapterOrder: typeof log.chapterOrder === 'number' ? log.chapterOrder : null,
+    note: stringValue(log.note),
+    linkedFactId: stringValue(log.linkedFactId) || null,
+    linkedCandidateId: stringValue(log.linkedCandidateId) || null,
+    convertedAt: stringValue(log.convertedAt) || null,
+    createdAt: stringValue(log.createdAt) || new Date().toISOString()
+  }
+}
+
 function normalizeCharacterStateTransaction(value: unknown): CharacterStateTransaction {
   const transaction = objectOrEmpty(value)
   const timestamp = new Date().toISOString()
@@ -907,6 +925,34 @@ function normalizeBudgetProfile(value: unknown, projectId = ''): ContextBudgetPr
 
 function normalizeChapterTask(value: unknown): ChapterTask {
   return { ...createEmptyChapterTask(), ...(objectOrEmpty(value) as Partial<ChapterTask>) }
+}
+
+function normalizeStageSummary(value: unknown): StageSummary {
+  const summary = objectOrEmpty(value)
+  const chapterStart = typeof summary.chapterStart === 'number' ? summary.chapterStart : 1
+  const chapterEnd = typeof summary.chapterEnd === 'number' ? summary.chapterEnd : chapterStart
+  const compressedPlotSummary = stringValue(summary.compressedPlotSummary) || stringValue(summary.plotProgress)
+  return {
+    id: stringValue(summary.id),
+    projectId: stringValue(summary.projectId),
+    chapterStart,
+    chapterEnd,
+    coveredChapterRange: stringValue(summary.coveredChapterRange) || `第 ${chapterStart}-${chapterEnd} 章`,
+    compressedPlotSummary,
+    irreversibleChanges: stringValue(summary.irreversibleChanges),
+    endingCarryoverState: stringValue(summary.endingCarryoverState),
+    emotionalAftertaste: stringValue(summary.emotionalAftertaste),
+    pacingState: stringValue(summary.pacingState),
+    plotProgress: stringValue(summary.plotProgress) || compressedPlotSummary,
+    characterRelations: stringValue(summary.characterRelations),
+    secrets: stringValue(summary.secrets),
+    foreshadowingPlanted: stringValue(summary.foreshadowingPlanted),
+    foreshadowingResolved: stringValue(summary.foreshadowingResolved),
+    unresolvedQuestions: stringValue(summary.unresolvedQuestions),
+    nextStageDirection: stringValue(summary.nextStageDirection),
+    createdAt: stringValue(summary.createdAt) || new Date().toISOString(),
+    updatedAt: stringValue(summary.updatedAt) || new Date().toISOString()
+  }
 }
 
 function normalizeContinuityBridgeSuggestion(value: unknown) {
@@ -1326,13 +1372,13 @@ export function normalizeAppData(input: Partial<AppData>): AppData {
     storyBibles: arrayOrEmpty(raw.storyBibles),
     chapters: arrayOrEmpty(raw.chapters),
     characters: arrayOrEmpty(raw.characters),
-    characterStateLogs: arrayOrEmpty(raw.characterStateLogs),
+    characterStateLogs: arrayOrEmpty<CharacterStateLog>(raw.characterStateLogs).map(normalizeCharacterStateLog),
     characterStateFacts: arrayOrEmpty<CharacterStateFact>(raw.characterStateFacts).map(normalizeCharacterStateFact),
     characterStateTransactions: arrayOrEmpty<CharacterStateTransaction>(raw.characterStateTransactions).map(normalizeCharacterStateTransaction),
     characterStateChangeCandidates: arrayOrEmpty<CharacterStateChangeCandidate>(raw.characterStateChangeCandidates).map(normalizeCharacterStateChangeCandidate),
     foreshadowings: arrayOrEmpty<Foreshadowing>(raw.foreshadowings).map(normalizeForeshadowing),
     timelineEvents: arrayOrEmpty(raw.timelineEvents),
-    stageSummaries: arrayOrEmpty(raw.stageSummaries),
+    stageSummaries: arrayOrEmpty<StageSummary>(raw.stageSummaries).map(normalizeStageSummary),
     promptVersions: arrayOrEmpty(raw.promptVersions),
     promptContextSnapshots: arrayOrEmpty<PromptContextSnapshot>(raw.promptContextSnapshots).map(normalizePromptContextSnapshot),
     storyDirectionGuides: arrayOrEmpty<StoryDirectionGuide>(raw.storyDirectionGuides).map(normalizeStoryDirectionGuide),

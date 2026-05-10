@@ -41,6 +41,7 @@ async function loadModules() {
     'src/services/TokenEstimator.ts',
     'src/services/ContinuityService.ts',
     'src/services/CharacterStateService.ts',
+    'src/services/StageSummaryService.ts',
     'src/services/ContextCompressionService.ts',
     'src/services/ContextBudgetManager.ts',
     'src/services/StoryDirectionService.ts',
@@ -95,13 +96,19 @@ function makeStageSummary() {
     projectId: 'project-1',
     chapterStart: 1,
     chapterEnd: 3,
-    plotProgress: 'STAGE_SUMMARY_1_3：主角发现雾城旧案与钟楼信号有关。',
-    characterRelations: '',
-    secrets: '',
-    foreshadowingPlanted: '',
-    foreshadowingResolved: '',
-    unresolvedQuestions: '',
-    nextStageDirection: '',
+    coveredChapterRange: '第 1-3 章',
+    compressedPlotSummary: 'STAGE_SUMMARY_1_3：主角发现雾城旧案与钟楼信号有关。',
+    irreversibleChanges: 'IRREVERSIBLE_STAGE_CHANGE：监听装置已被确认。',
+    endingCarryoverState: 'ENDING_CARRYOVER_STATE：主角带着银色怀表离开电话亭。',
+    emotionalAftertaste: 'EMOTIONAL_AFTERTASTE：怀疑与紧迫感上升。',
+    pacingState: 'PACING_STATE：调查线索进入收束。',
+    plotProgress: 'LEGACY_PLOT_PROGRESS_SHOULD_NOT_APPEAR_WHEN_NEW_SUMMARY_EXISTS',
+    characterRelations: 'OLD_CHARACTER_RELATIONS_SHOULD_NOT_APPEAR',
+    secrets: 'OLD_SECRETS_SHOULD_NOT_APPEAR',
+    foreshadowingPlanted: 'OLD_FORESHADOWING_PLANTED_SHOULD_NOT_APPEAR',
+    foreshadowingResolved: 'OLD_FORESHADOWING_RESOLVED_SHOULD_NOT_APPEAR',
+    unresolvedQuestions: 'OLD_UNRESOLVED_QUESTIONS_SHOULD_NOT_APPEAR',
+    nextStageDirection: 'OLD_NEXT_STAGE_DIRECTION_SHOULD_NOT_APPEAR',
     createdAt: timestamp,
     updatedAt: timestamp
   }
@@ -183,6 +190,7 @@ async function main() {
     compressChapterRecapsForBudget,
     detailedChapterRecapText
   } = await loadModules()
+  const stageSummaryViewSource = await readFile(join(root, 'src/renderer/src/views/StageSummaryView.tsx'), 'utf-8')
 
   const project = makeProject()
   const longDetail = 'DETAIL_CH2_LONG '.repeat(260)
@@ -230,6 +238,30 @@ async function main() {
   const stagePrompt = PromptBuilderService.build(makePromptInput(project, chapters, stageSummaries, tightSelection, tightProfile))
   checks.push(assert(!stagePrompt.includes('DETAIL_CH2_LONG'), 'final prompt does not include replaced detailed recap source text'))
   checks.push(assert(stagePrompt.includes('STAGE_SUMMARY_1_3'), 'final prompt includes stage summary replacement text'))
+  checks.push(assert(stagePrompt.includes('IRREVERSIBLE_STAGE_CHANGE'), 'stage summary prompt keeps irreversible changes'))
+  checks.push(assert(stagePrompt.includes('ENDING_CARRYOVER_STATE'), 'stage summary prompt keeps ending carryover state'))
+  checks.push(
+    assert(
+      [
+        'LEGACY_PLOT_PROGRESS_SHOULD_NOT_APPEAR_WHEN_NEW_SUMMARY_EXISTS',
+        'OLD_CHARACTER_RELATIONS_SHOULD_NOT_APPEAR',
+        'OLD_SECRETS_SHOULD_NOT_APPEAR',
+        'OLD_FORESHADOWING_PLANTED_SHOULD_NOT_APPEAR',
+        'OLD_FORESHADOWING_RESOLVED_SHOULD_NOT_APPEAR',
+        'OLD_UNRESOLVED_QUESTIONS_SHOULD_NOT_APPEAR',
+        'OLD_NEXT_STAGE_DIRECTION_SHOULD_NOT_APPEAR'
+      ].every((token) => !stagePrompt.includes(token)),
+      'legacy stage summary fields stay compatible but do not enter the writing prompt'
+    )
+  )
+  checks.push(
+    assert(
+      ['主要角色关系变化', '已埋伏笔', '关键秘密/信息差', '当前未解决问题', '已回收伏笔', '下一阶段推荐推进方向'].every(
+        (label) => !stageSummaryViewSource.includes(label)
+      ),
+      'stage summary UI hides legacy relationship/foreshadowing/secret/planning fields'
+    )
+  )
 
   const oneLineChapters = chapters.map((chapter) =>
     chapter.id === 'chapter-2'

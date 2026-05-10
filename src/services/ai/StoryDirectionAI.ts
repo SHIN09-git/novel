@@ -12,6 +12,7 @@ import type {
   TimelineEvent
 } from '../../shared/types'
 import type { AIClient } from './AIClient'
+import { StageSummaryService } from '../StageSummaryService'
 
 export interface PolishStoryDirectionIdeaInput {
   userRawIdea: string
@@ -132,7 +133,7 @@ function fallbackGeneration(input: GenerateStoryDirectionGuideInput): StoryDirec
 function summaryForPrompt(stageSummaries: StageSummary[]): string {
   return stageSummaries
     .slice(-6)
-    .map((summary) => `第 ${summary.chapterStart}-${summary.chapterEnd} 章：${summary.plotProgress || summary.nextStageDirection}`)
+    .map((summary) => `${StageSummaryService.coveredChapterRange(summary)}：${StageSummaryService.compressedPlotSummary(summary) || summary.endingCarryoverState || ''}`)
     .join('\n')
 }
 

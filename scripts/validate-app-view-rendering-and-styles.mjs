@@ -19,8 +19,11 @@ async function exists(relativePath) {
 async function main() {
   const checks = []
   const appSource = await readFile(join(root, 'src/renderer/src/App.tsx'), 'utf-8')
+  const appShellSource = await readFile(join(root, 'src/renderer/src/components/layoutParts/AppShell.tsx'), 'utf-8')
   const mainSource = await readFile(join(root, 'src/renderer/src/main.tsx'), 'utf-8')
   const stylesSource = await readFile(join(root, 'src/renderer/src/styles.css'), 'utf-8')
+  const promptBuilderSource = await readFile(join(root, 'src/renderer/src/views/PromptBuilderView.tsx'), 'utf-8')
+  const foreshadowingViewSource = await readFile(join(root, 'src/renderer/src/views/ForeshadowingView.tsx'), 'utf-8')
   const indexCssPath = 'src/renderer/src/styles/index.css'
   const indexCss = await readFile(join(root, indexCssPath), 'utf-8')
 
@@ -98,6 +101,41 @@ async function main() {
         appSource.includes('<RevisionStudioView') &&
         appSource.includes('<SettingsView'),
       'heavy views remain accessible through the switch without changing exports'
+    )
+  )
+
+  checks.push(
+    assert(
+      foreshadowingViewSource.includes('archivedForeshadowingRank') &&
+        foreshadowingViewSource.includes('FORESHADOWING_WEIGHT_ORDER') &&
+        foreshadowingViewSource.includes('.sort(compareForeshadowingForLedger)'),
+      'ForeshadowingView sorts unresolved items by weight and keeps archived/resolved items at the bottom'
+    )
+  )
+
+  checks.push(
+    assert(
+      promptBuilderSource.includes('[...scoped.foreshadowings].sort(compareForeshadowingForPrompt)'),
+      'PromptBuilderView uses the same weight/archive ordering for manual foreshadowing selection'
+    )
+  )
+
+  checks.push(
+    assert(
+      promptBuilderSource.lastIndexOf('{renderManualForeshadowingPanel()}') > promptBuilderSource.lastIndexOf('<h2>已保存版本</h2>'),
+      'PromptBuilderView renders manual foreshadowing selection at the bottom of the main column'
+    )
+  )
+
+  checks.push(
+    assert(
+      appShellSource.includes('function NavIcon') &&
+        appShellSource.includes('<svg viewBox="0 0 24 24"') &&
+        !appShellSource.includes('viewIcons') &&
+        ['dashboard', 'bible', 'chapters', 'characters', 'foreshadowings', 'timeline', 'stages', 'direction', 'prompt', 'pipeline', 'revision', 'settings'].every((view) =>
+          appShellSource.includes(`case '${view}'`)
+        ),
+      'Sidebar navigation uses one-to-one inline SVG icons instead of letter placeholders'
     )
   )
 

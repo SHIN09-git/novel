@@ -18,6 +18,10 @@ export function StageSummaryView({ data, project, saveData }: ProjectProps) {
   const [chapterEnd, setChapterEnd] = useState(3)
   const aiService = useMemo(() => new AIService(), [])
 
+  function coveredRange(start: number, end: number) {
+    return `第 ${start}-${end} 章`
+  }
+
   async function generateDraft() {
     const selectedChapters = chapters.filter((chapter) => chapter.order >= chapterStart && chapter.order <= chapterEnd)
     if (selectedChapters.length === 0) return
@@ -71,7 +75,7 @@ export function StageSummaryView({ data, project, saveData }: ProjectProps) {
 
   return (
     <div className="stage-summary-view">
-      <Header title="滚动阶段摘要" description="阶段摘要用于替代旧章节详细信息，避免 Prompt 越写越长。" />
+      <Header title="滚动阶段摘要" description="阶段摘要只保留旧章节剧情压缩和远期背景记忆，角色、伏笔和信息差请回到对应账本维护。" />
       <section className="panel inline-form stage-builder">
         <NumberInput label="起始章节" value={chapterStart} min={1} onChange={(value) => setChapterStart(clampNumber(value ?? 1, 1))} />
         <NumberInput label="结束章节" value={chapterEnd} min={1} onChange={(value) => setChapterEnd(clampNumber(value ?? 3, 3))} />
@@ -86,17 +90,21 @@ export function StageSummaryView({ data, project, saveData }: ProjectProps) {
           summaries.map((summary) => (
             <article key={summary.id} className="panel">
               <div className="form-grid compact">
-                <NumberInput label="覆盖起始章" value={summary.chapterStart} onChange={(chapterStart) => updateSummary(summary.id, { chapterStart: chapterStart ?? summary.chapterStart })} />
-                <NumberInput label="覆盖结束章" value={summary.chapterEnd} onChange={(chapterEnd) => updateSummary(summary.id, { chapterEnd: chapterEnd ?? summary.chapterEnd })} />
+                <NumberInput label="覆盖起始章" value={summary.chapterStart} onChange={(chapterStart) => {
+                  const nextStart = chapterStart ?? summary.chapterStart
+                  updateSummary(summary.id, { chapterStart: nextStart, coveredChapterRange: coveredRange(nextStart, summary.chapterEnd) })
+                }} />
+                <NumberInput label="覆盖结束章" value={summary.chapterEnd} onChange={(chapterEnd) => {
+                  const nextEnd = chapterEnd ?? summary.chapterEnd
+                  updateSummary(summary.id, { chapterEnd: nextEnd, coveredChapterRange: coveredRange(summary.chapterStart, nextEnd) })
+                }} />
               </div>
               <div className="form-grid">
-                <TextArea label="阶段剧情进展" value={summary.plotProgress} onChange={(plotProgress) => updateSummary(summary.id, { plotProgress })} />
-                <TextArea label="主要角色关系变化" value={summary.characterRelations} onChange={(characterRelations) => updateSummary(summary.id, { characterRelations })} />
-                <TextArea label="关键秘密/信息差" value={summary.secrets} onChange={(secrets) => updateSummary(summary.id, { secrets })} />
-                <TextArea label="已埋伏笔" value={summary.foreshadowingPlanted} onChange={(foreshadowingPlanted) => updateSummary(summary.id, { foreshadowingPlanted })} />
-                <TextArea label="已回收伏笔" value={summary.foreshadowingResolved} onChange={(foreshadowingResolved) => updateSummary(summary.id, { foreshadowingResolved })} />
-                <TextArea label="当前未解决问题" value={summary.unresolvedQuestions} onChange={(unresolvedQuestions) => updateSummary(summary.id, { unresolvedQuestions })} />
-                <TextArea label="下一阶段推荐推进方向" value={summary.nextStageDirection} onChange={(nextStageDirection) => updateSummary(summary.id, { nextStageDirection })} />
+                <TextArea label="压缩剧情摘要" value={summary.compressedPlotSummary || summary.plotProgress} onChange={(compressedPlotSummary) => updateSummary(summary.id, { compressedPlotSummary, plotProgress: compressedPlotSummary })} />
+                <TextArea label="不可逆变化" value={summary.irreversibleChanges ?? ''} onChange={(irreversibleChanges) => updateSummary(summary.id, { irreversibleChanges })} />
+                <TextArea label="结尾承接状态" value={summary.endingCarryoverState ?? ''} onChange={(endingCarryoverState) => updateSummary(summary.id, { endingCarryoverState })} />
+                <TextArea label="情绪余味" value={summary.emotionalAftertaste ?? ''} onChange={(emotionalAftertaste) => updateSummary(summary.id, { emotionalAftertaste })} />
+                <TextArea label="节奏状态" value={summary.pacingState ?? ''} onChange={(pacingState) => updateSummary(summary.id, { pacingState })} />
               </div>
               <button className="danger-button" onClick={() => deleteSummary(summary)}>
                 删除阶段摘要

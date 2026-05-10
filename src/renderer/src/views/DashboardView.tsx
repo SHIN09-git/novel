@@ -1,4 +1,5 @@
 import type { Chapter } from '../../../shared/types'
+import { StageSummaryService } from '../../../services/StageSummaryService'
 import { Header } from '../components/Layout'
 import { ActionToolbar, SectionCard, StatCard, StatusBadge } from '../components/UI'
 import { formatDate, newId, now } from '../utils/format'
@@ -20,6 +21,9 @@ export function DashboardView({ data, project, saveData }: ProjectProps) {
   const latestQualityReport = [...scoped.qualityGateReports].sort((a, b) => b.createdAt.localeCompare(a.createdAt))[0]
   const latestLog = [...scoped.characterStateLogs].sort((a, b) => b.createdAt.localeCompare(a.createdAt))[0]
   const latestLogCharacter = latestLog ? scoped.characters.find((character) => character.id === latestLog.characterId) : null
+  const latestStageDetail = latestStage
+    ? StageSummaryService.compressedPlotSummary(latestStage) || latestStage.endingCarryoverState || '阶段摘要已压缩为远期剧情背景'
+    : '建议每 3 章生成一次摘要'
 
   async function createNextChapter() {
     const timestamp = now()
@@ -68,12 +72,12 @@ export function DashboardView({ data, project, saveData }: ProjectProps) {
         <div className="dashboard-next-card">
           <span>下一步建议</span>
           <strong>准备第 {nextChapter} 章</strong>
-          <p>{latestStage?.nextStageDirection || recentChapter?.endingHook || '先补齐最近章节复盘，再进入 Prompt 构建器或生产流水线。'}</p>
+          <p>{recentChapter?.endingHook || latestStageDetail || '先补齐最近章节复盘，再进入 Prompt 构建器或生产流水线。'}</p>
         </div>
       </section>
       <section className="metric-grid dashboard-metrics">
         <StatCard label="总字数" value={totalWords.toLocaleString()} detail={`${scoped.chapters.length} 个章节 · 最近第 ${recentChapter?.order ?? '-'} 章`} tone="accent" />
-        <StatCard label="阶段摘要" value={latestStage ? `${latestStage.chapterStart}-${latestStage.chapterEnd}` : '暂无'} detail={latestStage?.nextStageDirection || '建议每 3 章生成一次摘要'} tone="info" />
+        <StatCard label="阶段摘要" value={latestStage ? `${latestStage.chapterStart}-${latestStage.chapterEnd}` : '暂无'} detail={latestStageDetail} tone="info" />
         <StatCard label="高权重伏笔" value={highForeshadowingCount} detail="未回收且需要进入调度视野" tone="warning" />
         <StatCard label="主要角色" value={mainCharacterCount} detail="维护当前戏剧状态，而非百科条目" tone="success" />
       </section>

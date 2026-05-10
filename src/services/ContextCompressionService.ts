@@ -7,6 +7,7 @@ import type {
   StageSummary
 } from '../shared/types'
 import { TokenEstimator } from './TokenEstimator'
+import { StageSummaryService } from './StageSummaryService'
 
 interface ChapterWithShortSummaries extends Chapter {
   oneLineSummary?: string
@@ -45,16 +46,7 @@ export function detailedChapterRecapText(chapter: Chapter): string {
 }
 
 export function stageSummaryCompressionText(summary: StageSummary): string {
-  return [
-    `阶段摘要 ${summary.chapterStart}-${summary.chapterEnd}`,
-    `剧情进展：${textOrEmpty(summary.plotProgress)}`,
-    `角色关系：${textOrEmpty(summary.characterRelations)}`,
-    `关键秘密/信息差：${textOrEmpty(summary.secrets)}`,
-    `已埋伏笔：${textOrEmpty(summary.foreshadowingPlanted)}`,
-    `已回收伏笔：${textOrEmpty(summary.foreshadowingResolved)}`,
-    `未解决问题：${textOrEmpty(summary.unresolvedQuestions)}`,
-    `下一阶段方向：${textOrEmpty(summary.nextStageDirection)}`
-  ].join('\n')
+  return StageSummaryService.formatForBudget(summary)
 }
 
 function firstSentenceOrExcerpt(text: string, limit = SUMMARY_EXCERPT_LIMIT): string {

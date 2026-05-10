@@ -18,6 +18,7 @@ import {
   validateForeshadowingExtractionSchema,
   validateNextSuggestionsSchema
 } from './AISchemaValidator'
+import { StageSummaryService } from '../StageSummaryService'
 
 export class ChapterReviewAI {
   constructor(private readonly client: AIClient) {}
@@ -59,24 +60,7 @@ export class ChapterReviewAI {
   }
 
   async generateStageSummary(chapters: Chapter[]): Promise<Omit<StageSummary, 'id' | 'projectId' | 'createdAt' | 'updatedAt'>> {
-    const sorted = [...chapters].sort((a, b) => a.order - b.order)
-    const chapterStart = sorted[0]?.order ?? 1
-    const chapterEnd = sorted[sorted.length - 1]?.order ?? chapterStart
-    const summaries = sorted
-      .map((chapter) => `第 ${chapter.order} 章《${chapter.title || '未命名'}》：${chapter.summary || '待补充摘要'}`)
-      .join('\n')
-
-    return {
-      chapterStart,
-      chapterEnd,
-      plotProgress: `根据所选章节整理阶段剧情进展：\n${summaries}`,
-      characterRelations: '主要角色关系变化：\n- ',
-      secrets: '关键秘密/信息差：\n- ',
-      foreshadowingPlanted: '已埋伏笔：\n- ',
-      foreshadowingResolved: '已回收伏笔：\n- ',
-      unresolvedQuestions: '当前未解决问题：\n- ',
-      nextStageDirection: '下一阶段推荐推进方向：\n- '
-    }
+    return StageSummaryService.createDraftFromChapters(chapters)
   }
 
   async updateCharacterStates(

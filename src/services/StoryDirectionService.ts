@@ -5,6 +5,7 @@ import type {
   StoryDirectionChapterBeat,
   StoryDirectionGuide
 } from '../shared/types'
+import { StageSummaryService } from './StageSummaryService'
 
 function clean(value: string | null | undefined): string {
   return (value ?? '').trim()
@@ -111,20 +112,7 @@ export class StoryDirectionService {
   static formatStageSummaryReview(stageSummaries: StageSummary[] = []): string {
     return [...stageSummaries]
       .sort((a, b) => b.chapterEnd - a.chapterEnd || b.chapterStart - a.chapterStart)
-      .map((summary) =>
-        [
-          `第 ${summary.chapterStart}-${summary.chapterEnd} 章`,
-          line('剧情推进：', summary.plotProgress),
-          line('角色关系：', summary.characterRelations),
-          line('秘密与线索：', summary.secrets),
-          line('埋下伏笔：', summary.foreshadowingPlanted),
-          line('回收伏笔：', summary.foreshadowingResolved),
-          line('未解问题：', summary.unresolvedQuestions),
-          line('下一阶段方向：', summary.nextStageDirection)
-        ]
-          .filter(Boolean)
-          .join('\n')
-      )
+      .map((summary) => StageSummaryService.formatForPrompt(summary))
       .join('\n\n')
   }
 }

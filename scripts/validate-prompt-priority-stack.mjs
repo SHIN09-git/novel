@@ -41,6 +41,7 @@ async function loadPromptBuilder() {
     'src/services/TokenEstimator.ts',
     'src/services/ContinuityService.ts',
     'src/services/CharacterStateService.ts',
+    'src/services/StageSummaryService.ts',
     'src/services/ContextCompressionService.ts',
     'src/services/ContextBudgetManager.ts',
     'src/services/StoryDirectionService.ts',

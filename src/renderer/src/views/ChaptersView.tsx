@@ -64,8 +64,10 @@ export function ChaptersView({ data, project, saveData }: ProjectProps) {
   const confirmAction = useConfirm()
   const scoped = projectData(data, project.id)
   const chapters = [...scoped.chapters].sort((a, b) => a.order - b.order)
-  const [selectedId, setSelectedId] = useState<ID | null>(chapters[0]?.id ?? null)
-  const selected = chapters.find((chapter) => chapter.id === selectedId) ?? chapters[0] ?? null
+  const chapterListItems = [...chapters].sort((a, b) => b.order - a.order)
+  const defaultSelectedChapter = chapterListItems[0] ?? null
+  const [selectedId, setSelectedId] = useState<ID | null>(defaultSelectedChapter?.id ?? null)
+  const selected = chapters.find((chapter) => chapter.id === selectedId) ?? defaultSelectedChapter
   const selectedBridge = selected
     ? scoped.chapterContinuityBridges.find((bridge) => bridge.fromChapterId === selected.id && bridge.toChapterOrder === selected.order + 1) ?? null
     : null
@@ -82,8 +84,14 @@ export function ChaptersView({ data, project, saveData }: ProjectProps) {
   const aiService = useMemo(() => new AIService(data.settings), [data.settings])
 
   useEffect(() => {
-    if (!selectedId && chapters[0]) setSelectedId(chapters[0].id)
-  }, [chapters, selectedId])
+    if (!selectedId && defaultSelectedChapter) {
+      setSelectedId(defaultSelectedChapter.id)
+      return
+    }
+    if (selectedId && !chapters.some((chapter) => chapter.id === selectedId)) {
+      setSelectedId(defaultSelectedChapter?.id ?? null)
+    }
+  }, [chapters, defaultSelectedChapter, selectedId])
 
   useEffect(() => {
     setBodyDraft(selected?.body ?? '')
@@ -588,7 +596,7 @@ export function ChaptersView({ data, project, saveData }: ProjectProps) {
       />
       <section className="split-layout chapter-workbench">
         <ChapterListPanel
-          chapters={chapters}
+          chapters={chapterListItems}
           selectedChapterId={selected?.id ?? null}
           activeBodyCharacterCount={bodyCharacterCount}
           onSelectChapter={(chapter) => {

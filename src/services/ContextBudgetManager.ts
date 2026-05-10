@@ -28,6 +28,7 @@ import {
   replacementTextForCompressedChapter
 } from './ContextCompressionService'
 import { TokenEstimator } from './TokenEstimator'
+import { StageSummaryService } from './StageSummaryService'
 
 interface ProjectContextData {
   project: Project
@@ -193,15 +194,7 @@ function stringifyChapter(chapter: Chapter): string {
 }
 
 function stringifyStageSummary(summary: StageSummary): string {
-  return [
-    summary.plotProgress,
-    summary.characterRelations,
-    summary.secrets,
-    summary.foreshadowingPlanted,
-    summary.foreshadowingResolved,
-    summary.unresolvedQuestions,
-    summary.nextStageDirection
-  ].join('\n')
+  return StageSummaryService.formatForBudget(summary)
 }
 
 function stringifyCharacter(character: Character): string {

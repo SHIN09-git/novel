@@ -1,10 +1,12 @@
 import type {
   AppData,
+  Chapter,
   Character,
   CharacterCardField,
   CharacterStateChangeCandidate,
   CharacterStateFact,
   CharacterStateFactValue,
+  CharacterStateLog,
   CharacterStateTransaction,
   CharacterStateTransactionType,
   ContextNeedPlan,
@@ -85,6 +87,40 @@ function inferValueType(value: CharacterStateFactValue | null): CharacterStateFa
   return String(value ?? '').length > 80 ? 'text' : 'string'
 }
 
+export type CharacterStateFactDraft = Partial<CharacterStateFact> & { projectId: ID; characterId: ID; label: string }
+
+function includesAny(text: string, keywords: string[]): boolean {
+  return keywords.some((keyword) => text.includes(keyword))
+}
+
+function uniqueFields(fields: CharacterCardField[]): CharacterCardField[] {
+  return [...new Set(fields)]
+}
+
+function withDefaultLinkedCardFields(fields: CharacterCardField[] | null | undefined, category: StateFactCategory): CharacterCardField[] {
+  return fields && fields.length ? uniqueFields(fields) : CharacterStateService.getDefaultLinkedCardFieldsForCategory(category)
+}
+
+function inferLabelFromLog(text: string, category: StateFactCategory): string {
+  if (category === 'physical') {
+    if (text.includes('右手') && text.includes('结晶')) return '右手结晶化'
+    if (text.includes('右臂') && text.includes('灼痛')) return '右臂灼痛'
+    if (text.includes('右臂')) return '右臂状态'
+    if (text.includes('左臂')) return '左臂状态'
+    if (text.includes('结晶')) return '身体结晶化'
+    if (text.includes('骨裂')) return '骨裂'
+    if (text.includes('出血')) return '出血'
+    return '伤势/身体状态'
+  }
+  if (category === 'inventory') return includesAny(text, ['失去', '丢失']) ? '失去物品' : '持有物品'
+  if (category === 'knowledge') return '已知信息'
+  if (category === 'location') return '当前位置'
+  if (category === 'resource') return '资源/余额'
+  if (category === 'promise') return '承诺/债务'
+  if (category === 'ability') return '能力限制'
+  return '状态事实'
+}
+
 export interface StateValidationIssue {
   type:
     | 'resource_underflow'
@@ -104,6 +140,53 @@ export interface StateValidationIssue {
 export class CharacterStateService {
   static formatFactValue = valueToText
 
+  static getDefaultLinkedCardFieldsForCategory(category: StateFactCategory): CharacterCardField[] {
+    if (category === 'resource' || category === 'inventory') return ['abilitiesAndResources']
+    if (category === 'location' || category === 'goal' || category === 'status') return ['surfaceGoal']
+    if (category === 'physical') return ['weaknessAndCost', 'abilitiesAndResources']
+    if (category === 'knowledge' || category === 'secret') return ['abilitiesAndResources', 'relationshipTension']
+    if (category === 'mental' || category === 'relationship') return ['relationshipTension']
+    if (category === 'promise') return ['relationshipTension', 'weaknessAndCost']
+    if (category === 'ability') return ['abilitiesAndResources', 'weaknessAndCost']
+    return []
+  }
+
+  static inferFactDraftFromLog(
+    logText: string,
+    character: Pick<Character, 'id' | 'projectId'>,
+    chapter?: Pick<Chapter, 'id' | 'order'> | null
+  ): CharacterStateFactDraft {
+    const text = logText.trim()
+    let category: StateFactCategory = 'custom'
+    if (includesAny(text, ['手臂', '右臂', '左臂', '右手', '左手', '伤', '灼痛', '结晶', '骨裂', '出血', '疲惫'])) category = 'physical'
+    else if (includesAny(text, ['持有', '得到', '获得', '失去', '丢失', '钥匙', '地图', '武器'])) category = 'inventory'
+    else if (includesAny(text, ['知道', '得知', '发现', '明白', '记起', '秘密'])) category = 'knowledge'
+    else if (includesAny(text, ['位置', '到达', '离开', '进入', '抵达'])) category = 'location'
+    else if (includesAny(text, ['现金', '钱', '余额', '金币', '花费', '支付', '购买'])) category = 'resource'
+    else if (includesAny(text, ['承诺', '答应', '欠', '债', '契约'])) category = 'promise'
+    else if (includesAny(text, ['能力', '权限', '冷却', '代价', '无法使用'])) category = 'ability'
+
+    const linkedCardFields = this.getDefaultLinkedCardFieldsForCategory(category)
+    return {
+      projectId: character.projectId,
+      characterId: character.id,
+      category,
+      key: inferLabelFromLog(text, category),
+      label: inferLabelFromLog(text, category),
+      valueType: 'text',
+      value: text,
+      unit: '',
+      linkedCardFields,
+      trackingLevel: category === 'custom' ? 'note' : 'hard',
+      promptPolicy: category === 'custom' ? 'manual_only' : 'when_relevant',
+      status: 'active',
+      sourceChapterId: chapter?.id ?? null,
+      sourceChapterOrder: chapter?.order ?? null,
+      evidence: text,
+      confidence: category === 'custom' ? 0.5 : 0.85
+    }
+  }
+
   static getRelevantCharacterStatesForPrompt(
     characterIds: ID[],
     contextNeedPlan: ContextNeedPlan | null,
@@ -117,21 +200,22 @@ export class CharacterStateService {
       .sort((a, b) => factSortScore(b, contextNeedPlan) - factSortScore(a, contextNeedPlan) || a.label.localeCompare(b.label))
   }
 
-  static createOrUpdateFact(factInput: Partial<CharacterStateFact> & { projectId: ID; characterId: ID; label: string }, appData: AppData): AppData {
+  static createOrUpdateFact(factInput: CharacterStateFactDraft, appData: AppData): AppData {
     const timestamp = now()
     const existing = factInput.id ? appData.characterStateFacts.find((fact) => fact.id === factInput.id) : null
     const value = factInput.value ?? existing?.value ?? ''
+    const category = factInput.category ?? existing?.category ?? 'custom'
     const fact: CharacterStateFact = {
       id: existing?.id ?? factInput.id ?? newId(),
       projectId: factInput.projectId,
       characterId: factInput.characterId,
-      category: factInput.category ?? existing?.category ?? 'custom',
+      category,
       key: factInput.key ?? existing?.key ?? factInput.label,
       label: factInput.label,
       valueType: factInput.valueType ?? existing?.valueType ?? inferValueType(value),
       value,
       unit: factInput.unit ?? existing?.unit ?? '',
-      linkedCardFields: factInput.linkedCardFields ?? existing?.linkedCardFields ?? [],
+      linkedCardFields: withDefaultLinkedCardFields(factInput.linkedCardFields ?? existing?.linkedCardFields, category),
       trackingLevel: factInput.trackingLevel ?? existing?.trackingLevel ?? 'hard',
       promptPolicy: factInput.promptPolicy ?? existing?.promptPolicy ?? 'when_relevant',
       status: factInput.status ?? existing?.status ?? 'active',
@@ -147,6 +231,107 @@ export class CharacterStateService {
       characterStateFacts: existing
         ? appData.characterStateFacts.map((item) => (item.id === fact.id ? fact : item))
         : [fact, ...appData.characterStateFacts]
+    }
+  }
+
+  static createFactFromLog(log: CharacterStateLog, draft: CharacterStateFactDraft, appData: AppData): AppData {
+    const currentLog = appData.characterStateLogs.find((item) => item.id === log.id) ?? log
+    if (currentLog.linkedFactId || currentLog.linkedCandidateId) return appData
+    const timestamp = now()
+    const factId = draft.id ?? newId()
+    const nextData = this.createOrUpdateFact(
+      {
+        ...draft,
+        id: factId,
+        projectId: log.projectId,
+        characterId: log.characterId,
+        sourceChapterId: draft.sourceChapterId ?? log.chapterId,
+        sourceChapterOrder: draft.sourceChapterOrder ?? log.chapterOrder,
+        evidence: draft.evidence || log.note,
+        confidence: draft.confidence ?? 1
+      },
+      appData
+    )
+    const fact = nextData.characterStateFacts.find((item) => item.id === factId)
+    if (!fact) return nextData
+    const transaction: CharacterStateTransaction = {
+      id: newId(),
+      projectId: log.projectId,
+      characterId: log.characterId,
+      factId,
+      chapterId: log.chapterId,
+      chapterOrder: log.chapterOrder,
+      transactionType: 'create',
+      beforeValue: null,
+      afterValue: fact.value,
+      delta: null,
+      reason: log.note,
+      evidence: log.note,
+      source: 'manual',
+      status: 'accepted',
+      createdAt: timestamp,
+      updatedAt: timestamp
+    }
+    return {
+      ...nextData,
+      characterStateTransactions: [transaction, ...nextData.characterStateTransactions],
+      characterStateLogs: nextData.characterStateLogs.map((item) =>
+        item.id === log.id ? { ...item, linkedFactId: factId, convertedAt: timestamp } : item
+      )
+    }
+  }
+
+  static createCandidateFromLog(log: CharacterStateLog, draft: CharacterStateFactDraft, appData: AppData): AppData {
+    const currentLog = appData.characterStateLogs.find((item) => item.id === log.id) ?? log
+    if (currentLog.linkedFactId || currentLog.linkedCandidateId) return appData
+    const timestamp = now()
+    const fact: CharacterStateFact = {
+      id: draft.id ?? newId(),
+      projectId: log.projectId,
+      characterId: log.characterId,
+      category: draft.category ?? 'custom',
+      key: draft.key ?? draft.label,
+      label: draft.label,
+      valueType: draft.valueType ?? inferValueType(draft.value ?? ''),
+      value: draft.value ?? log.note,
+      unit: draft.unit ?? '',
+      linkedCardFields: withDefaultLinkedCardFields(draft.linkedCardFields, draft.category ?? 'custom'),
+      trackingLevel: draft.trackingLevel ?? 'hard',
+      promptPolicy: draft.promptPolicy ?? 'when_relevant',
+      status: draft.status ?? 'active',
+      sourceChapterId: draft.sourceChapterId ?? log.chapterId,
+      sourceChapterOrder: draft.sourceChapterOrder ?? log.chapterOrder,
+      evidence: draft.evidence || log.note,
+      confidence: draft.confidence ?? 0.8,
+      createdAt: timestamp,
+      updatedAt: timestamp
+    }
+    const candidateId = newId()
+    const candidate: CharacterStateChangeCandidate = {
+      id: candidateId,
+      projectId: log.projectId,
+      characterId: log.characterId,
+      chapterId: log.chapterId,
+      chapterOrder: log.chapterOrder,
+      candidateType: 'create_fact',
+      targetFactId: null,
+      proposedFact: fact,
+      proposedTransaction: null,
+      beforeValue: null,
+      afterValue: fact.value,
+      evidence: log.note,
+      confidence: draft.confidence ?? 0.8,
+      riskLevel: fact.trackingLevel === 'hard' ? 'medium' : 'low',
+      status: 'pending',
+      createdAt: timestamp,
+      updatedAt: timestamp
+    }
+    return {
+      ...appData,
+      characterStateChangeCandidates: [candidate, ...appData.characterStateChangeCandidates],
+      characterStateLogs: appData.characterStateLogs.map((item) =>
+        item.id === log.id ? { ...item, linkedCandidateId: candidateId, convertedAt: timestamp } : item
+      )
     }
   }
 
@@ -169,17 +354,18 @@ export class CharacterStateService {
       ? applyTransactionValue(existing.value, candidate.afterValue, candidate.proposedTransaction?.delta ?? null, transactionType)
       : candidate.proposedFact?.value ?? candidate.afterValue ?? ''
     const proposed = candidate.proposedFact
+    const fallbackCategory = proposed?.category ?? 'custom'
     const fallbackFact: CharacterStateFact = {
           id: newId(),
           projectId: candidate.projectId,
           characterId: candidate.characterId,
-          category: 'custom' as StateFactCategory,
+          category: fallbackCategory,
           key: proposed?.key ?? 'state',
           label: candidate.proposedFact?.label ?? '状态事实',
           valueType: inferValueType(nextValue),
           value: nextValue,
           unit: '',
-          linkedCardFields: [],
+          linkedCardFields: withDefaultLinkedCardFields(proposed?.linkedCardFields, fallbackCategory),
           trackingLevel: 'hard',
           promptPolicy: 'when_relevant',
           status: 'active',
@@ -190,9 +376,11 @@ export class CharacterStateService {
           createdAt: timestamp,
           updatedAt: timestamp
         }
+    const baseFact = existing ?? proposed ?? fallbackFact
     const fact: CharacterStateFact = {
-      ...(existing ?? proposed ?? fallbackFact),
+      ...baseFact,
       value: nextValue,
+      linkedCardFields: withDefaultLinkedCardFields(baseFact.linkedCardFields, baseFact.category),
       status: candidate.candidateType === 'resolve_fact' ? 'resolved' : existing?.status ?? proposed?.status ?? 'active',
       sourceChapterId: candidate.chapterId ?? existing?.sourceChapterId ?? null,
       sourceChapterOrder: candidate.chapterOrder ?? existing?.sourceChapterOrder ?? null,

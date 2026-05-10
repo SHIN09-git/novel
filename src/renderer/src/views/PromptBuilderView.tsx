@@ -5,6 +5,7 @@ import type {
   ChapterTask,
   ContextNeedPlan,
   ContextBudgetMode,
+  Foreshadowing,
   ForeshadowingTreatmentMode,
   ID,
   Project,
@@ -63,6 +64,25 @@ function safeModeLabel(mode: ContextBudgetMode): string {
   return mode === 'custom' ? '自定义模式' : modeLabel(mode)
 }
 
+const FORESHADOWING_WEIGHT_ORDER: Record<Foreshadowing['weight'], number> = {
+  payoff: 4,
+  high: 3,
+  medium: 2,
+  low: 1
+}
+
+function archivedForeshadowingRank(item: Foreshadowing): number {
+  return item.status === 'resolved' || item.status === 'abandoned' ? 1 : 0
+}
+
+function compareForeshadowingForPrompt(a: Foreshadowing, b: Foreshadowing): number {
+  const archiveDelta = archivedForeshadowingRank(a) - archivedForeshadowingRank(b)
+  if (archiveDelta !== 0) return archiveDelta
+  const weightDelta = FORESHADOWING_WEIGHT_ORDER[b.weight] - FORESHADOWING_WEIGHT_ORDER[a.weight]
+  if (weightDelta !== 0) return weightDelta
+  return b.updatedAt.localeCompare(a.updatedAt)
+}
+
 export function PromptBuilderView({ data, project, saveData, onSendToPipeline }: ProjectProps) {
   const confirmAction = useConfirm()
   const scoped = projectData(data, project.id)
@@ -106,6 +126,10 @@ export function PromptBuilderView({ data, project, saveData, onSendToPipeline }:
   const autoCharacters = useMemo(
     () => recommendedCharacters(scoped.characters, autoForeshadowings),
     [scoped.characters, autoForeshadowings]
+  )
+  const sortedForeshadowings = useMemo(
+    () => [...scoped.foreshadowings].sort(compareForeshadowingForPrompt),
+    [scoped.foreshadowings]
   )
   const continuity = useMemo(
     () =>
@@ -389,6 +413,42 @@ export function PromptBuilderView({ data, project, saveData, onSendToPipeline }:
     })
   }
 
+  function renderManualForeshadowingPanel() {
+    return (
+      <section className="panel">
+        <h2>手动选择本章相关伏笔</h2>
+        <div className="stack-list">
+          {sortedForeshadowings.map((item) => {
+            const isAuto = autoForeshadowings.some((auto) => auto.id === item.id)
+            const effectiveMode = effectiveTreatmentMode(item, foreshadowingTreatmentOverrides)
+            return (
+              <div key={item.id} className="context-item">
+                <Toggle
+                  label={`${item.title || '未命名伏笔'}${isAuto ? '（自动推荐）' : ''}`}
+                  checked={selectedForeshadowingIds.includes(item.id)}
+                  onChange={(checked) => setSelectedForeshadowingIds(toggleId(selectedForeshadowingIds, item.id, checked))}
+                />
+                <p className="muted">
+                  状态：{statusLabel(item.status)} · 权重：{weightLabel(item.weight)} · 预计回收：{item.expectedPayoff || '未设置'} · 本章处理：{treatmentModeLabel(effectiveMode)}
+                </p>
+                <div className="inline-controls">
+                  <SelectField<ForeshadowingTreatmentMode>
+                    label="临时处理方式"
+                    value={effectiveMode}
+                    onChange={(nextMode) => updateForeshadowingTreatmentOverride(item.id, nextMode)}
+                    options={FORESHADOWING_TREATMENT_OPTIONS}
+                  />
+                  <button className="ghost-button" onClick={() => saveForeshadowingTreatmentMode(item.id)}>保存为当前处理方式</button>
+                </div>
+                <p className="muted">{treatmentDescription(effectiveMode)}</p>
+              </div>
+            )
+          })}
+        </div>
+      </section>
+    )
+  }
+
   return (
     <div className="prompt-view">
       <Header title="Prompt 构建器" description="把上下文选择、预算、伏笔调度和章节衔接整理成可执行的写作 Prompt。" />
@@ -535,7 +595,7 @@ export function PromptBuilderView({ data, project, saveData, onSendToPipeline }:
                     <div>
                       <h3>伏笔需求</h3>
                       <div className="stack-list">
-                        {scoped.foreshadowings.slice(0, 12).map((item) => (
+                        {sortedForeshadowings.slice(0, 12).map((item) => (
                           <div key={item.id} className="context-item">
                             <strong>{item.title}</strong>
                             <Toggle
@@ -594,38 +654,6 @@ export function PromptBuilderView({ data, project, saveData, onSendToPipeline }:
                   onChange={(checked) => setSelectedCharacterIds(toggleId(selectedCharacterIds, character.id, checked))}
                 />
               ))}
-            </div>
-          </section>
-
-          <section className="panel">
-            <h2>手动选择本章相关伏笔</h2>
-            <div className="stack-list">
-              {scoped.foreshadowings.map((item) => {
-                const isAuto = autoForeshadowings.some((auto) => auto.id === item.id)
-                const effectiveMode = effectiveTreatmentMode(item, foreshadowingTreatmentOverrides)
-                return (
-                  <div key={item.id} className="context-item">
-                    <Toggle
-                      label={`${item.title || '未命名伏笔'}${isAuto ? '（自动推荐）' : ''}`}
-                      checked={selectedForeshadowingIds.includes(item.id)}
-                      onChange={(checked) => setSelectedForeshadowingIds(toggleId(selectedForeshadowingIds, item.id, checked))}
-                    />
-                    <p className="muted">
-                      状态：{statusLabel(item.status)} · 权重：{weightLabel(item.weight)} · 预计回收：{item.expectedPayoff || '未设置'} · 本章处理：{treatmentModeLabel(effectiveMode)}
-                    </p>
-                    <div className="inline-controls">
-                      <SelectField<ForeshadowingTreatmentMode>
-                        label="临时处理方式"
-                        value={effectiveMode}
-                        onChange={(nextMode) => updateForeshadowingTreatmentOverride(item.id, nextMode)}
-                        options={FORESHADOWING_TREATMENT_OPTIONS}
-                      />
-                      <button className="ghost-button" onClick={() => saveForeshadowingTreatmentMode(item.id)}>保存为当前处理方式</button>
-                    </div>
-                    <p className="muted">{treatmentDescription(effectiveMode)}</p>
-                  </div>
-                )
-              })}
             </div>
           </section>
 
@@ -702,6 +730,8 @@ export function PromptBuilderView({ data, project, saveData, onSendToPipeline }:
               ))}
             </div>
           </section>
+
+          {renderManualForeshadowingPanel()}
         </div>
       </section>
     </div>

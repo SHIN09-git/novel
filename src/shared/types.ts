@@ -276,6 +276,9 @@ export interface CharacterStateLog {
   chapterId: ID | null
   chapterOrder: number | null
   note: string
+  linkedFactId?: ID | null
+  linkedCandidateId?: ID | null
+  convertedAt?: string | null
   createdAt: string
 }
 
@@ -396,6 +399,12 @@ export interface StageSummary {
   projectId: ID
   chapterStart: number
   chapterEnd: number
+  coveredChapterRange?: string
+  compressedPlotSummary?: string
+  irreversibleChanges?: string
+  endingCarryoverState?: string
+  emotionalAftertaste?: string
+  pacingState?: string
   plotProgress: string
   characterRelations: string
   secrets: string

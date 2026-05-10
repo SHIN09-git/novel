@@ -11,6 +11,25 @@ import { expectedPayoffNearText } from '../utils/promptContext'
 import type { ProjectProps } from './viewTypes'
 import { updateProjectTimestamp } from './viewTypes'
 
+const FORESHADOWING_WEIGHT_ORDER: Record<ForeshadowingWeight, number> = {
+  payoff: 4,
+  high: 3,
+  medium: 2,
+  low: 1
+}
+
+function archivedForeshadowingRank(item: Foreshadowing): number {
+  return item.status === 'resolved' || item.status === 'abandoned' ? 1 : 0
+}
+
+function compareForeshadowingForLedger(a: Foreshadowing, b: Foreshadowing): number {
+  const archiveDelta = archivedForeshadowingRank(a) - archivedForeshadowingRank(b)
+  if (archiveDelta !== 0) return archiveDelta
+  const weightDelta = FORESHADOWING_WEIGHT_ORDER[b.weight] - FORESHADOWING_WEIGHT_ORDER[a.weight]
+  if (weightDelta !== 0) return weightDelta
+  return b.updatedAt.localeCompare(a.updatedAt)
+}
+
 export function ForeshadowingView({ data, project, saveData }: ProjectProps) {
   const confirmAction = useConfirm()
   const scoped = projectData(data, project.id)
@@ -24,7 +43,7 @@ export function ForeshadowingView({ data, project, saveData }: ProjectProps) {
     .filter((item) => weightFilter === 'all' || item.weight === weightFilter)
     .filter((item) => treatmentFilter === 'all' || normalizeTreatmentMode(item.treatmentMode, item.status, item.weight) === treatmentFilter)
     .filter((item) => !nearChapter || !item.expectedPayoff || expectedPayoffNearText(item.expectedPayoff, nearChapter))
-    .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))
+    .sort(compareForeshadowingForLedger)
   const selected = scoped.foreshadowings.find((item) => item.id === selectedId) ?? foreshadowings[0] ?? null
 
   async function addForeshadowing() {

@@ -26,18 +26,3 @@ export const viewLabels: Record<View, string> = {
   revision: '修订工作台',
   settings: '设置'
 }
-
-export const viewIcons: Record<View, string> = {
-  dashboard: 'D',
-  bible: 'B',
-  chapters: 'C',
-  characters: 'R',
-  foreshadowings: 'F',
-  timeline: 'T',
-  stages: 'S',
-  direction: 'G',
-  prompt: '#',
-  pipeline: 'P',
-  revision: 'V',
-  settings: 'G'
-}

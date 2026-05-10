@@ -39,6 +39,7 @@ async function loadModules() {
   await compileTsTree([
     'src/shared/foreshadowingTreatment.ts',
     'src/services/TokenEstimator.ts',
+    'src/services/StageSummaryService.ts',
     'src/services/ContextCompressionService.ts',
     'src/services/ContextBudgetManager.ts'
   ])

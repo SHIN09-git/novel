@@ -197,6 +197,44 @@ async function main() {
   const normalizedOld = normalizeAppData(baseData({ characterStateFacts: undefined }))
   checks.push(assert(Array.isArray(normalizedOld.characterStateFacts), '旧项目缺 characterStateFacts 时正常补空数组'))
 
+  const crystalLog = {
+    id: 'log-crystal',
+    projectId: 'project-1',
+    characterId: 'character-1',
+    chapterId: 'chapter-1',
+    chapterOrder: 1,
+    note: '右手结晶化，依存于状态彻底成为与聚合体沟通的媒介',
+    createdAt: timestamp
+  }
+  const normalizedLogData = normalizeAppData(baseData({ characterStateLogs: [crystalLog] }))
+  const normalizedLog = normalizedLogData.characterStateLogs[0]
+  checks.push(assert(normalizedLog.linkedFactId === null && normalizedLog.linkedCandidateId === null, '旧 CharacterStateLog 会补 linkedFactId / linkedCandidateId 空值'))
+  const inferredCrystal = CharacterStateService.inferFactDraftFromLog(crystalLog.note, normalizedLogData.characters[0], normalizedLogData.chapters[0])
+  checks.push(assert(inferredCrystal.category === 'physical', '日志“右手结晶化”会被推断为 physical 状态'))
+  checks.push(assert(inferredCrystal.label === '右手结晶化', '日志“右手结晶化”会生成可读状态名称'))
+  checks.push(assert(inferredCrystal.linkedCardFields.includes('weaknessAndCost') && inferredCrystal.linkedCardFields.includes('abilitiesAndResources'), 'physical 状态默认挂接弱点与代价、能力与资源'))
+  checks.push(assert(inferredCrystal.promptPolicy === 'when_relevant' && inferredCrystal.trackingLevel === 'hard', 'physical 日志默认作为 hard / when_relevant 状态事实草稿'))
+
+  const convertedFromLog = CharacterStateService.createFactFromLog(normalizedLog, inferredCrystal, normalizedLogData)
+  const crystalFact = convertedFromLog.characterStateFacts.find((fact) => fact.label === '右手结晶化')
+  checks.push(assert(Boolean(crystalFact), 'createFactFromLog 会把日志转成 active CharacterStateFact'))
+  checks.push(assert(convertedFromLog.characterStateLogs[0].linkedFactId === crystalFact?.id, '转入账本后 CharacterStateLog.linkedFactId 被写入'))
+  checks.push(assert(convertedFromLog.characterStateTransactions.some((tx) => tx.factId === crystalFact?.id && tx.transactionType === 'create'), '转入账本会创建 create transaction'))
+  const convertedTwice = CharacterStateService.createFactFromLog(convertedFromLog.characterStateLogs[0], inferredCrystal, convertedFromLog)
+  checks.push(assert(convertedTwice.characterStateFacts.length === convertedFromLog.characterStateFacts.length, '同一条日志不能重复转入账本'))
+  const convertedWithStaleLog = CharacterStateService.createFactFromLog(normalizedLog, inferredCrystal, convertedFromLog)
+  checks.push(assert(convertedWithStaleLog.characterStateFacts.length === convertedFromLog.characterStateFacts.length, '旧闭包里的同一条日志也不能重复转入账本'))
+
+  const candidateFromLogData = CharacterStateService.createCandidateFromLog(normalizedLog, inferredCrystal, normalizedLogData)
+  const candidateFromLog = candidateFromLogData.characterStateChangeCandidates.find((item) => item.evidence === crystalLog.note)
+  checks.push(assert(candidateFromLog?.status === 'pending', 'createCandidateFromLog 会创建 pending 状态变化候选'))
+  checks.push(assert(candidateFromLogData.characterStateLogs[0].linkedCandidateId === candidateFromLog?.id, '转为候选后 CharacterStateLog.linkedCandidateId 被写入'))
+  const acceptedLogCandidate = CharacterStateService.applyStateChangeCandidate(candidateFromLog?.id ?? '', candidateFromLogData)
+  checks.push(assert(acceptedLogCandidate.characterStateFacts.some((fact) => fact.label === '右手结晶化'), '接受日志候选后能进入 characterStateFacts'))
+
+  const crystalRelevant = CharacterStateService.getRelevantCharacterStatesForPrompt(['character-1'], plan, 2, crystalFact ? [crystalFact] : [])
+  checks.push(assert(crystalRelevant.some((fact) => fact.label === '右手结晶化'), 'PromptBuilder 在 physical / ability 相关章节中能纳入右手结晶化状态'))
+
   const sourceFiles = {
     types: await readFile(join(root, 'src', 'shared', 'types.ts'), 'utf-8'),
     prompt: await readFile(join(root, 'src', 'services', 'PromptBuilderService.ts'), 'utf-8'),
@@ -211,6 +249,10 @@ async function main() {
   checks.push(assert(sourceFiles.runner.includes('includedCharacterStateFactIds'), 'Run Trace 记录 includedCharacterStateFactIds'))
   checks.push(assert(sourceFiles.chapters.includes('characterStateChangeSuggestions'), '章节复盘 UI 接收状态变化候选'))
   checks.push(assert(sourceFiles.characters.includes('动态状态账本'), '角色页展示动态状态账本'))
+
+  checks.push(assert(sourceFiles.characters.includes('状态日志 / 历史记录'), '角色页将日志文案降级为状态日志 / 历史记录'))
+  checks.push(assert(sourceFiles.characters.includes('转为状态事实') && sourceFiles.characters.includes('转为候选'), '角色日志卡片提供转为状态事实 / 转为候选入口'))
+  checks.push(assert(sourceFiles.characters.includes('未归类状态'), 'linkedCardFields 为空的 fact 会显示在未归类状态分组'))
 
   for (const check of checks) {
     if (!check.ok) console.error('✗', check.message, check.details)

@@ -32,6 +32,7 @@ import { formatContinuityBridgeForPrompt, resolveContinuityBridge } from './Cont
 import { TokenEstimator } from './TokenEstimator'
 import { CharacterStateService } from './CharacterStateService'
 import { StoryDirectionService } from './StoryDirectionService'
+import { StageSummaryService } from './StageSummaryService'
 
 const PLACEHOLDER_PATTERNS = [
   /待补充/i,
@@ -297,16 +298,7 @@ function formatCompressedChapterRecap(chapter: Chapter, record: ContextCompressi
 }
 
 function formatStageSummary(summary: StageSummary): string {
-  return [
-    `### 第 ${summary.chapterStart}-${summary.chapterEnd} 章阶段摘要`,
-    `阶段剧情进展：${valueOrEmpty(summary.plotProgress)}`,
-    `主要角色关系变化：${valueOrEmpty(summary.characterRelations)}`,
-    `关键秘密/信息差：${valueOrEmpty(summary.secrets)}`,
-    `已埋伏笔：${valueOrEmpty(summary.foreshadowingPlanted)}`,
-    `已回收伏笔：${valueOrEmpty(summary.foreshadowingResolved)}`,
-    `当前未解决问题：${valueOrEmpty(summary.unresolvedQuestions)}`,
-    `下一阶段推荐推进方向：${valueOrEmpty(summary.nextStageDirection)}`
-  ].join('\n')
+  return StageSummaryService.formatForPrompt(summary)
 }
 
 function recentCharacterLogs(characterId: ID, logs: CharacterStateLog[]): CharacterStateLog[] {

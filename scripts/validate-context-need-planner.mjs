@@ -36,7 +36,7 @@ async function compileTsTree(files) {
 }
 
 async function loadPlanner() {
-  await compileTsTree(['src/services/StoryDirectionService.ts', 'src/services/ContextNeedPlannerService.ts'])
+  await compileTsTree(['src/services/StageSummaryService.ts', 'src/services/StoryDirectionService.ts', 'src/services/ContextNeedPlannerService.ts'])
   return import(`${pathToFileURL(join(outDir, 'src/services/ContextNeedPlannerService.mjs')).href}?t=${Date.now()}`)
 }
 

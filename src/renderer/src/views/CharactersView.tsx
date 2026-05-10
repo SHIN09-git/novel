@@ -8,7 +8,7 @@ import type {
   ID,
   StateFactCategory
 } from '../../../shared/types'
-import { CharacterStateService } from '../../../services/CharacterStateService'
+import { CharacterStateService, type CharacterStateFactDraft } from '../../../services/CharacterStateService'
 import { useConfirm } from '../components/ConfirmDialog'
 import { EmptyState, NumberInput, SelectField, TextArea, TextInput, Toggle } from '../components/FormFields'
 import { Header } from '../components/Layout'
@@ -69,6 +69,8 @@ function factDisplayValue(fact: CharacterStateFact): string {
   return `${CharacterStateService.formatFactValue(fact.value)}${fact.unit ? ` ${fact.unit}` : ''}`
 }
 
+type LogSaveMode = 'log_only' | 'fact' | 'candidate'
+
 export function CharactersView({ data, project, saveData }: ProjectProps) {
   const confirmAction = useConfirm()
   const scoped = projectData(data, project.id)
@@ -77,6 +79,9 @@ export function CharactersView({ data, project, saveData }: ProjectProps) {
   const [selectedId, setSelectedId] = useState<ID | null>(characters[0]?.id ?? null)
   const [logNote, setLogNote] = useState('')
   const [logChapter, setLogChapter] = useState<number | null>(chapters.at(-1)?.order ?? null)
+  const [logSaveMode, setLogSaveMode] = useState<LogSaveMode>('log_only')
+  const [conversionLogId, setConversionLogId] = useState<ID | null>(null)
+  const [conversionDraft, setConversionDraft] = useState<CharacterStateFactDraft | null>(null)
   const selected = characters.find((character) => character.id === selectedId) ?? characters[0] ?? null
   const stateFacts = scoped.characterStateFacts
     .filter((fact) => fact.characterId === selected?.id && fact.status === 'active')
@@ -162,9 +167,27 @@ export function CharactersView({ data, project, saveData }: ProjectProps) {
     setSelectedId(null)
   }
 
+  function chapterForOrder(order: number | null) {
+    return order === null ? null : chapters.find((item) => item.order === order) ?? null
+  }
+
+  function inferLogDraft(character: Character, note: string, chapterOrder: number | null): CharacterStateFactDraft {
+    return CharacterStateService.inferFactDraftFromLog(note, character, chapterForOrder(chapterOrder))
+  }
+
+  function beginConvertLog(character: Character, log: CharacterStateLog) {
+    setConversionLogId(log.id)
+    setConversionDraft(inferLogDraft(character, log.note, log.chapterOrder))
+  }
+
+  function patchConversionDraft(patch: Partial<CharacterStateFactDraft>) {
+    setConversionDraft((draft) => (draft ? { ...draft, ...patch } : draft))
+  }
+
   async function addStateLog(character: Character) {
     if (!logNote.trim()) return
     const chapter = chapters.find((item) => item.order === logChapter)
+    const timestamp = now()
     const log: CharacterStateLog = {
       id: newId(),
       projectId: project.id,
@@ -172,16 +195,25 @@ export function CharactersView({ data, project, saveData }: ProjectProps) {
       chapterId: chapter?.id ?? null,
       chapterOrder: logChapter,
       note: logNote,
-      createdAt: now()
+      linkedFactId: null,
+      linkedCandidateId: null,
+      convertedAt: null,
+      createdAt: timestamp
     }
-    await saveData((current) => ({
-      ...current,
-      projects: updateProjectTimestamp(current, project.id),
-      characterStateLogs: [...current.characterStateLogs, log],
-      characters: current.characters.map((item) =>
-        item.id === character.id ? { ...item, lastChangedChapter: logChapter, updatedAt: now() } : item
-      )
-    }))
+    await saveData((current) => {
+      let next = {
+        ...current,
+        projects: updateProjectTimestamp(current, project.id),
+        characterStateLogs: [...current.characterStateLogs, log],
+        characters: current.characters.map((item) =>
+          item.id === character.id ? { ...item, lastChangedChapter: logChapter, updatedAt: timestamp } : item
+        )
+      }
+      const draft = inferLogDraft(character, log.note, log.chapterOrder)
+      if (logSaveMode === 'fact') next = CharacterStateService.createFactFromLog(log, draft, next)
+      if (logSaveMode === 'candidate') next = CharacterStateService.createCandidateFromLog(log, draft, next)
+      return next
+    })
     setLogNote('')
   }
 
@@ -221,6 +253,28 @@ export function CharactersView({ data, project, saveData }: ProjectProps) {
     setFactValue('')
   }
 
+  async function convertLogToFact(log: CharacterStateLog) {
+    if (!selected) return
+    const draft = conversionLogId === log.id && conversionDraft ? conversionDraft : inferLogDraft(selected, log.note, log.chapterOrder)
+    await saveData((current) => ({
+      ...CharacterStateService.createFactFromLog(log, draft, current),
+      projects: updateProjectTimestamp(current, project.id)
+    }))
+    setConversionLogId(null)
+    setConversionDraft(null)
+  }
+
+  async function convertLogToCandidate(log: CharacterStateLog) {
+    if (!selected) return
+    const draft = conversionLogId === log.id && conversionDraft ? conversionDraft : inferLogDraft(selected, log.note, log.chapterOrder)
+    await saveData((current) => ({
+      ...CharacterStateService.createCandidateFromLog(log, draft, current),
+      projects: updateProjectTimestamp(current, project.id)
+    }))
+    setConversionLogId(null)
+    setConversionDraft(null)
+  }
+
   async function updateStateFactValue(fact: CharacterStateFact, raw: string) {
     await saveData((current) =>
       CharacterStateService.createOrUpdateFact(
@@ -243,6 +297,21 @@ export function CharactersView({ data, project, saveData }: ProjectProps) {
     await saveData((current) =>
       CharacterStateService.createOrUpdateFact(
         { ...fact, status: 'inactive', projectId: project.id, characterId: fact.characterId, label: fact.label },
+        {
+          ...current,
+          projects: updateProjectTimestamp(current, project.id)
+        }
+      )
+    )
+  }
+
+  async function updateStateFactLinkedFields(fact: CharacterStateFact, field: CharacterCardField, enabled: boolean) {
+    const linkedCardFields = enabled
+      ? [...new Set([...fact.linkedCardFields, field])]
+      : fact.linkedCardFields.filter((item) => item !== field)
+    await saveData((current) =>
+      CharacterStateService.createOrUpdateFact(
+        { ...fact, linkedCardFields, projectId: project.id, characterId: fact.characterId, label: fact.label },
         {
           ...current,
           projects: updateProjectTimestamp(current, project.id)
@@ -381,6 +450,25 @@ export function CharactersView({ data, project, saveData }: ProjectProps) {
                               <small>
                                 {fact.trackingLevel} · {fact.category} · {fact.promptPolicy}
                               </small>
+                              <small>
+                                来源：{fact.sourceChapterOrder ? `第 ${fact.sourceChapterOrder} 章` : '手动/未关联章节'}
+                                {fact.evidence ? ` · 证据：${fact.evidence}` : ''}
+                              </small>
+                              <details className="state-link-editor">
+                                <summary>修改挂接字段</summary>
+                                <div className="checkbox-grid">
+                                  {Object.entries(CARD_FIELD_LABELS).map(([fieldKey, fieldLabel]) => (
+                                    <label key={fieldKey}>
+                                      <input
+                                        type="checkbox"
+                                        checked={fact.linkedCardFields.includes(fieldKey as CharacterCardField)}
+                                        onChange={(event) => updateStateFactLinkedFields(fact, fieldKey as CharacterCardField, event.target.checked)}
+                                      />
+                                      {fieldLabel}
+                                    </label>
+                                  ))}
+                                </div>
+                              </details>
                             </div>
                             <input value={factDisplayValue(fact)} onChange={(event) => updateStateFactValue(fact, event.target.value)} />
                             <button className="ghost-button" onClick={() => archiveStateFact(fact)}>
@@ -392,6 +480,45 @@ export function CharactersView({ data, project, saveData }: ProjectProps) {
                     )
                   })}
                   {stateFacts.length === 0 ? <p className="muted">暂无动态状态。建议先添加现金、持有物品、当前位置或伤势。</p> : null}
+                  {stateFacts.filter((fact) => fact.linkedCardFields.length === 0).length > 0 ? (
+                    <section className="state-ledger-group">
+                      <h3>未归类状态</h3>
+                      {stateFacts.filter((fact) => fact.linkedCardFields.length === 0).map((fact) => (
+                        <article key={fact.id} className="state-fact-card">
+                          <div>
+                            <strong>{fact.label}</strong>
+                            <span>{factDisplayValue(fact)}</span>
+                            <small>
+                              {fact.trackingLevel} · {fact.category} · {fact.promptPolicy}
+                            </small>
+                            <small>
+                              来源：{fact.sourceChapterOrder ? `第 ${fact.sourceChapterOrder} 章` : '手动/未关联章节'}
+                              {fact.evidence ? ` · 证据：${fact.evidence}` : ''}
+                            </small>
+                            <details className="state-link-editor">
+                              <summary>修改挂接字段</summary>
+                              <div className="checkbox-grid">
+                                {Object.entries(CARD_FIELD_LABELS).map(([fieldKey, fieldLabel]) => (
+                                  <label key={fieldKey}>
+                                    <input
+                                      type="checkbox"
+                                      checked={fact.linkedCardFields.includes(fieldKey as CharacterCardField)}
+                                      onChange={(event) => updateStateFactLinkedFields(fact, fieldKey as CharacterCardField, event.target.checked)}
+                                    />
+                                    {fieldLabel}
+                                  </label>
+                                ))}
+                              </div>
+                            </details>
+                          </div>
+                          <input value={factDisplayValue(fact)} onChange={(event) => updateStateFactValue(fact, event.target.value)} />
+                          <button className="ghost-button" onClick={() => archiveStateFact(fact)}>
+                            归档
+                          </button>
+                        </article>
+                      ))}
+                    </section>
+                  ) : null}
                 </div>
                 {stateCandidates.length > 0 ? (
                   <div className="candidate-list">
@@ -417,7 +544,8 @@ export function CharactersView({ data, project, saveData }: ProjectProps) {
                 ) : null}
               </div>
               <div className="panel character-log-panel">
-                <h2>角色状态更新记录</h2>
+                <h2>状态日志 / 历史记录</h2>
+                <p className="muted">日志只记录一次状态变化，不会自动进入动态状态账本；需要选择同步入账，或在日志卡片上点击“转为状态事实 / 转为候选”。</p>
                 <div className="inline-form">
                   <select value={logChapter ?? ''} onChange={(event) => setLogChapter(event.target.value ? Number(event.target.value) : null)}>
                     <option value="">未关联章节</option>
@@ -428,6 +556,11 @@ export function CharactersView({ data, project, saveData }: ProjectProps) {
                     ))}
                   </select>
                   <input value={logNote} placeholder="记录这次状态变化" onChange={(event) => setLogNote(event.target.value)} />
+                  <select value={logSaveMode} onChange={(event) => setLogSaveMode(event.target.value as LogSaveMode)}>
+                    <option value="log_only">仅记录日志</option>
+                    <option value="fact">同步写入动态状态账本</option>
+                    <option value="candidate">创建待确认候选</option>
+                  </select>
                   <button className="primary-button" onClick={() => addStateLog(selected)}>
                     记录
                   </button>
@@ -438,6 +571,87 @@ export function CharactersView({ data, project, saveData }: ProjectProps) {
                       <strong>{log.chapterOrder ? `第 ${log.chapterOrder} 章` : '未关联章节'}</strong>
                       <p>{log.note}</p>
                       <small>{formatDate(log.createdAt)}</small>
+                      {log.linkedFactId ? <StatusBadge tone="success">已转入账本：{log.linkedFactId}</StatusBadge> : null}
+                      {log.linkedCandidateId ? <StatusBadge tone="info">已转为候选：{log.linkedCandidateId}</StatusBadge> : null}
+                      {!log.linkedFactId && !log.linkedCandidateId ? (
+                        <div className="row-actions">
+                          <button className="ghost-button" onClick={() => beginConvertLog(selected, log)}>
+                            转为状态事实
+                          </button>
+                          <button className="ghost-button" onClick={() => convertLogToCandidate(log)}>
+                            转为候选
+                          </button>
+                        </div>
+                      ) : null}
+                      {conversionLogId === log.id && conversionDraft ? (
+                        <div className="state-log-conversion-form">
+                          <div className="form-grid compact">
+                            <TextInput label="状态名称" value={conversionDraft.label} onChange={(label) => patchConversionDraft({ label, key: label })} />
+                            <SelectField
+                              label="类别"
+                              value={conversionDraft.category ?? 'custom'}
+                              options={STATE_CATEGORY_OPTIONS}
+                              onChange={(category) =>
+                                patchConversionDraft({
+                                  category,
+                                  linkedCardFields: CharacterStateService.getDefaultLinkedCardFieldsForCategory(category)
+                                })
+                              }
+                            />
+                            <TextInput label="状态值" value={String(conversionDraft.value ?? '')} onChange={(value) => patchConversionDraft({ value, valueType: 'text' })} />
+                            <SelectField
+                              label="追踪等级"
+                              value={conversionDraft.trackingLevel ?? 'hard'}
+                              options={[
+                                { value: 'hard', label: 'hard' },
+                                { value: 'soft', label: 'soft' },
+                                { value: 'note', label: 'note' }
+                              ]}
+                              onChange={(trackingLevel) => patchConversionDraft({ trackingLevel })}
+                            />
+                            <SelectField
+                              label="Prompt 策略"
+                              value={conversionDraft.promptPolicy ?? 'when_relevant'}
+                              options={[
+                                { value: 'always', label: 'always' },
+                                { value: 'when_relevant', label: 'when_relevant' },
+                                { value: 'manual_only', label: 'manual_only' }
+                              ]}
+                              onChange={(promptPolicy) => patchConversionDraft({ promptPolicy })}
+                            />
+                          </div>
+                          <div className="checkbox-grid">
+                            {Object.entries(CARD_FIELD_LABELS).map(([fieldKey, fieldLabel]) => (
+                              <label key={fieldKey}>
+                                <input
+                                  type="checkbox"
+                                  checked={(conversionDraft.linkedCardFields ?? []).includes(fieldKey as CharacterCardField)}
+                                  onChange={(event) => {
+                                    const currentFields = conversionDraft.linkedCardFields ?? []
+                                    patchConversionDraft({
+                                      linkedCardFields: event.target.checked
+                                        ? [...new Set([...currentFields, fieldKey as CharacterCardField])]
+                                        : currentFields.filter((field) => field !== fieldKey)
+                                    })
+                                  }}
+                                />
+                                {fieldLabel}
+                              </label>
+                            ))}
+                          </div>
+                          <div className="row-actions">
+                            <button className="primary-button" onClick={() => convertLogToFact(log)}>
+                              确认转入账本
+                            </button>
+                            <button className="ghost-button" onClick={() => {
+                              setConversionLogId(null)
+                              setConversionDraft(null)
+                            }}>
+                              取消
+                            </button>
+                          </div>
+                        </div>
+                      ) : null}
                     </article>
                   ))}
                 </div>
