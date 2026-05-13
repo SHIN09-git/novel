@@ -43,9 +43,17 @@ async function loadModules() {
     'src/services/CharacterStateService.ts',
     'src/services/StageSummaryService.ts',
     'src/services/ContextCompressionService.ts',
+    'src/services/contextBudget/types.ts',
+    'src/services/contextBudget/scoringEngine.ts',
+    'src/services/contextBudget/selectionEngine.ts',
+    'src/services/contextBudget/traceBuilder.ts',
     'src/services/ContextBudgetManager.ts',
     'src/services/StoryDirectionService.ts',
     'src/services/HardCanonPackService.ts',
+    'src/services/promptFormatters/chapterFormatters.ts',
+    'src/services/promptFormatters/characterFormatters.ts',
+    'src/services/promptFormatters/foreshadowingFormatters.ts',
+    'src/services/promptFormatters/promptUtils.ts',
     'src/services/PromptBuilderService.ts'
   ])
   const contextBudget = await import(`${pathToFileURL(join(outDir, 'src/services/ContextBudgetManager.mjs')).href}?t=${Date.now()}`)
@@ -339,7 +347,13 @@ async function main() {
 
   const compressionSource = await readFile(join(root, 'src/services/ContextCompressionService.ts'), 'utf-8')
   const promptBuilderSource = await readFile(join(root, 'src/services/PromptBuilderService.ts'), 'utf-8')
-  const runnerSource = await readFile(join(root, 'src/renderer/src/views/generation/usePipelineRunner.ts'), 'utf-8')
+  const runnerSource = [
+    await readFile(join(root, 'src/renderer/src/views/generation/usePipelineRunner.ts'), 'utf-8'),
+    await readFile(join(root, 'src/renderer/src/views/generation/usePipelineRunnerCore.ts'), 'utf-8'),
+    await readFile(join(root, 'src/renderer/src/views/generation/pipelineRunnerEngine.ts'), 'utf-8'),
+    await readFile(join(root, 'src/renderer/src/views/generation/pipelineSteps/contextPlanning.ts'), 'utf-8'),
+    await readFile(join(root, 'src/renderer/src/views/generation/pipelineSteps/chapterGeneration.ts'), 'utf-8')
+  ].join('\n')
   const generationViewSource = await readFile(join(root, 'src/renderer/src/views/GenerationPipelineView.tsx'), 'utf-8')
   const tracePanelSource = await readFile(join(root, 'src/renderer/src/views/generation/RunTracePanel.tsx'), 'utf-8')
 
@@ -353,7 +367,13 @@ async function main() {
       'compressed recap replacements are represented in promptBlockOrder without becoming forced context blocks'
     )
   )
-  checks.push(assert(runnerSource.includes('compressionRecords: budgetSelection?.compressionRecords'), 'Run Trace records compressionRecords from the same budget selection'))
+  checks.push(
+    assert(
+      runnerSource.includes('compressionRecords: budgetSelection?.compressionRecords') ||
+        runnerSource.includes('compressionRecords: state.budgetSelection?.compressionRecords'),
+      'Run Trace records compressionRecords from the same budget selection'
+    )
+  )
   checks.push(assert(runnerSource.includes('promptBlockOrder,'), 'Run Trace records promptBlockOrder alongside compressionRecords'))
   checks.push(
     assert(

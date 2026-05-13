@@ -98,6 +98,48 @@ export interface OpenStorageFolderResult {
   error?: string
 }
 
+export interface BackupInfo {
+  path: string
+  timestamp: number
+  size: number
+  isAutomatic: boolean
+}
+
+export interface BackupCreateResult {
+  ok: true
+  backupPath: string
+}
+
+export interface BackupListResult {
+  ok: true
+  backups: BackupInfo[]
+}
+
+export interface BackupRestoreResult {
+  ok: true
+  data: AppData
+  storagePath: string
+  preRestoreBackupPath?: string
+}
+
+export interface BackupDeleteResult {
+  ok: true
+}
+
+export interface BackupOpenFolderResult {
+  ok: boolean
+  error?: string
+}
+
+export interface LogsGetPathResult {
+  ok: true
+  logPath: string
+}
+
+export interface LogsOpenResult {
+  ok: true
+}
+
 export interface MigrationMergePreviewRequest {
   sourcePath: string
   targetPath: string

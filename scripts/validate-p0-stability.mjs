@@ -44,10 +44,15 @@ async function main() {
     ["import { newId } from './format'", "const newId = () => 'history-id'"]
   ])
   const pipelineSource = await readFile(join(root, 'src', 'renderer', 'src', 'views', 'GenerationPipelineView.tsx'), 'utf-8')
-  const pipelineRunnerSource = await readFile(
+  const pipelineRunnerFacadeSource = await readFile(
     join(root, 'src', 'renderer', 'src', 'views', 'generation', 'usePipelineRunner.ts'),
     'utf-8'
   )
+  const pipelineRunnerCoreSource = await readFile(
+    join(root, 'src', 'renderer', 'src', 'views', 'generation', 'usePipelineRunnerCore.ts'),
+    'utf-8'
+  )
+  const pipelineRunnerSource = `${pipelineRunnerFacadeSource}\n${pipelineRunnerCoreSource}`
   const pipelineTopStatusSource = await readFile(
     join(root, 'src', 'renderer', 'src', 'components', 'pipeline', 'PipelineTopStatusBar.tsx'),
     'utf-8'

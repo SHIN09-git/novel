@@ -23,6 +23,8 @@ npm.cmd run build
 
 在首页创建一个项目。
 
+如果你已经有旧版数据，首页为空时可以先点击“导入旧数据 JSON”，选择旧版导出的 AppData JSON 或旧的 `novel-director-data.json`。导入成功后会直接进入第一个项目；如果导入失败，请保留源文件并到设置页检查备份、日志和数据路径。
+
 建议使用虚构示例：
 
 - 名称：`Fog City Echo`
@@ -187,6 +189,8 @@ npm.cmd run build
 ### 2. Create a Project
 
 On the home screen, create a project.
+
+If you already have old data, click `导入旧数据 JSON` on the empty home screen and select an exported AppData JSON file or legacy `novel-director-data.json`. After a successful import, the app opens the first project. If import fails, keep the source file and use Settings to inspect backups, logs, and data paths.
 
 Suggested synthetic example:
 

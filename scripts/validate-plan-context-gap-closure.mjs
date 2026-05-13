@@ -178,8 +178,19 @@ checks.push(assert(result.newlyRequiredTimelineEventIds.includes('tl-warning'), 
 const stateCategories = result.derivedContextNeedPlan.requiredStateFactCategories['char-han'] ?? []
 checks.push(assert(['physical', 'status', 'mental', 'relationship', 'location', 'goal', 'promise', 'knowledge', 'secret', 'inventory'].some((item) => stateCategories.includes(item)), 'Plan-derived need plan adds state fact categories for matched/onstage characters', { stateCategories }))
 
-const runnerSource = await readFile(join(root, 'src/renderer/src/views/generation/usePipelineRunner.ts'), 'utf-8')
-const typesSource = await readFile(join(root, 'src/shared/types.ts'), 'utf-8')
+const runnerSource = [
+  await readFile(join(root, 'src/renderer/src/views/generation/usePipelineRunner.ts'), 'utf-8'),
+  await readFile(join(root, 'src/renderer/src/views/generation/usePipelineRunnerCore.ts'), 'utf-8'),
+  await readFile(join(root, 'src/renderer/src/views/generation/pipelineRunnerEngine.ts'), 'utf-8'),
+  await readFile(join(root, 'src/renderer/src/views/generation/pipelineSteps/chapterGeneration.ts'), 'utf-8'),
+  await readFile(join(root, 'src/renderer/src/views/generation/pipelineUtils.ts'), 'utf-8')
+].join('\n')
+const typesSource = [
+  await readFile(join(root, 'src/shared/types.ts'), 'utf-8'),
+  await readFile(join(root, 'src/shared/types/context.ts'), 'utf-8'),
+  await readFile(join(root, 'src/shared/types/generation.ts'), 'utf-8'),
+  await readFile(join(root, 'src/shared/types/trace.ts'), 'utf-8')
+].join('\n')
 const orderIndex = (needle) => runnerSource.indexOf(`'${needle}'`)
 checks.push(assert(typesSource.includes("'context_need_planning_from_plan'") && typesSource.includes('PlanContextGapAnalysisResult'), 'shared types include new plan-closure step types and result type'))
 checks.push(
@@ -194,7 +205,14 @@ checks.push(
 checks.push(assert(runnerSource.includes('PlanContextGapAnalyzerService.buildFromChapterPlan'), 'pipeline runner uses PlanContextGapAnalyzerService'))
 checks.push(assert(runnerSource.includes('deltaFromPreviousSelection'), 'pipeline runner records delta selection output'))
 checks.push(assert(runnerSource.includes('缺少计划后重建上下文，无法生成正文'), 'pipeline runner prevents draft generation without rebuilt context'))
-checks.push(assert(runnerSource.includes('buildPipelineContextResultFromSelection') && runnerSource.includes('contextNeedPlanFromPlan ?? contextNeedPlan'), 'pipeline runner rebuilds final prompt from explicit selection and derived need plan'))
+checks.push(
+  assert(
+    runnerSource.includes('buildPipelineContextResultFromSelection') &&
+      (runnerSource.includes('contextNeedPlanFromPlan ?? contextNeedPlan') ||
+        runnerSource.includes('state.contextNeedPlanFromPlan ?? state.contextNeedPlan')),
+    'pipeline runner rebuilds final prompt from explicit selection and derived need plan'
+  )
+)
 checks.push(assert(typesSource.includes('selectedTimelineEventIds: ID[]'), 'Run Trace records selected timeline event ids'))
 
 const failed = checks.filter((check) => !check.ok)

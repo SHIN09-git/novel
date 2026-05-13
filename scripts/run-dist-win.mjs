@@ -33,8 +33,10 @@ console.log(`Using ELECTRON_BUILDER_CACHE=${env.ELECTRON_BUILDER_CACHE}`)
 
 const npmCli = process.env.npm_execpath || join(dirname(process.execPath), 'node_modules', 'npm', 'bin', 'npm-cli.js')
 const electronBuilderCli = join(root, 'node_modules', 'electron-builder', 'cli.js')
+const packagedSmokeScript = join(root, 'scripts', 'smoke-packaged-app.mjs')
 
 run(process.execPath, [npmCli, 'run', 'build'])
 run(process.execPath, [electronBuilderCli, '--win', 'nsis'])
+run(process.execPath, [packagedSmokeScript])
 console.log('Restoring Node.js better-sqlite3 binding after Electron packaging...')
 run(process.execPath, [npmCli, 'rebuild', 'better-sqlite3'])

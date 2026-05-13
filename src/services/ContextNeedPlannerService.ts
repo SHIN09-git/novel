@@ -16,6 +16,7 @@ import type {
   ExpectedPresence,
   ExpectedSceneType,
   Foreshadowing,
+  HardCanonItem,
   ID,
   Project,
   StageSummary,
@@ -38,6 +39,7 @@ interface BuildNeedPlanInput {
   foreshadowing: Foreshadowing[]
   timelineEvents: TimelineEvent[]
   stageSummaries: StageSummary[]
+  hardCanonItems?: HardCanonItem[]
   storyDirectionGuide?: StoryDirectionGuide | null
   storyDirectionPromptText?: string
   source?: ContextNeedPlanSource
@@ -128,6 +130,84 @@ function contextNeed(
   }
 }
 
+function priorityRank(priority: ContextNeedPriority): number {
+  if (priority === 'must') return 4
+  if (priority === 'high') return 3
+  if (priority === 'medium') return 2
+  return 1
+}
+
+function strongestPriority(priorities: ContextNeedPriority[]): ContextNeedPriority {
+  return priorities.reduce((best, current) => (priorityRank(current) > priorityRank(best) ? current : best), 'low')
+}
+
+function stateCategoryPriority(category: StateFactCategory, sceneType: ExpectedSceneType, presence: ExpectedPresence): ContextNeedPriority {
+  if (presence !== 'onstage') return category === 'knowledge' || category === 'relationship' ? 'medium' : 'low'
+  if (category === 'physical' || category === 'ability' || category === 'inventory' || category === 'location') {
+    return sceneType === 'action' || sceneType === 'transition' ? 'must' : 'high'
+  }
+  if (category === 'resource') return 'must'
+  if (category === 'knowledge' || category === 'secret') return sceneType === 'investigation' || sceneType === 'reveal' || sceneType === 'payoff' ? 'must' : 'high'
+  if (category === 'relationship' || category === 'mental' || category === 'promise') return sceneType === 'relationship' || sceneType === 'dialogue' ? 'high' : 'medium'
+  return 'medium'
+}
+
+function stateCategoryReason(category: StateFactCategory, characterName: string, sceneType: ExpectedSceneType): string {
+  const labels: Record<string, string> = {
+    resource: '资源/金钱会影响本章行动成本，缺失时容易出现无来源消费或资源透支。',
+    inventory: '持有物品会影响本章可用解法，缺失时容易使用未持有道具。',
+    location: '当前位置会影响场景衔接，缺失时容易发生无解释跳转。',
+    physical: '身体/伤势会影响行动能力，缺失时容易让伤势无解释消失。',
+    mental: '心理状态会影响对话和决策，缺失时容易出现情绪断裂。',
+    knowledge: '已知信息会限制角色能说什么、判断什么，缺失时容易知识泄露。',
+    relationship: '关系状态会影响互动张力，缺失时容易让关系突然重置。',
+    goal: '当前目标会约束本章行动方向，缺失时容易偏离章节任务。',
+    promise: '承诺/债务会影响选择代价，缺失时容易被正文忽略。',
+    secret: '秘密信息会限制揭露节奏，缺失时容易提前说破。',
+    ability: '能力限制会约束解法，缺失时容易出现无代价开挂。',
+    status: '当前状态会约束角色连续性，缺失时容易重置。',
+    custom: '自定义状态被本章需求点名，需人工确认是否进入上下文。'
+  }
+  return `角色“${characterName}”在 ${sceneType} 场景中需要 ${category} 状态：${labels[category] ?? labels.custom}`
+}
+
+function foreshadowingNeedPriority(item: Foreshadowing, taskTextValue: string, allowedText: string): ContextNeedPriority {
+  if (item.treatmentMode === 'payoff' || item.weight === 'payoff') return 'must'
+  if (textMentions(allowedText, item.title)) return 'must'
+  if (textMentions(taskTextValue, item.title)) return 'high'
+  if (item.treatmentMode === 'advance' || item.treatmentMode === 'mislead') return 'high'
+  if (item.treatmentMode === 'hint') return item.weight === 'high' ? 'high' : 'medium'
+  return 'low'
+}
+
+function foreshadowingNeedReason(item: Foreshadowing, priority: ContextNeedPriority): string {
+  const modeText = `treatmentMode=${item.treatmentMode}`
+  if (priority === 'must') return `伏笔《${item.title}》需要作为 must 进入本章操作规则：${modeText}，权重=${item.weight}，避免提前回收或漏掉兑现。`
+  if (priority === 'high') return `伏笔《${item.title}》与本章任务或中期导向相关：${modeText}，需要明确允许/禁止行为。`
+  return `伏笔《${item.title}》可作为背景提醒：${modeText}，预算紧张时可低优先级处理。`
+}
+
+function timelineNeedReason(event: TimelineEvent): string {
+  return `时间线锚点《${event.title}》与本章角色、任务或因果顺序相关，需要防止事件顺序、已知结果和后续影响错位。`
+}
+
+function hardCanonMatchesTask(item: HardCanonItem, text: string): boolean {
+  return textMentions(text, item.title) || containsAny(text, [item.category, item.content.slice(0, 18)].filter(Boolean))
+}
+
+function hardCanonNeedPriority(item: HardCanonItem, text: string): ContextNeedPriority {
+  if (item.priority === 'must') return 'must'
+  if (item.priority === 'high' && hardCanonMatchesTask(item, text)) return 'high'
+  if (item.category === 'world_rule' || item.category === 'system_rule' || item.category === 'prohibition') return item.priority === 'high' ? 'high' : 'medium'
+  return hardCanonMatchesTask(item, text) ? 'medium' : 'low'
+}
+
+function hardCanonNeedReason(item: HardCanonItem, priority: ContextNeedPriority): string {
+  if (priority === 'must') return `HardCanon《${item.title}》是不可违背硬设定，必须约束本章正文，防止普通摘要或模型临时发挥覆盖 canon。`
+  if (priority === 'high') return `HardCanon《${item.title}》与本章任务/规则风险相关，应优先进入最小硬设定。`
+  return `HardCanon《${item.title}》与本章存在弱相关，预算允许时进入；预算不足时可记录为低优先级。`
+}
+
 function inferSceneType(task: Partial<ChapterTask>, continuityBridge: ChapterContinuityBridge | null): ExpectedSceneType {
   const text = `${combinedTaskText(task)}\n${continuityBridge?.immediateNextBeat ?? ''}\n${continuityBridge?.openMicroTensions ?? ''}`
   if (containsAny(text, ['战斗', '追击', '逃亡', '搏斗', '突围', '袭击', '行动'])) return 'action'
@@ -172,9 +252,13 @@ function inferRoleInChapter(character: Character, taskText: string): CharacterRo
 export class ContextNeedPlannerService {
   static buildFromChapterIntent(input: BuildNeedPlanInput): ContextNeedPlan {
     const timestamp = now()
+    const taskOnlyText = combinedTaskText(input.chapterTaskDraft)
     const storyDirectionText =
       input.storyDirectionPromptText ?? StoryDirectionService.formatForPrompt(input.storyDirectionGuide ?? null, input.targetChapterOrder)
-    const taskText = [combinedTaskText(input.chapterTaskDraft), storyDirectionText].map(textValue).filter(Boolean).join('\n')
+    const taskText = [taskOnlyText, storyDirectionText].map(textValue).filter(Boolean).join('\n')
+    const storyDirectionBeat = input.storyDirectionGuide
+      ? StoryDirectionService.getBeatForChapter(input.storyDirectionGuide, input.targetChapterOrder)
+      : null
     const sceneType = inferSceneType(input.chapterTaskDraft, input.continuityBridge)
     const relatedCharacterIds = new Set<ID>()
 
@@ -200,6 +284,32 @@ export class ContextNeedPlannerService {
               : '主要角色，默认需要校验当前戏剧状态。'
         }
       })
+      .map((item) => {
+        const character = input.characters.find((candidate) => candidate.id === item.characterId)
+        if (!character) return item
+        if (textMentions(taskOnlyText, character.name)) {
+          return {
+            ...item,
+            reason: '章节任务契约直接点名该角色，需要调用本章角色切片与状态账本。'
+          }
+        }
+        if (textMentions(storyDirectionText, character.name)) {
+          return {
+            ...item,
+            reason: '中期剧情导向提到该角色，需要作为本章推进方向的候选角色。'
+          }
+        }
+        if (relatedCharacterIds.has(character.id)) {
+          return {
+            ...item,
+            reason: '本章相关伏笔关联到该角色，需要防止伏笔推进时角色状态缺失。'
+          }
+        }
+        return {
+          ...item,
+          reason: '主要角色默认进入低噪声校验范围，避免核心角色行为断裂。'
+        }
+      })
 
     const requiredCharacterCardFields: Record<ID, CharacterCardField[]> = {}
     const requiredStateFactCategories: Record<ID, StateFactCategory[]> = {}
@@ -208,6 +318,17 @@ export class ContextNeedPlannerService {
       if (!character) continue
       requiredCharacterCardFields[item.characterId] = ContextNeedPlannerService.inferRequiredCharacterFields(character, input.chapterTaskDraft, sceneType, item.expectedPresence)
       requiredStateFactCategories[item.characterId] = ContextNeedPlannerService.inferRequiredStateCategories(character, input.chapterTaskDraft, sceneType)
+    }
+
+    for (const fact of input.characterStateFacts) {
+      if (fact.status !== 'active') continue
+      const expected = expectedCharacters.find((character) => character.characterId === fact.characterId)
+      if (!expected) continue
+      if (fact.trackingLevel !== 'hard' && fact.promptPolicy !== 'always') continue
+      requiredStateFactCategories[fact.characterId] = unique([
+        ...(requiredStateFactCategories[fact.characterId] ?? []),
+        fact.category
+      ])
     }
 
     const requiredForeshadowingIds = input.foreshadowing
@@ -268,6 +389,36 @@ export class ContextNeedPlannerService {
         reason: '与本章出场角色或事件连续性有关。'
       }))
     ]
+
+    const hardCanonNeeds = (input.hardCanonItems ?? [])
+      .filter((item) => item.status === 'active')
+      .map((item) => {
+        const priority = hardCanonNeedPriority(item, taskText)
+        return contextNeed(
+          'hard_canon',
+          'hardCanon',
+          item.id,
+          priority,
+          hardCanonNeedReason(item, priority),
+          priority === 'low'
+        )
+      })
+      .filter((need) => need.priority !== 'low')
+
+    const storyDirectionNeeds = storyDirectionText
+      ? [
+          contextNeed(
+            'story_direction',
+            'storyDirection',
+            input.storyDirectionGuide?.id ?? null,
+            storyDirectionBeat ? 'high' : 'medium',
+            storyDirectionBeat
+              ? `中期剧情导向包含第 ${input.targetChapterOrder} 章节拍，应用于本章推进方向与章节任务补强。`
+              : '中期剧情导向提供本章软性推进方向；未命中精确章节节拍，按中优先级使用。',
+            !storyDirectionBeat
+          )
+        ]
+      : []
 
     const contextNeeds = uniqueByKey(
       [
@@ -356,6 +507,48 @@ export class ContextNeedPlannerService {
       (item) => `${item.needType}:${item.sourceId ?? item.sourceHint}`
     )
 
+    const strengthenedContextNeeds: ContextNeedItem[] = contextNeeds.map((need): ContextNeedItem => {
+      if (need.needType === 'character_state' && need.sourceId) {
+        const expected = expectedCharacters.find((character) => character.characterId === need.sourceId)
+        const categories = requiredStateFactCategories[need.sourceId] ?? []
+        const priority = strongestPriority(
+          categories.map((category) => stateCategoryPriority(category, sceneType, expected?.expectedPresence ?? 'referenced'))
+        )
+        const reasons = categories.map((category) => stateCategoryReason(category, input.characters.find((character) => character.id === need.sourceId)?.name ?? '角色', sceneType))
+        return {
+          ...need,
+          priority,
+          uncertain: expected?.expectedPresence !== 'onstage',
+          reason: `本章需要核对该角色状态账本类别：${categories.join('、') || 'status'}。${reasons.join('；') || expected?.reason || need.reason}`
+        }
+      }
+      if (need.needType === 'foreshadowing' && need.sourceId) {
+        const item = input.foreshadowing.find((candidate) => candidate.id === need.sourceId)
+        if (!item) return need
+        const priority = foreshadowingNeedPriority(item, taskText, textValue(input.chapterTaskDraft.allowedPayoffs))
+        return {
+          ...need,
+          priority,
+          reason: foreshadowingNeedReason(item, priority)
+        }
+      }
+      if (need.needType === 'timeline_anchor' && need.sourceId) {
+        const event = input.timelineEvents.find((candidate) => candidate.id === need.sourceId)
+        if (!event) return need
+        return {
+          ...need,
+          priority: 'high',
+          reason: timelineNeedReason(event)
+        }
+      }
+      return need
+    })
+
+    const prioritizedContextNeeds = uniqueByKey(
+      [...hardCanonNeeds, ...storyDirectionNeeds, ...strengthenedContextNeeds],
+      (item) => `${item.needType}:${item.sourceId ?? item.sourceHint}`
+    )
+
     return {
       id: newId(),
       projectId: input.project.id,
@@ -378,7 +571,7 @@ export class ContextNeedPlannerService {
         reason: '本章需求计划要求隐藏、暂停或禁止推进该伏笔。'
       })),
       warnings: input.previousChapter ? [] : ['缺少上一章，无法完整规划章节衔接需求。'],
-      contextNeeds,
+      contextNeeds: prioritizedContextNeeds,
       createdAt: timestamp,
       updatedAt: timestamp
     }

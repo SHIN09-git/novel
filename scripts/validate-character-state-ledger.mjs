@@ -14,6 +14,7 @@ function assert(condition, message, details = {}) {
 function rewriteRelativeImports(source) {
   return source.replace(/(from\s+['"])(\.{1,2}\/[^'"]+?)(['"])/g, (_match, prefix, specifier, suffix) => {
     if (/\.(mjs|js|json)$/.test(specifier)) return `${prefix}${specifier}${suffix}`
+    if (specifier === './normalizers' || specifier.endsWith('/normalizers')) return `${prefix}${specifier}/index.mjs${suffix}`
     return `${prefix}${specifier}.mjs${suffix}`
   })
 }
@@ -39,6 +40,18 @@ async function loadModules() {
   await compileTsTree([
     'src/services/CharacterStateService.ts',
     'src/shared/defaults.ts',
+    'src/shared/defaults/index.ts',
+    'src/shared/normalizers/index.ts',
+    'src/shared/normalizers/common.ts',
+    'src/shared/normalizers/appData.ts',
+    'src/shared/normalizers/characterState.ts',
+    'src/shared/normalizers/context.ts',
+    'src/shared/normalizers/continuity.ts',
+    'src/shared/normalizers/foreshadowing.ts',
+    'src/shared/normalizers/memoryUpdate.ts',
+    'src/shared/normalizers/reports.ts',
+    'src/shared/normalizers/runTrace.ts',
+    'src/shared/normalizers/storyDirection.ts',
     'src/shared/foreshadowingTreatment.ts'
   ])
   const service = await import(`${pathToFileURL(join(outDir, 'src/services/CharacterStateService.mjs')).href}?t=${Date.now()}`)
@@ -236,10 +249,23 @@ async function main() {
   checks.push(assert(crystalRelevant.some((fact) => fact.label === '右手结晶化'), 'PromptBuilder 在 physical / ability 相关章节中能纳入右手结晶化状态'))
 
   const sourceFiles = {
-    types: await readFile(join(root, 'src', 'shared', 'types.ts'), 'utf-8'),
-    prompt: await readFile(join(root, 'src', 'services', 'PromptBuilderService.ts'), 'utf-8'),
+    types: [
+      await readFile(join(root, 'src', 'shared', 'types.ts'), 'utf-8'),
+      await readFile(join(root, 'src', 'shared', 'types', 'character.ts'), 'utf-8')
+    ].join('\n'),
+    prompt: [
+      await readFile(join(root, 'src', 'services', 'PromptBuilderService.ts'), 'utf-8'),
+      await readFile(join(root, 'src', 'services', 'promptFormatters', 'characterFormatters.ts'), 'utf-8')
+    ].join('\n'),
     quality: await readFile(join(root, 'src', 'services', 'QualityGateService.ts'), 'utf-8'),
-    runner: await readFile(join(root, 'src', 'renderer', 'src', 'views', 'generation', 'usePipelineRunner.ts'), 'utf-8'),
+    runner: [
+      await readFile(join(root, 'src', 'renderer', 'src', 'views', 'generation', 'usePipelineRunner.ts'), 'utf-8'),
+      await readFile(join(root, 'src', 'renderer', 'src', 'views', 'generation', 'usePipelineRunnerCore.ts'), 'utf-8'),
+      await readFile(join(root, 'src', 'renderer', 'src', 'views', 'generation', 'pipelineRunnerEngine.ts'), 'utf-8'),
+      await readFile(join(root, 'src', 'renderer', 'src', 'views', 'generation', 'pipelineSteps', 'contextPlanning.ts'), 'utf-8'),
+      await readFile(join(root, 'src', 'renderer', 'src', 'views', 'generation', 'pipelineSteps', 'chapterGeneration.ts'), 'utf-8'),
+      await readFile(join(root, 'src', 'renderer', 'src', 'views', 'generation', 'pipelineSteps', 'memoryExtraction.ts'), 'utf-8')
+    ].join('\n'),
     chapters: await readFile(join(root, 'src', 'renderer', 'src', 'views', 'ChaptersView.tsx'), 'utf-8'),
     characters: await readFile(join(root, 'src', 'renderer', 'src', 'views', 'CharactersView.tsx'), 'utf-8')
   }

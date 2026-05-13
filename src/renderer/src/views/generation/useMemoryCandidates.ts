@@ -7,7 +7,7 @@ import type {
   Project,
   QualityGateReport
 } from '../../../../shared/types'
-import { normalizeMemoryUpdatePatch } from '../../../../shared/defaults'
+import { normalizeMemoryUpdatePatch } from '../../../../shared/normalizers/memoryUpdate'
 import { normalizeTreatmentMode } from '../../../../shared/foreshadowingTreatment'
 import { QUALITY_GATE_HUMAN_REVIEW_SCORE, QualityGateService } from '../../../../services/QualityGateService'
 import type { ConfirmFn } from '../../components/ConfirmDialog'

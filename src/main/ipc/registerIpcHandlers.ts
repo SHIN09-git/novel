@@ -3,7 +3,7 @@ import { copyFile, mkdir, readFile, stat, writeFile } from 'node:fs/promises'
 import { dirname, extname, isAbsolute, join, parse, relative, resolve } from 'node:path'
 import { safeParseJson } from '../../services/AIJsonParser'
 import { normalizeAppData, sanitizeAppDataForPersistence } from '../../shared/defaults'
-import { describeNetworkError as describeSafeNetworkError, getUserFriendlyError, redactSensitiveText } from '../../shared/errorUtils'
+import { getUserFriendlyError, redactSensitiveText } from '../../shared/errorUtils'
 import { IPC_CHANNELS } from '../../shared/ipc/ipcChannels'
 import {
   ValidationError,
@@ -18,6 +18,11 @@ import type {
   ChatCompletionRequest,
   ConfirmMigrationMergeRequest,
   ConfirmMigrationMergeResult,
+  BackupCreateResult,
+  BackupDeleteResult,
+  BackupListResult,
+  BackupOpenFolderResult,
+  BackupRestoreResult,
   CredentialDeleteApiKeyResult,
   CredentialHasApiKeyResult,
   CredentialMigrateLegacyApiKeyResult,
@@ -45,13 +50,15 @@ import type {
 } from '../../shared/ipc/ipcTypes'
 import type { ApiProvider, AppData } from '../../shared/types'
 import { AppConfigService } from '../AppConfigService'
+import { BackupService } from '../BackupService'
 import {
   backupFileForOverwrite,
   confirmMigrationMerge,
   createMigrationMergePreview
 } from '../DataMergeService'
 import { SecureCredentialService } from '../SecureCredentialService'
-import type { TokenBucketRateLimiter } from '../RateLimiter'
+import { LogService } from '../LogService'
+import type { IAIService } from '../services/AIService'
 import type { StorageService } from '../../storage/StorageService'
 import { SQLITE_DATA_FILE_NAME } from '../../storage/StorageService'
 import { createStorageService } from '../../storage/SqliteStorageService'
@@ -60,13 +67,21 @@ import { safeIpcHandler } from './safeIpcHandler'
 interface IpcHandlerContext {
   appConfig: AppConfigService
   credentialService: SecureCredentialService
+  backupService: BackupService
   getStorage: () => StorageService
   setStorage: (storage: StorageService) => void
-  aiRateLimiters: Partial<Record<ApiProvider, TokenBucketRateLimiter>>
+  aiService: IAIService
 }
 
-function sanitizeAiErrorText(text: string, apiKey?: string): string {
-  return redactSensitiveText(text, [apiKey]).slice(0, 800)
+async function maybeCreateAutomaticBackup(context: IpcHandlerContext, reason: string): Promise<void> {
+  try {
+    const storage = context.getStorage()
+    const currentData = await storage.load()
+    const backupPath = await context.backupService.maybeCreateAutomaticBackup(currentData)
+    if (backupPath) LogService.info(`Automatic backup created before ${reason}: ${backupPath}`)
+  } catch (error) {
+    LogService.warn(`Automatic backup skipped before ${reason}`, error)
+  }
 }
 
 async function pathExists(path: string): Promise<boolean> {
@@ -234,7 +249,11 @@ function validateChatCompletionRequest(request: ChatCompletionRequest): ChatComp
       baseUrl: validateUrl(settings.baseUrl, 'AI Base URL'),
       modelName: validateString(settings.modelName, 'AI model name', { minLength: 1, maxLength: 200 }),
       temperature: validateNumber(settings.temperature, 'AI temperature', { min: 0, max: 2 }),
-      maxTokens: validateNumber(settings.maxTokens, 'AI max tokens', { min: 1, max: 200_000, integer: true })
+      maxTokens: validateNumber(settings.maxTokens, 'AI max tokens', { min: 1, max: 200_000, integer: true }),
+      retryEnabled: typeof settings.retryEnabled === 'boolean' ? settings.retryEnabled : true,
+      maxRetries: typeof settings.maxRetries === 'number'
+        ? validateNumber(settings.maxRetries, 'AI max retries', { min: 0, max: 10, integer: true })
+        : 3
     },
     messages: validateChatMessages(record.messages)
   }
@@ -339,11 +358,14 @@ export function registerIpcHandlers(context: IpcHandlerContext): void {
     IPC_CHANNELS.STORAGE_GET,
     safeIpcHandler(async (): Promise<StorageGetResult> => {
       const storage = context.getStorage()
+      LogService.info(`Loading storage data from ${storage.getStoragePath()}`)
       const loaded = await storage.load()
       const secured = await secureAndSanitizeAppData(context, loaded)
       if (secured.migratedLegacyApiKey || loaded.settings.apiKey || loaded.settings.hasApiKey !== secured.data.settings.hasApiKey) {
+        await maybeCreateAutomaticBackup(context, 'legacy credential migration')
         await storage.save(secured.data)
       }
+      LogService.info(`Storage loaded: projects=${secured.data.projects.length}, chapters=${secured.data.chapters.length}`)
       return {
         data: secured.data,
         storagePath: storage.getStoragePath(),
@@ -357,7 +379,9 @@ export function registerIpcHandlers(context: IpcHandlerContext): void {
     safeIpcHandler(async (_event, data: AppData): Promise<StorageSaveResult> => {
       const storage = context.getStorage()
       const secured = await secureAndSanitizeAppData(context, data)
+      await maybeCreateAutomaticBackup(context, 'full AppData save')
       await storage.save(secured.data)
+      LogService.info(`Storage saved: ${storage.getStoragePath()}`)
       return {
         ok: true,
         storagePath: storage.getStoragePath(),
@@ -370,6 +394,8 @@ export function registerIpcHandlers(context: IpcHandlerContext): void {
     IPC_CHANNELS.DATA_SAVE_GENERATION_RUN_BUNDLE,
     safeIpcHandler(async (_event, request: SaveGenerationRunBundleRequest): Promise<StorageWriteResult> => {
       const storage = context.getStorage()
+      await maybeCreateAutomaticBackup(context, 'generation run bundle save')
+      LogService.info(`Saving GenerationRunBundle: jobId=${request.bundle.jobId}`)
       return storage.saveGenerationRunBundle(request.bundle)
     })
   )
@@ -378,6 +404,8 @@ export function registerIpcHandlers(context: IpcHandlerContext): void {
     IPC_CHANNELS.DATA_SAVE_CHAPTER_COMMIT_BUNDLE,
     safeIpcHandler(async (_event, request: SaveChapterCommitBundleRequest): Promise<StorageWriteResult> => {
       const storage = context.getStorage()
+      await maybeCreateAutomaticBackup(context, 'chapter commit bundle save')
+      LogService.info(`Saving ChapterCommitBundle: commitId=${request.bundle.commitId}`)
       return storage.saveChapterCommitBundle(request.bundle)
     })
   )
@@ -386,6 +414,8 @@ export function registerIpcHandlers(context: IpcHandlerContext): void {
     IPC_CHANNELS.DATA_SAVE_REVISION_COMMIT_BUNDLE,
     safeIpcHandler(async (_event, request: SaveRevisionCommitBundleRequest): Promise<StorageWriteResult> => {
       const storage = context.getStorage()
+      await maybeCreateAutomaticBackup(context, 'revision commit bundle save')
+      LogService.info(`Saving RevisionCommitBundle: revisionCommitId=${request.bundle.revisionCommitId}`)
       return storage.saveRevisionCommitBundle(request.bundle)
     })
   )
@@ -394,7 +424,7 @@ export function registerIpcHandlers(context: IpcHandlerContext): void {
     IPC_CHANNELS.STORAGE_EXPORT,
     safeIpcHandler(async (_event, data: AppData): Promise<ExportDataResult> => {
       const result = await dialog.showSaveDialog({
-        title: '导出小说导演台数据',
+        title: '导出 Novel Director 数据',
         defaultPath: 'novel-director-export.json',
         filters: [{ name: 'JSON', extensions: ['json'] }]
       })
@@ -409,7 +439,7 @@ export function registerIpcHandlers(context: IpcHandlerContext): void {
     IPC_CHANNELS.STORAGE_IMPORT,
     safeIpcHandler(async (): Promise<ImportDataResult> => {
       const result = await dialog.showOpenDialog({
-        title: '导入小说导演台数据',
+        title: '导入 Novel Director 数据',
         properties: ['openFile'],
         filters: [{ name: 'JSON', extensions: ['json'] }]
       })
@@ -521,6 +551,76 @@ export function registerIpcHandlers(context: IpcHandlerContext): void {
   )
 
   ipcMain.handle(
+    IPC_CHANNELS.BACKUP_CREATE,
+    safeIpcHandler(async (): Promise<BackupCreateResult> => {
+      const storage = context.getStorage()
+      const data = await storage.load()
+      const backupPath = await context.backupService.createBackup(data, false)
+      LogService.info(`Manual backup created: ${backupPath}`)
+      return { ok: true, backupPath }
+    })
+  )
+
+  ipcMain.handle(
+    IPC_CHANNELS.BACKUP_LIST,
+    safeIpcHandler(async (): Promise<BackupListResult> => ({
+      ok: true,
+      backups: await context.backupService.listBackups()
+    }))
+  )
+
+  ipcMain.handle(
+    IPC_CHANNELS.BACKUP_RESTORE,
+    safeIpcHandler(async (_event, backupPath: string): Promise<BackupRestoreResult> => {
+      const storage = context.getStorage()
+      let preRestoreBackupPath: string | undefined
+      try {
+        preRestoreBackupPath = await context.backupService.createBackup(await storage.load(), false)
+      } catch (error) {
+        LogService.warn('Pre-restore backup failed; continuing with selected backup restore.', error)
+      }
+      const data = await context.backupService.loadBackup(validateFilePath(backupPath, 'Backup path'))
+      await storage.save(data)
+      LogService.info(`Backup restored: ${backupPath}`)
+      return { ok: true, data, storagePath: storage.getStoragePath(), preRestoreBackupPath }
+    })
+  )
+
+  ipcMain.handle(
+    IPC_CHANNELS.BACKUP_DELETE,
+    safeIpcHandler(async (_event, backupPath: string): Promise<BackupDeleteResult> => {
+      await context.backupService.deleteBackup(validateFilePath(backupPath, 'Backup path'))
+      LogService.info(`Backup deleted: ${backupPath}`)
+      return { ok: true }
+    })
+  )
+
+  ipcMain.handle(
+    IPC_CHANNELS.BACKUP_OPEN_FOLDER,
+    safeIpcHandler(async (): Promise<BackupOpenFolderResult> => {
+      await context.backupService.ensureBackupDir()
+      const error = await shell.openPath(context.backupService.getBackupDir())
+      return error ? { ok: false, error } : { ok: true }
+    })
+  )
+
+  ipcMain.handle(
+    IPC_CHANNELS.LOGS_GET_PATH,
+    safeIpcHandler(async () => ({
+      ok: true as const,
+      logPath: LogService.getLogPath()
+    }))
+  )
+
+  ipcMain.handle(
+    IPC_CHANNELS.LOGS_OPEN,
+    safeIpcHandler(async () => {
+      LogService.openLogFile()
+      return { ok: true as const }
+    })
+  )
+
+  ipcMain.handle(
     IPC_CHANNELS.EXPORT_SAVE_TEXT_FILE,
     safeIpcHandler(async (_event, request: SaveTextFileRequest): Promise<SaveFileResult> => saveTextFile(request, false))
   )
@@ -582,75 +682,12 @@ export function registerIpcHandlers(context: IpcHandlerContext): void {
   ipcMain.handle(
     IPC_CHANNELS.AI_CHAT_COMPLETION,
     safeIpcHandler(async (_event, request: ChatCompletionRequest): Promise<ChatCompletionResult> => {
-      let apiKey = ''
       try {
-        const { settings, messages } = validateChatCompletionRequest(request)
-        apiKey = settings.apiProvider === 'local' ? '' : await context.credentialService.getApiKey()
-        if (settings.apiProvider !== 'local' && !apiKey.trim()) {
-          return { ok: false as const, error: '未配置 API Key。已跳过远程 AI 调用。' }
-        }
-
-        const limiter = settings.apiProvider === 'local' ? null : context.aiRateLimiters[settings.apiProvider]
-        if (limiter) {
-          await limiter.acquire()
-        }
-
-        const url = `${settings.baseUrl}/chat/completions`
-        const headers: Record<string, string> = {
-          'Content-Type': 'application/json'
-        }
-        if (apiKey.trim()) {
-          headers.Authorization = `Bearer ${apiKey.trim()}`
-        }
-
-        const requestBody = {
-          model: settings.modelName,
-          messages,
-          temperature: settings.temperature,
-          max_tokens: settings.maxTokens,
-          response_format: { type: 'json_object' }
-        }
-
-        let response = await fetch(url, {
-          method: 'POST',
-          headers,
-          body: JSON.stringify(requestBody)
-        })
-
-        if (!response.ok) {
-          const errorText = await response.text()
-          if (/response_format|json_object|unsupported/i.test(errorText)) {
-            const { response_format: _responseFormat, ...fallbackBody } = requestBody
-            response = await fetch(url, {
-              method: 'POST',
-              headers,
-              body: JSON.stringify(fallbackBody)
-            })
-            if (response.ok) {
-              const payload = (await response.json()) as {
-                choices?: Array<{ finish_reason?: string; finishReason?: string; message?: { content?: string } }>
-              }
-              const choice = payload.choices?.[0]
-              const content = choice?.message?.content
-              if (!content) return { ok: false as const, error: 'AI 返回为空。' }
-              return { ok: true as const, content, finishReason: choice?.finish_reason ?? choice?.finishReason }
-            }
-          }
-          return { ok: false as const, error: `AI 调用失败：HTTP ${response.status} ${sanitizeAiErrorText(errorText, apiKey)}` }
-        }
-
-        const payload = (await response.json()) as {
-          choices?: Array<{ finish_reason?: string; finishReason?: string; message?: { content?: string } }>
-        }
-        const choice = payload.choices?.[0]
-        const content = choice?.message?.content
-        if (!content) return { ok: false as const, error: 'AI 返回为空。' }
-        return { ok: true as const, content, finishReason: choice?.finish_reason ?? choice?.finishReason }
+        return await context.aiService.chatCompletion(validateChatCompletionRequest(request))
       } catch (error) {
-        const message = error instanceof ValidationError
-          ? getUserFriendlyError(error)
-          : describeSafeNetworkError(error)
-        return { ok: false as const, error: `AI 请求失败：${sanitizeAiErrorText(message, apiKey)}` }
+        LogService.error('AI chat completion failed', error)
+        const message = getUserFriendlyError(error)
+        return { ok: false as const, error: `AI 请求失败：${redactSensitiveText(message).slice(0, 800)}` }
       }
     })
   )

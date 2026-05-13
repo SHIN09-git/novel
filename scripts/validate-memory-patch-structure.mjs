@@ -1,6 +1,7 @@
 import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import { join, resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
+import { build } from 'esbuild'
 import ts from 'typescript'
 
 const root = resolve('.')
@@ -37,14 +38,34 @@ async function loadTsModule(relativePath, replacements = []) {
   return import(`${pathToFileURL(outPath).href}?t=${Date.now()}`)
 }
 
+async function bundleTsModule(relativePath, outfileName) {
+  await mkdir(outDir, { recursive: true })
+  const outfile = join(outDir, outfileName)
+  await build({
+    entryPoints: [join(root, relativePath)],
+    outfile,
+    bundle: true,
+    platform: 'node',
+    format: 'esm',
+    target: 'node22',
+    logLevel: 'silent'
+  })
+  return import(`${pathToFileURL(outfile).href}?t=${Date.now()}`)
+}
+
 async function main() {
   const checks = []
-  const typesSource = await read('src/shared/types.ts')
-  const treatmentPath = await compileTsModule('src/shared/foreshadowingTreatment.ts')
-  const defaults = await loadTsModule('src/shared/defaults.ts', [
-    ["from './foreshadowingTreatment'", `from '${pathToFileURL(treatmentPath).href}'`]
-  ])
-  const runnerSource = await read('src/renderer/src/views/generation/usePipelineRunner.ts')
+  const typesSource = [
+    await read('src/shared/types.ts'),
+    await read('src/shared/types/memory.ts')
+  ].join('\n')
+  const defaults = await bundleTsModule('src/shared/defaults.ts', 'defaults.mjs')
+  const runnerSource = [
+    await read('src/renderer/src/views/generation/usePipelineRunner.ts'),
+    await read('src/renderer/src/views/generation/usePipelineRunnerCore.ts'),
+    await read('src/renderer/src/views/generation/pipelineRunnerEngine.ts'),
+    await read('src/renderer/src/views/generation/pipelineSteps/memoryExtraction.ts')
+  ].join('\n')
   const memorySource = await read('src/renderer/src/views/generation/useMemoryCandidates.ts')
   const uiSource = await read('src/renderer/src/views/GenerationPipelineView.tsx')
   const memoryPanelSource = await read('src/renderer/src/components/pipeline/PipelineMemoryCandidatesPanel.tsx')

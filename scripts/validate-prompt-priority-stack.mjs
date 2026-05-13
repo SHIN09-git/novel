@@ -43,9 +43,17 @@ async function loadPromptBuilder() {
     'src/services/CharacterStateService.ts',
     'src/services/StageSummaryService.ts',
     'src/services/ContextCompressionService.ts',
+    'src/services/contextBudget/types.ts',
+    'src/services/contextBudget/scoringEngine.ts',
+    'src/services/contextBudget/selectionEngine.ts',
+    'src/services/contextBudget/traceBuilder.ts',
     'src/services/ContextBudgetManager.ts',
     'src/services/StoryDirectionService.ts',
     'src/services/HardCanonPackService.ts',
+    'src/services/promptFormatters/chapterFormatters.ts',
+    'src/services/promptFormatters/characterFormatters.ts',
+    'src/services/promptFormatters/foreshadowingFormatters.ts',
+    'src/services/promptFormatters/promptUtils.ts',
     'src/services/PromptBuilderService.ts'
   ])
   return import(`${pathToFileURL(join(outDir, 'src/services/PromptBuilderService.mjs')).href}?t=${Date.now()}`)

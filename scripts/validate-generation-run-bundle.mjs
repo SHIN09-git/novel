@@ -210,8 +210,19 @@ function fixtureData() {
 async function main() {
   const checks = []
   const service = await loadService()
-  const runnerSource = await read('src/renderer/src/views/generation/usePipelineRunner.ts')
-  const typesSource = await read('src/shared/types.ts')
+  const runnerSource = [
+    await read('src/renderer/src/views/generation/usePipelineRunner.ts'),
+    await read('src/renderer/src/views/generation/usePipelineRunnerCore.ts'),
+    await read('src/renderer/src/views/generation/pipelineRunnerEngine.ts'),
+    await read('src/renderer/src/views/generation/pipelineSteps/contextPlanning.ts'),
+    await read('src/renderer/src/views/generation/pipelineSteps/chapterGeneration.ts'),
+    await read('src/renderer/src/views/generation/pipelineSteps/memoryExtraction.ts'),
+    await read('src/renderer/src/views/generation/pipelineSteps/qualityCheck.ts')
+  ].join('\n')
+  const typesSource = [
+    await read('src/shared/types.ts'),
+    await read('src/shared/types/trace.ts')
+  ].join('\n')
   const runTests = await read('scripts/run-tests.mjs')
   const data = fixtureData()
 
@@ -309,7 +320,7 @@ async function main() {
       runnerSource.includes('buildGenerationRunBundle') &&
         runnerSource.includes('applyGenerationRunBundleToAppData') &&
         runnerSource.includes('saveGenerationRunBundle') &&
-        runnerSource.includes('persistWorking(working, jobId)'),
+        (runnerSource.includes('persistWorking(working, jobId)') || runnerSource.includes('persistWorking(state.working, jobId)')),
       'usePipelineRunner persists pipeline records through GenerationRunBundle utilities'
     )
   )

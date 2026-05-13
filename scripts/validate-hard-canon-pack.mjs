@@ -205,9 +205,18 @@ checks.push(assert(!promptResult.finalPrompt.includes('SHOULD_NOT_COPY_FULL_STOR
 checks.push(assert(promptResult.promptBlockOrder.some((block) => block.kind === 'hard_canon' && block.included), 'promptBlockOrder records included hard_canon block'))
 checks.push(assert(promptResult.hardCanonPrompt?.includedItemIds.includes('canon-must'), 'BuildPromptResult exposes hardCanonPrompt trace data'))
 
-const runTraceSource = await read('src/renderer/src/views/generation/usePipelineRunner.ts')
+const runTraceSource = [
+  await read('src/renderer/src/views/generation/usePipelineRunner.ts'),
+  await read('src/renderer/src/views/generation/usePipelineRunnerCore.ts'),
+  await read('src/renderer/src/views/generation/pipelineRunnerEngine.ts'),
+  await read('src/renderer/src/views/generation/pipelineSteps/contextPlanning.ts'),
+  await read('src/renderer/src/views/generation/pipelineSteps/chapterGeneration.ts')
+].join('\n')
 checks.push(assert(runTraceSource.includes('hardCanonPackItemCount') && runTraceSource.includes('includedHardCanonItemIds'), 'pipeline runner writes HardCanon trace fields'))
-const tracePanelSource = await read('src/renderer/src/views/generation/RunTracePanel.tsx')
+const tracePanelSource = [
+  await read('src/renderer/src/views/generation/RunTracePanel.tsx'),
+  await read('src/renderer/src/views/generation/runTraceSummary.ts')
+].join('\n')
 checks.push(assert(tracePanelSource.includes('hardCanonPackItemCount'), 'Run Trace summary can copy HardCanon trace fields'))
 const hardCanonViewSource = await read('src/renderer/src/views/HardCanonView.tsx')
 checks.push(assert(hardCanonViewSource.includes('这里放不能被 AI 改写的硬设定'), 'HardCanon UI explains author-facing purpose'))

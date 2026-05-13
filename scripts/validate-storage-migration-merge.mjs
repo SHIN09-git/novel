@@ -1,6 +1,7 @@
 import { mkdir, readFile, rm, stat, writeFile } from 'node:fs/promises'
 import { join, resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
+import { build } from 'esbuild'
 import ts from 'typescript'
 
 const root = resolve('.')
@@ -33,6 +34,21 @@ async function compileTsModule(relativePath, replacements = []) {
 async function loadTsModule(relativePath, replacements = []) {
   const outPath = await compileTsModule(relativePath, replacements)
   return import(`${pathToFileURL(outPath).href}?t=${Date.now()}`)
+}
+
+async function bundleTsModule(relativePath, outfileName) {
+  await mkdir(outDir, { recursive: true })
+  const outPath = join(outDir, outfileName)
+  await build({
+    entryPoints: [join(root, relativePath)],
+    outfile: outPath,
+    bundle: true,
+    platform: 'node',
+    format: 'esm',
+    target: 'node22',
+    logLevel: 'silent'
+  })
+  return outPath
 }
 
 function now() {
@@ -211,10 +227,7 @@ async function main() {
     )
   )
 
-  const treatmentPath = await compileTsModule('src/shared/foreshadowingTreatment.ts')
-  const defaultsPath = await compileTsModule('src/shared/defaults.ts', [
-    ["from './foreshadowingTreatment'", `from '${pathToFileURL(treatmentPath).href}'`]
-  ])
+  const defaultsPath = await bundleTsModule('src/shared/defaults.ts', 'defaults.mjs')
   const chapterCommitBundlePath = await compileTsModule('src/services/ChapterCommitBundleService.ts')
   const generationRunBundlePath = await compileTsModule('src/services/GenerationRunBundleService.ts')
   const revisionCommitBundlePath = await compileTsModule('src/services/RevisionCommitBundleService.ts')

@@ -75,6 +75,23 @@ tmp/rc-regression/novel-director-data.json
 5. 破坏一次性 JSON 副本，确认会生成 `.corrupt.<timestamp>.json` 备份。
 6. 确认保存或导出的 AppData JSON 中不含 API Key。
 
+### 发布烟测
+
+生成安装包后运行：
+
+```bash
+npm.cmd run smoke:packaged
+```
+
+该检查会启动 `release/win-unpacked/Novel Director.exe`，使用一次性 `tmp/packaged-smoke-user-data`，并验证：
+
+- 应用图标资源存在。
+- `window.novelDirector` preload API 可用。
+- data load/save/import/export API 可见。
+- 默认本地数据路径可解析为 SQLite / JSON 数据文件。
+- 首次启动无 API Key 状态不会崩溃。
+- SQLite 默认数据库会在隔离 userData 中创建。
+
 ### 导出检查
 
 在章节页检查：
@@ -177,6 +194,23 @@ Use only disposable copies for destructive tests.
 4. Confirm backups are created before overwrite or merge.
 5. Corrupt a disposable JSON copy and confirm a `.corrupt.<timestamp>.json` backup is created.
 6. Confirm API keys are not persisted in exported or saved AppData JSON.
+
+### Release Smoke Test
+
+After packaging, run:
+
+```bash
+npm.cmd run smoke:packaged
+```
+
+This starts `release/win-unpacked/Novel Director.exe` with disposable `tmp/packaged-smoke-user-data` and verifies:
+
+- Application icon resources exist.
+- `window.novelDirector` preload API is available.
+- data load/save/import/export APIs are visible.
+- The default local data path resolves to a SQLite / JSON data file.
+- First launch without an API key does not crash.
+- The default SQLite database is created in the isolated userData directory.
 
 ### Export Checks
 

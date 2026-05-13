@@ -56,7 +56,7 @@ export default function App() {
   const currentProject = data.projects.find((project) => project.id === currentProjectId) ?? null
 
   if (!currentProject) {
-    return <HomeView data={data} saveData={saveData} setProjectId={setCurrentProjectId} setView={setView} />
+    return <HomeView data={data} saveData={saveData} replaceData={replaceData} setProjectId={setCurrentProjectId} setView={setView} />
   }
 
   function renderCurrentView(activeData: AppData, activeProject: Project) {

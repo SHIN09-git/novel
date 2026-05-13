@@ -3,6 +3,11 @@ import { IPC_CHANNELS } from '../shared/ipc/ipcChannels'
 import type {
   ChatCompletionRequest,
   ChatCompletionResult,
+  BackupCreateResult,
+  BackupDeleteResult,
+  BackupListResult,
+  BackupOpenFolderResult,
+  BackupRestoreResult,
   ConfirmMigrationMergeResult,
   CredentialDeleteApiKeyResult,
   CredentialHasApiKeyResult,
@@ -12,6 +17,8 @@ import type {
   GetStoragePathResult,
   ImportDataResult,
   IpcFailure,
+  LogsGetPathResult,
+  LogsOpenResult,
   MigrateStoragePathResult,
   MigrationMergePreviewResult,
   OpenStorageFolderResult,
@@ -83,6 +90,19 @@ const novelDirector = {
         IPC_CHANNELS.APP_OPEN_STORAGE_FOLDER,
         storagePath === undefined ? undefined : assertText(storagePath, 'storagePath')
       ) as Promise<OpenStorageFolderResult>
+  },
+  backup: {
+    create: () => invokeOrThrow<BackupCreateResult>(IPC_CHANNELS.BACKUP_CREATE),
+    list: () => invokeOrThrow<BackupListResult>(IPC_CHANNELS.BACKUP_LIST),
+    restore: (backupPath: string) =>
+      invokeOrThrow<BackupRestoreResult>(IPC_CHANNELS.BACKUP_RESTORE, assertText(backupPath, 'backupPath')),
+    delete: (backupPath: string) =>
+      invokeOrThrow<BackupDeleteResult>(IPC_CHANNELS.BACKUP_DELETE, assertText(backupPath, 'backupPath')),
+    openFolder: () => invokeOrThrow<BackupOpenFolderResult>(IPC_CHANNELS.BACKUP_OPEN_FOLDER)
+  },
+  logs: {
+    getPath: () => invokeOrThrow<LogsGetPathResult>(IPC_CHANNELS.LOGS_GET_PATH),
+    open: () => invokeOrThrow<LogsOpenResult>(IPC_CHANNELS.LOGS_OPEN)
   },
   export: {
     saveTextFile: (content: string, defaultFileName: string) =>

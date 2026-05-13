@@ -9,10 +9,24 @@ function assert(condition, message, details = {}) {
 
 async function main() {
   const checks = []
-  const typesSource = await readFile(join(root, 'src', 'shared', 'types.ts'), 'utf-8')
-  const runnerSource = await readFile(join(root, 'src', 'renderer', 'src', 'views', 'generation', 'usePipelineRunner.ts'), 'utf-8')
+  const typesSource = [
+    await readFile(join(root, 'src', 'shared', 'types.ts'), 'utf-8'),
+    await readFile(join(root, 'src', 'shared', 'types', 'context.ts'), 'utf-8'),
+    await readFile(join(root, 'src', 'shared', 'types', 'quality.ts'), 'utf-8'),
+    await readFile(join(root, 'src', 'shared', 'types', 'trace.ts'), 'utf-8')
+  ].join('\n')
+  const runnerSource = [
+    await readFile(join(root, 'src', 'renderer', 'src', 'views', 'generation', 'usePipelineRunner.ts'), 'utf-8'),
+    await readFile(join(root, 'src', 'renderer', 'src', 'views', 'generation', 'usePipelineRunnerCore.ts'), 'utf-8'),
+    await readFile(join(root, 'src', 'renderer', 'src', 'views', 'generation', 'pipelineRunnerEngine.ts'), 'utf-8'),
+    await readFile(join(root, 'src', 'renderer', 'src', 'views', 'generation', 'pipelineSteps', 'contextPlanning.ts'), 'utf-8'),
+    await readFile(join(root, 'src', 'renderer', 'src', 'views', 'generation', 'pipelineSteps', 'chapterGeneration.ts'), 'utf-8')
+  ].join('\n')
   const runTraceSource = await readFile(join(root, 'src', 'renderer', 'src', 'utils', 'runTrace.ts'), 'utf-8')
-  const promptBuilderSource = await readFile(join(root, 'src', 'services', 'PromptBuilderService.ts'), 'utf-8')
+  const promptBuilderSource = [
+    await readFile(join(root, 'src', 'services', 'PromptBuilderService.ts'), 'utf-8'),
+    await readFile(join(root, 'src', 'services', 'promptFormatters', 'chapterFormatters.ts'), 'utf-8')
+  ].join('\n')
   const fixture = JSON.parse(await readFile(join(root, 'tmp', 'rc-regression', 'novel-director-data.json'), 'utf-8'))
 
   checks.push(
@@ -51,7 +65,8 @@ async function main() {
     assert(
       promptBuilderSource.includes('formatCompressedChapterRecap') &&
         promptBuilderSource.includes('compressionByChapterId') &&
-        runnerSource.includes('compressionRecords: budgetSelection?.compressionRecords'),
+        (runnerSource.includes('compressionRecords: budgetSelection?.compressionRecords') ||
+          runnerSource.includes('compressionRecords: state.budgetSelection?.compressionRecords')),
       'compressed chapter recap replacements are rendered in final prompts and recorded into Run Trace'
     )
   )

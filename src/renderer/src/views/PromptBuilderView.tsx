@@ -220,6 +220,7 @@ export function PromptBuilderView({ data, project, saveData, onSendToPipeline }:
       foreshadowing: scoped.foreshadowings,
       timelineEvents: scoped.timelineEvents,
       stageSummaries: scoped.stageSummaries,
+      hardCanonItems: scoped.hardCanonPacks.flatMap((pack) => pack.items),
       storyDirectionGuide: activeStoryDirectionGuide,
       storyDirectionPromptText: StoryDirectionService.formatForPrompt(activeStoryDirectionGuide, targetChapterOrder),
       source: 'prompt_builder'

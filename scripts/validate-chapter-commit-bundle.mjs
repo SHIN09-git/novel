@@ -256,7 +256,11 @@ async function main() {
   const { SqliteStorageService } = sqliteModule
   const { JsonStorageService } = jsonModule
 
-  const typesSource = await read('src/shared/types.ts')
+  const typesSource = [
+    await read('src/shared/types.ts'),
+    await read('src/shared/types/appData.ts'),
+    await read('src/shared/types/trace.ts')
+  ].join('\n')
   const storageServiceSource = await read('src/storage/StorageService.ts')
   const ipcSource = await read('src/shared/ipc/ipcChannels.ts')
   const preloadSource = await read('src/preload/index.ts')

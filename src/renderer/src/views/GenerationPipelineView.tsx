@@ -4,7 +4,6 @@ import type {
   ChapterCommitBundle,
   ConsistencyReviewIssue,
   ConsistencyReviewReport,
-  ContextBudgetProfile,
   ContextBudgetMode,
   ContextNeedPlan,
   ContextSelectionResult,
@@ -30,18 +29,7 @@ import { safeParseJson } from '../../../services/AIJsonParser'
 import { buildRunTraceAuthorSummary, upsertRunTraceAuthorSummaryToAppData } from '../../../services/RunTraceAuthorSummaryService'
 import { TokenEstimator } from '../../../services/TokenEstimator'
 import { useConfirm } from '../components/ConfirmDialog'
-import { Header } from '../components/Layout'
-import { PipelineConfigPanel } from '../components/pipeline/PipelineConfigPanel'
-import { PipelineCurrentArtifactPanel, type PipelineArtifactTab } from '../components/pipeline/PipelineCurrentArtifactPanel'
-import { PipelineDiagnosticsPanel } from '../components/pipeline/PipelineDiagnosticsPanel'
-import { PipelineEmptyState } from '../components/pipeline/PipelineEmptyState'
-import { PipelineJobList } from '../components/pipeline/PipelineJobList'
-import { PipelineLayout } from '../components/pipeline/PipelineLayout'
-import { PipelineMemoryCandidatesPanel } from '../components/pipeline/PipelineMemoryCandidatesPanel'
-import { PipelineRiskBanner } from '../components/pipeline/PipelineRiskBanner'
-import { PipelineStepRail } from '../components/pipeline/PipelineStepRail'
-import { PipelineTopStatusBar } from '../components/pipeline/PipelineTopStatusBar'
-import { PipelineTracePanel } from '../components/pipeline/PipelineTracePanel'
+import type { PipelineArtifactTab } from '../components/pipeline/PipelineCurrentArtifactPanel'
 import { newId, now } from '../utils/format'
 import { projectData } from '../utils/projectData'
 import { buildPipelineContextFromSelection, createContextBudgetProfile, selectBudgetContext } from '../utils/promptContext'
@@ -49,6 +37,14 @@ import { addReaderEmotionPreset, loadReaderEmotionState, rememberReaderEmotionTa
 import { appendGenerationRunTraceForcedContextBlocks, appendGenerationRunTraceIds, upsertGenerationRunTraceByJobId } from '../utils/runTrace'
 import type { SaveDataInput } from '../utils/saveDataState'
 import { buildRunTraceSummary } from './generation/RunTracePanel'
+import { GenerationPipelineConsole } from './generation/GenerationPipelineConsole'
+import {
+  budgetSelectionFromStepOutput,
+  consistencyIssueToRevisionType,
+  consistencyRevisionInstruction,
+  contextFromBuildContextOutput,
+  updateProjectTimestamp
+} from './generation/generationPipelineHelpers'
 import { useDraftAcceptance } from './generation/useDraftAcceptance'
 import { useMemoryCandidates } from './generation/useMemoryCandidates'
 import { PIPELINE_STEP_LABELS, PIPELINE_STEP_ORDER, usePipelineRunner } from './generation/usePipelineRunner'
@@ -62,44 +58,6 @@ interface ProjectProps {
   onOpenRevision?: (prefill: { chapterId: ID | null; draftId: ID | null; requestId: ID }) => void
   initialSnapshotId?: ID | null
   onInitialSnapshotConsumed?: () => void
-}
-
-function updateProjectTimestamp(data: AppData, projectId: ID): Project[] {
-  return data.projects.map((project) => (project.id === projectId ? { ...project, updatedAt: now() } : project))
-}
-
-function consistencyIssueToRevisionType(issue: ConsistencyReviewIssue): RevisionRequestType {
-  if (issue.type === 'timeline_conflict' || issue.type === 'previous_chapter_contradiction' || issue.type === 'continuity_gap') return 'fix_continuity'
-  if (issue.type === 'worldbuilding_conflict' || issue.type === 'geography_or_physics_conflict') return 'fix_worldbuilding'
-  if (issue.type === 'character_knowledge_leak') return 'fix_character_knowledge'
-  if (issue.type === 'character_motivation_gap') return 'strengthen_conflict'
-  if (issue.type === 'character_ooc') return 'fix_ooc'
-  if (issue.type === 'foreshadowing_misuse' || issue.type === 'foreshadowing_leak') return 'fix_foreshadowing'
-  return 'custom'
-}
-
-function consistencyRevisionInstruction(issue: ConsistencyReviewIssue): string {
-  return (
-    issue.revisionInstruction ||
-    [issue.description, issue.suggestedFix].filter(Boolean).join('\n修订目标：') ||
-    '修复该一致性问题，同时不得改动无关剧情、不得引入新设定、不得破坏角色状态和伏笔 treatmentMode。'
-  )
-}
-
-function contextFromBuildContextOutput(output: string): string {
-  const parsed = safeParseJson<{ finalPrompt?: string; context?: string }>(output, 'pipeline build_context output')
-  if (parsed.ok && typeof parsed.data.finalPrompt === 'string' && parsed.data.finalPrompt.trim()) return parsed.data.finalPrompt
-  if (parsed.ok && typeof parsed.data.context === 'string' && parsed.data.context.trim()) return parsed.data.context
-  return output.trim()
-}
-
-function budgetSelectionFromStepOutput(output: string): { profile: ContextBudgetProfile | null; selection: ContextSelectionResult | null } {
-  const parsed = safeParseJson<{ profile?: ContextBudgetProfile; selection?: ContextSelectionResult }>(output, 'pipeline budget selection output')
-  if (!parsed.ok) return { profile: null, selection: null }
-  return {
-    profile: parsed.data.profile ?? null,
-    selection: parsed.data.selection ?? null
-  }
 }
 
 export function GenerationPipelineView({
@@ -574,126 +532,121 @@ export function GenerationPipelineView({
 
   return (
     <div className="generation-view">
-      <Header title="章节生产流水线" description="把上下文构建、任务书、正文草稿、复盘、记忆候选和一致性审稿串成可见流程。" />
-      <PipelineLayout
-        topBar={
-          <PipelineTopStatusBar
-            targetChapterOrder={selectedJob?.targetChapterOrder ?? targetChapterOrder}
-            job={selectedJob}
-            contextSource={contextSource}
-            snapshot={selectedSnapshot ?? selectedTraceSnapshot}
-            qualityReport={latestQualityReport}
-            draft={latestDraft}
-            isRunning={isPipelineRunning}
-            primaryActionLabel={primaryActionLabel()}
-            primaryActionDisabled={contextSource === 'prompt_snapshot' && !selectedSnapshot && !selectedJob}
-            onPrimaryAction={runPrimaryAction}
-          />
-        }
-        sidebar={
-          <>
-            <PipelineConfigPanel
-              targetChapterOrder={targetChapterOrder}
-              nextChapter={nextChapter}
-              pipelineMode={pipelineMode}
-              estimatedWordCount={estimatedWordCount}
-              readerEmotionTarget={readerEmotionTarget}
-              readerEmotionPresets={readerEmotionPresets}
-              newReaderEmotionPreset={newReaderEmotionPreset}
-              budgetMode={budgetMode}
-              budgetMaxTokens={budgetMaxTokens}
-              defaultTokenBudget={data.settings.defaultTokenBudget}
-              contextSource={contextSource}
-              snapshots={snapshots}
-              selectedSnapshot={selectedSnapshot}
-              selectedSnapshotId={selectedSnapshotId}
-              isRunning={isPipelineRunning}
-              onTargetChapterOrderChange={setTargetChapterOrder}
-              onPipelineModeChange={setPipelineMode}
-              onEstimatedWordCountChange={setEstimatedWordCount}
-              onReaderEmotionTargetChange={setReaderEmotionTarget}
-              onReaderEmotionPreset={applyReaderEmotionPreset}
-              onNewReaderEmotionPresetChange={setNewReaderEmotionPreset}
-              onAddReaderEmotionPreset={addReaderEmotionPresetFromInput}
-              onBudgetModeChange={setBudgetMode}
-              onBudgetMaxTokensChange={setBudgetMaxTokens}
-              onContextSourceChange={setContextSource}
-              onSnapshotChange={handleSnapshotChange}
-              onUseAutoContext={useAutoContext}
-              onStart={startPipeline}
-            />
-            <PipelineJobList jobs={jobs} selectedJobId={selectedJob?.id ?? null} labels={PIPELINE_STEP_LABELS} onSelectJob={setSelectedJobId} />
-          </>
-        }
-        main={
-          !selectedJob ? (
-            <PipelineEmptyState />
-          ) : (
-            <>
-              <PipelineCurrentArtifactPanel
-                activeTab={activeArtifactTab}
-                onActiveTabChange={setActiveArtifactTab}
-                job={selectedJob}
-                draft={latestDraft}
-                steps={selectedSteps}
-                labels={PIPELINE_STEP_LABELS}
-                onAcceptDraft={draftAcceptance.acceptDraft}
-                onRejectDraft={draftAcceptance.rejectDraft}
-                onRetryDraft={(job) => retryStep(job, 'generate_chapter_draft')}
-                onCopyDraft={(draft) => {
-                  void window.novelDirector.clipboard.writeText(draft.body).then(() => setPipelineMessage('已复制草稿正文。'))
-                }}
-                onRetryStep={retryStep}
-                onSkipStep={skipStep}
-              />
-              <PipelineMemoryCandidatesPanel
-                candidates={selectedCandidates}
-                scoped={scoped}
-                onAccept={memoryCandidates.applyCandidate}
-                onAcceptAll={memoryCandidates.applyAllPendingCandidates}
-                onReject={memoryCandidates.rejectCandidate}
-              />
-            </>
-          )
-        }
-        inspector={
-          <>
-            <PipelineRiskBanner
-              job={selectedJob}
-              draft={latestDraft}
-              qualityReport={latestQualityReport}
-              consistencyReports={selectedReports}
-              memoryCandidates={selectedCandidates}
-              snapshot={selectedSnapshot}
-              targetChapterOrder={targetChapterOrder}
-              pipelineMessage={pipelineMessage}
-            />
-            <PipelineStepRail job={selectedJob} steps={selectedSteps} labels={PIPELINE_STEP_LABELS} onRetry={retryStep} onSkip={skipStep} />
-            <PipelineDiagnosticsPanel
-              qualityReport={latestQualityReport}
-              consistencyReports={selectedReports}
-              revisionCandidates={selectedRevisionCandidates}
-              latestDraft={latestDraft}
-              linkedConsistencyIssueTitle={linkedConsistencyIssueTitle}
-              onGenerateRevisionCandidate={generateRevisionCandidate}
-              onAcceptRevisionCandidate={acceptRevisionCandidate}
-              onRejectRevisionCandidate={rejectRevisionCandidate}
-              onStartRevisionFromConsistencyIssue={startRevisionFromConsistencyIssue}
-              onUpdateConsistencyIssueStatus={updateConsistencyIssueStatus}
-            />
-            <PipelineTracePanel
-              trace={selectedTrace}
-              snapshot={selectedTraceSnapshot}
-              authorSummary={selectedAuthorSummary}
-              consistencyReport={traceConsistencyReport}
-              qualityReport={traceQualityReport}
-              continuityBridge={traceContinuityBridge}
-              redundancyReport={traceRedundancyReport}
-              onCopy={copyRunTrace}
-              onGenerateAuthorSummary={generateAuthorSummary}
-            />
-          </>
-        }
+      <GenerationPipelineConsole
+        selectedJob={selectedJob}
+        headerTitle="章节生产流水线"
+        headerDescription="把上下文构建、任务书、正文草稿、复盘、记忆候选和一致性审稿串成可见流程。"
+        topStatusBar={{
+          targetChapterOrder: selectedJob?.targetChapterOrder ?? targetChapterOrder,
+          job: selectedJob,
+          contextSource,
+          snapshot: selectedSnapshot ?? selectedTraceSnapshot,
+          qualityReport: latestQualityReport,
+          draft: latestDraft,
+          isRunning: isPipelineRunning,
+          primaryActionLabel: primaryActionLabel(),
+          primaryActionDisabled: contextSource === 'prompt_snapshot' && !selectedSnapshot && !selectedJob,
+          onPrimaryAction: runPrimaryAction
+        }}
+        configPanel={{
+          targetChapterOrder,
+          nextChapter,
+          pipelineMode,
+          estimatedWordCount,
+          readerEmotionTarget,
+          readerEmotionPresets,
+          newReaderEmotionPreset,
+          budgetMode,
+          budgetMaxTokens,
+          defaultTokenBudget: data.settings.defaultTokenBudget,
+          contextSource,
+          snapshots,
+          selectedSnapshot,
+          selectedSnapshotId,
+          isRunning: isPipelineRunning,
+          onTargetChapterOrderChange: setTargetChapterOrder,
+          onPipelineModeChange: setPipelineMode,
+          onEstimatedWordCountChange: setEstimatedWordCount,
+          onReaderEmotionTargetChange: setReaderEmotionTarget,
+          onReaderEmotionPreset: applyReaderEmotionPreset,
+          onNewReaderEmotionPresetChange: setNewReaderEmotionPreset,
+          onAddReaderEmotionPreset: addReaderEmotionPresetFromInput,
+          onBudgetModeChange: setBudgetMode,
+          onBudgetMaxTokensChange: setBudgetMaxTokens,
+          onContextSourceChange: setContextSource,
+          onSnapshotChange: handleSnapshotChange,
+          onUseAutoContext: useAutoContext,
+          onStart: startPipeline
+        }}
+        jobList={{
+          jobs,
+          selectedJobId: selectedJob?.id ?? null,
+          labels: PIPELINE_STEP_LABELS,
+          onSelectJob: setSelectedJobId
+        }}
+        currentArtifactPanel={{
+          activeTab: activeArtifactTab,
+          onActiveTabChange: setActiveArtifactTab,
+          job: selectedJob,
+          draft: latestDraft,
+          steps: selectedSteps,
+          labels: PIPELINE_STEP_LABELS,
+          onAcceptDraft: draftAcceptance.acceptDraft,
+          onRejectDraft: draftAcceptance.rejectDraft,
+          onRetryDraft: (job) => retryStep(job, 'generate_chapter_draft'),
+          onCopyDraft: (draft) => {
+            void window.novelDirector.clipboard.writeText(draft.body).then(() => setPipelineMessage('已复制草稿正文。'))
+          },
+          onRetryStep: retryStep,
+          onSkipStep: skipStep
+        }}
+        memoryCandidatesPanel={{
+          candidates: selectedCandidates,
+          scoped,
+          onAccept: memoryCandidates.applyCandidate,
+          onAcceptAll: memoryCandidates.applyAllPendingCandidates,
+          onReject: memoryCandidates.rejectCandidate
+        }}
+        riskBanner={{
+          job: selectedJob,
+          draft: latestDraft,
+          qualityReport: latestQualityReport,
+          consistencyReports: selectedReports,
+          memoryCandidates: selectedCandidates,
+          snapshot: selectedSnapshot,
+          targetChapterOrder,
+          pipelineMessage
+        }}
+        stepRail={{
+          job: selectedJob,
+          steps: selectedSteps,
+          labels: PIPELINE_STEP_LABELS,
+          onRetry: retryStep,
+          onSkip: skipStep
+        }}
+        diagnosticsPanel={{
+          qualityReport: latestQualityReport,
+          consistencyReports: selectedReports,
+          revisionCandidates: selectedRevisionCandidates,
+          latestDraft,
+          linkedConsistencyIssueTitle,
+          onGenerateRevisionCandidate: generateRevisionCandidate,
+          onAcceptRevisionCandidate: acceptRevisionCandidate,
+          onRejectRevisionCandidate: rejectRevisionCandidate,
+          onStartRevisionFromConsistencyIssue: startRevisionFromConsistencyIssue,
+          onUpdateConsistencyIssueStatus: updateConsistencyIssueStatus
+        }}
+        tracePanel={{
+          trace: selectedTrace,
+          snapshot: selectedTraceSnapshot,
+          authorSummary: selectedAuthorSummary,
+          consistencyReport: traceConsistencyReport,
+          qualityReport: traceQualityReport,
+          continuityBridge: traceContinuityBridge,
+          redundancyReport: traceRedundancyReport,
+          onCopy: copyRunTrace,
+          onGenerateAuthorSummary: generateAuthorSummary
+        }}
       />
     </div>
   )

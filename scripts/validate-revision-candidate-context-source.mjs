@@ -12,7 +12,10 @@ async function main() {
   const viewSource = await readFile(join(root, 'src', 'renderer', 'src', 'views', 'GenerationPipelineView.tsx'), 'utf-8')
   const promptContextSource = await readFile(join(root, 'src', 'renderer', 'src', 'utils', 'promptContext.ts'), 'utf-8')
   const promptBuilderSource = await readFile(join(root, 'src', 'services', 'PromptBuilderService.ts'), 'utf-8')
-  const typesSource = await readFile(join(root, 'src', 'shared', 'types.ts'), 'utf-8')
+  const typesSource = [
+    await readFile(join(root, 'src', 'shared', 'types.ts'), 'utf-8'),
+    await readFile(join(root, 'src', 'shared', 'types', 'revision.ts'), 'utf-8')
+  ].join('\n')
 
   checks.push(
     assert(

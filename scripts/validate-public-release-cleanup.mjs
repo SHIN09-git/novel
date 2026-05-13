@@ -83,6 +83,7 @@ const filesToScan = walk('.')
   .filter((file) => !file.startsWith(`dist${'\\'}`))
   .filter((file) => !file.startsWith(`dist-launcher${'\\'}`))
   .filter((file) => !file.startsWith(`release${'\\'}`))
+  .filter((file) => !file.startsWith(`release-fixed${'\\'}`))
   .filter((file) => !file.startsWith(`releases${'\\'}`))
   .filter((file) => !/\.(png|jpg|jpeg|gif|ico|exe|dll|bin)$/i.test(file))
 

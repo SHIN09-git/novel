@@ -15,6 +15,15 @@ export const IPC_CHANNELS = {
   APP_RESET_STORAGE_PATH: 'app:reset-storage-path',
   APP_OPEN_STORAGE_FOLDER: 'app:open-storage-folder',
 
+  BACKUP_CREATE: 'backup:create',
+  BACKUP_LIST: 'backup:list',
+  BACKUP_RESTORE: 'backup:restore',
+  BACKUP_DELETE: 'backup:delete',
+  BACKUP_OPEN_FOLDER: 'backup:open-folder',
+
+  LOGS_GET_PATH: 'logs:get-path',
+  LOGS_OPEN: 'logs:open',
+
   EXPORT_SAVE_TEXT_FILE: 'export:save-text-file',
   EXPORT_SAVE_MARKDOWN_FILE: 'export:save-markdown-file',
 

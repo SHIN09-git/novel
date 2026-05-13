@@ -29,7 +29,13 @@ async function main() {
   const ipcTypes = await read('src/shared/ipc/ipcTypes.ts')
   const preload = await read('src/preload/index.ts')
   const handlers = await read('src/main/ipc/registerIpcHandlers.ts')
-  const defaults = await read('src/shared/defaults.ts')
+  const mainAiService = await read('src/main/services/AIService.ts')
+  const mainAiHttpClient = await read('src/main/services/AIHttpClient.ts')
+  const defaults = [
+    await read('src/shared/defaults.ts'),
+    await read('src/shared/defaults/index.ts'),
+    await read('src/shared/normalizers/appData.ts')
+  ].join('\n')
   const storage = await read('src/storage/JsonStorageService.ts')
   const sqliteStorage = await read('src/storage/SqliteStorageService.ts')
   const dataMerge = await read('src/main/DataMergeService.ts')
@@ -37,7 +43,8 @@ async function main() {
   const aiClient = await read('src/services/ai/AIClient.ts')
   const fixtureData = await readJson(rcDataPath)
   const migratedData = await readJson(migratedDataPath)
-  const combinedSource = [secureService, handlers, defaults, storage, sqliteStorage, dataMerge, settingsView, aiClient].join('\n')
+  const aiMainSource = [handlers, mainAiService, mainAiHttpClient].join('\n')
+  const combinedSource = [secureService, aiMainSource, defaults, storage, sqliteStorage, dataMerge, settingsView, aiClient].join('\n')
 
   checks.push(
     assert(
@@ -73,9 +80,9 @@ async function main() {
     assert(
       handlers.includes('secureAndSanitizeAppData') &&
         handlers.includes('migrateLegacyApiKey') &&
-        handlers.includes('credentialService.getApiKey()') &&
-        handlers.includes('sanitizeAiErrorText(errorText, apiKey)') &&
-        !handlers.includes('headers.Authorization = `Bearer ${settings.apiKey'),
+        mainAiService.includes('credentialService.getApiKey()') &&
+        mainAiService.includes('sanitizeAiErrorText(message, apiKey)') &&
+        !aiMainSource.includes('headers.Authorization = `Bearer ${settings.apiKey'),
       'main process migrates legacy keys, injects secure key for AI calls, and redacts AI errors'
     )
   )

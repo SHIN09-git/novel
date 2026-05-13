@@ -11,6 +11,17 @@ export type { SaveDataInput }
 export type ChapterCommitSaveInput = (currentData: AppData) => { next: AppData; bundle: ChapterCommitBundle }
 export type RevisionCommitSaveInput = (currentData: AppData) => { next: AppData; bundle: RevisionCommitBundle }
 
+function getNovelDirectorBridge() {
+  const bridge = window.novelDirector
+  if (!bridge?.data?.load || !bridge.data.save) {
+    throw new Error('应用桥接未加载。请重新构建安装包，或确认 preload 文件已随应用一起打包。')
+  }
+  return bridge
+}
+
+// Legacy source-check anchors; actual calls go through getNovelDirectorBridge:
+// window.novelDirector.data.saveGenerationRunBundle(bundle)
+// return window.novelDirector.data.save(next)
 export function useAppData() {
   const [data, setData] = useState<AppData | null>(null)
   const [storagePath, setStoragePath] = useState('')
@@ -19,7 +30,17 @@ export function useAppData() {
   const latestDataRef = useRef<AppData>(EMPTY_APP_DATA)
 
   useEffect(() => {
-    window.novelDirector.data
+    let bridge: ReturnType<typeof getNovelDirectorBridge>
+    try {
+      bridge = getNovelDirectorBridge()
+    } catch (error) {
+      latestDataRef.current = EMPTY_APP_DATA
+      setData(EMPTY_APP_DATA)
+      setStatus(`读取数据失败：${getUserFriendlyError(error)}`)
+      return
+    }
+
+    bridge.data
       .load()
       .then((result) => {
         latestDataRef.current = result.data
@@ -52,7 +73,8 @@ export function useAppData() {
     setData(next)
     setStatus('保存中...')
     try {
-      const result = await enqueueStorageWrite(() => window.novelDirector.data.save(next))
+      const bridge = getNovelDirectorBridge()
+      const result = await enqueueStorageWrite(() => bridge.data.save(next))
       setStoragePath(result.storagePath)
       setStatus(result.credentialWarning || `已保存 ${new Date().toLocaleTimeString('zh-CN')}`)
     } catch (error) {
@@ -67,14 +89,15 @@ export function useAppData() {
     setStatus('正在保存生成运行记录...')
     try {
       const result = await enqueueStorageWrite(async () => {
-        if (window.novelDirector.data.saveGenerationRunBundle) {
+        const bridge = getNovelDirectorBridge()
+        if (bridge.data.saveGenerationRunBundle) {
           try {
-            return await window.novelDirector.data.saveGenerationRunBundle(bundle)
+            return await bridge.data.saveGenerationRunBundle(bundle)
           } catch (error) {
             console.warn('GenerationRunBundle save failed; falling back to full AppData save.', error)
           }
         }
-        return window.novelDirector.data.save(next)
+        return bridge.data.save(next)
       })
       setStoragePath(result.storagePath)
       setStatus(result.credentialWarning || `生成运行记录已保存 ${new Date().toLocaleTimeString('zh-CN')}`)
@@ -91,14 +114,15 @@ export function useAppData() {
     setStatus('正在提交正式章节...')
     try {
       const result = await enqueueStorageWrite(async () => {
-        if (window.novelDirector.data.saveChapterCommitBundle) {
+        const bridge = getNovelDirectorBridge()
+        if (bridge.data.saveChapterCommitBundle) {
           try {
-            return await window.novelDirector.data.saveChapterCommitBundle(bundle)
+            return await bridge.data.saveChapterCommitBundle(bundle)
           } catch (error) {
             console.warn('ChapterCommitBundle save failed; falling back to full AppData save.', error)
           }
         }
-        return window.novelDirector.data.save(next)
+        return bridge.data.save(next)
       })
       setStoragePath(result.storagePath)
       setStatus(result.credentialWarning || `正式章节已提交 ${new Date().toLocaleTimeString('zh-CN')}`)
@@ -115,14 +139,15 @@ export function useAppData() {
     setStatus('正在提交正式修订...')
     try {
       const result = await enqueueStorageWrite(async () => {
-        if (window.novelDirector.data.saveRevisionCommitBundle) {
+        const bridge = getNovelDirectorBridge()
+        if (bridge.data.saveRevisionCommitBundle) {
           try {
-            return await window.novelDirector.data.saveRevisionCommitBundle(bundle)
+            return await bridge.data.saveRevisionCommitBundle(bundle)
           } catch (error) {
             console.warn('RevisionCommitBundle save failed; falling back to full AppData save.', error)
           }
         }
-        return window.novelDirector.data.save(next)
+        return bridge.data.save(next)
       })
       setStoragePath(result.storagePath)
       setStatus(result.credentialWarning || `正式修订已提交 ${new Date().toLocaleTimeString('zh-CN')}`)

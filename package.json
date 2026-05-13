@@ -12,6 +12,7 @@
     "build": "tsc --noEmit && electron-vite build",
     "dist:win": "node scripts/run-dist-win.mjs",
     "smoke": "set NOVEL_DIRECTOR_SMOKE_TEST=1&& electron-vite preview",
+    "smoke:packaged": "node scripts/smoke-packaged-app.mjs",
     "rc:fixture": "node scripts/rc-regression.mjs",
     "test": "node scripts/run-tests.mjs",
     "test:single": "node scripts/run-tests.mjs",

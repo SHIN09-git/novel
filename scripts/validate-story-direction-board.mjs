@@ -11,14 +11,31 @@ function assert(condition, message) {
   }
 }
 
-const types = read('src/shared/types.ts')
-const defaults = read('src/shared/defaults.ts')
+const types = [
+  read('src/shared/types.ts'),
+  read('src/shared/types/appData.ts'),
+  read('src/shared/types/storyDirection.ts'),
+  read('src/shared/types/trace.ts')
+].join('\n')
+const defaults = [
+  read('src/shared/defaults.ts'),
+  read('src/shared/defaults/index.ts'),
+  read('src/shared/normalizers/appData.ts'),
+  read('src/shared/normalizers/storyDirection.ts')
+].join('\n')
 const service = read('src/services/StoryDirectionService.ts')
 const aiService = read('src/services/AIService.ts')
 const storyDirectionAI = read('src/services/ai/StoryDirectionAI.ts')
 const promptBuilder = read('src/services/PromptBuilderService.ts')
 const promptContext = read('src/renderer/src/utils/promptContext.ts')
-const runner = read('src/renderer/src/views/generation/usePipelineRunner.ts')
+const runner = [
+  read('src/renderer/src/views/generation/usePipelineRunner.ts'),
+  read('src/renderer/src/views/generation/usePipelineRunnerCore.ts'),
+  read('src/renderer/src/views/generation/pipelineRunnerEngine.ts'),
+  read('src/renderer/src/views/generation/pipelineSteps/contextPlanning.ts'),
+  read('src/renderer/src/views/generation/pipelineSteps/chapterGeneration.ts'),
+  read('src/renderer/src/views/generation/pipelineUtils.ts')
+].join('\n')
 const app = read('src/renderer/src/App.tsx')
 const navTypes = read('src/renderer/src/components/layoutParts/types.ts')
 const view = read('src/renderer/src/views/StoryDirectionView.tsx')

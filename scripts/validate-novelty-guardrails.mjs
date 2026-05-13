@@ -28,12 +28,34 @@ async function loadTsModule(relativePath) {
 
 async function main() {
   const checks = []
-  const typesSource = await readFile(join(root, 'src', 'shared', 'types.ts'), 'utf-8')
+  const typesSource = (
+    await Promise.all(
+      [
+        'src/shared/types.ts',
+        'src/shared/types/generation.ts',
+        'src/shared/types/memory.ts',
+        'src/shared/types/quality.ts',
+        'src/shared/types/trace.ts'
+      ].map((file) => readFile(join(root, file), 'utf-8'))
+    )
+  ).join('\n')
   const promptBuilderSource = await readFile(join(root, 'src', 'services', 'PromptBuilderService.ts'), 'utf-8')
   const pipelineAiSource = await readFile(join(root, 'src', 'services', 'ai', 'GenerationPipelineAI.ts'), 'utf-8')
   const qualityGateSource = await readFile(join(root, 'src', 'services', 'QualityGateService.ts'), 'utf-8')
   const qualityGateAiSource = await readFile(join(root, 'src', 'services', 'ai', 'QualityGateAI.ts'), 'utf-8')
-  const runnerSource = await readFile(join(root, 'src', 'renderer', 'src', 'views', 'generation', 'usePipelineRunner.ts'), 'utf-8')
+  const runnerSource = (
+    await Promise.all(
+      [
+        'src/renderer/src/views/generation/usePipelineRunner.ts',
+        'src/renderer/src/views/generation/usePipelineRunnerCore.ts',
+        'src/renderer/src/views/generation/pipelineRunnerEngine.ts',
+        'src/renderer/src/views/generation/pipelineSteps/chapterGeneration.ts',
+        'src/renderer/src/views/generation/pipelineSteps/memoryExtraction.ts',
+        'src/renderer/src/views/generation/pipelineSteps/qualityCheck.ts',
+        'src/renderer/src/views/generation/pipelineUtils.ts'
+      ].map((file) => readFile(join(root, file), 'utf-8'))
+    )
+  ).join('\n')
   const runTraceSource = await readFile(join(root, 'src', 'renderer', 'src', 'views', 'generation', 'RunTracePanel.tsx'), 'utf-8')
   const runTests = await readFile(join(root, 'scripts', 'run-tests.mjs'), 'utf-8')
 
@@ -177,6 +199,47 @@ async function main() {
     noveltyPolicy: allowedPolicy
   })
   checks.push(assert(allowedAudit.severity !== 'fail', 'task-allowed new rule with cost is not treated as hard fail', allowedAudit))
+
+  const priorRuleAudit = NoveltyDetector.audit({
+    generatedText: '\u4e3b\u89d2\u518d\u6b21\u4f7f\u7528\u624b\u52a8\u8bc4\u5b9a\u89c4\u5219\uff0c\u4ed8\u51fa\u4e00\u6b21\u6295\u7968\u8d44\u683c\u540e\u624d\u901a\u8fc7\u95e8\u7981\u3002',
+    context: '\u5df2\u77e5\u89c4\u5219\uff1a\u624b\u52a8\u8bc4\u5b9a\u9700\u8981\u6263\u9664\u4e00\u6b21\u6295\u7968\u8d44\u683c\u4f5c\u4e3a\u4ee3\u4ef7\u3002',
+    chapterPlan: strictPlan
+  })
+  checks.push(assert(priorRuleAudit.severity === 'pass', 'previously traced rule reuse is not escalated as new novelty', priorRuleAudit))
+
+  const costlyRuleAudit = NoveltyDetector.audit({
+    generatedText: '\u7cfb\u7edf\u9762\u677f\u5f39\u51fa\u8865\u5145\u8bf4\u660e\uff1a\u53ef\u4ee5\u5f00\u542f\u7279\u6b8a\u901a\u9053\uff0c\u4f46\u9700\u8981\u6c38\u4e45\u5931\u53bb\u4e00\u9879\u5df2\u6709\u6743\u9650\u4f5c\u4e3a\u4ee3\u4ef7\u3002',
+    context: '\u5df2\u77e5\u89c4\u5219\uff1a\u95e8\u7981\u5fc5\u987b\u4f7f\u7528\u5df2\u6709\u8eab\u4efd\u901a\u8fc7\u3002',
+    chapterPlan: strictPlan
+  })
+  checks.push(assert(costlyRuleAudit.severity === 'warning', 'unauthorized but costly new rule is downgraded to review warning, not hard fail', costlyRuleAudit))
+
+  const allowedNameAudit = NoveltyDetector.audit({
+    generatedText: '\u95e8\u540e\u7684\u5973\u5b69\u540d\u53eb\u6797\u5c0f\u96e8\uff0c\u5979\u662f\u4efb\u52a1\u4e66\u5141\u8bb8\u51fa\u573a\u7684\u65b0\u89d2\u8272\u3002',
+    context: '\u5df2\u6709\u89d2\u8272\uff1a\u5468\u70ec\u3001\u6c88\u77e5\u4e88\u3002',
+    chapterPlan: { ...strictPlan, allowedNovelty: '\u5141\u8bb8\u65b0\u589e\u547d\u540d\u89d2\u8272\uff1a\u6797\u5c0f\u96e8', forbiddenNovelty: '' }
+  })
+  checks.push(assert(allowedNameAudit.severity === 'pass', 'task-allowed named character is recorded without warning/fail severity', allowedNameAudit))
+
+  const knownNameAudit = NoveltyDetector.audit({
+    generatedText: '\u5468\u70ec\u4f4e\u58f0\u8bf4\u9053\uff1a\u201c\u8fd9\u6761\u8def\u4e0d\u80fd\u8d70\u3002\u201d',
+    context: '\u5df2\u6709\u89d2\u8272\uff1a\u5468\u70ec\u3001\u6c88\u77e5\u4e88\u3002',
+    chapterPlan: strictPlan
+  })
+  checks.push(assert(knownNameAudit.newNamedCharacters.length === 0, 'existing character names are not reported as new named characters', knownNameAudit))
+
+  const numberedAdminAudit = NoveltyDetector.audit({
+    generatedText: '\u533a\u57df\u7ba1\u7406\u5458-03\u5728\u95e8\u53e3\u8bb0\u5f55\u4e86\u6240\u6709\u4eba\u7684\u7f16\u53f7\u3002',
+    context: '\u5df2\u6709\u89d2\u8272\uff1a\u5468\u70ec\u3002',
+    chapterPlan: strictPlan
+  })
+  checks.push(
+    assert(
+      numberedAdminAudit.newOrganizationsOrRanks.length > 0 && numberedAdminAudit.newNamedCharacters.length === 0,
+      'numbered administrator identities are classified as organization/rank, not ordinary named characters',
+      numberedAdminAudit
+    )
+  )
 
   const orgAudit = NoveltyDetector.audit({
     generatedText: '区域管理员推开门，宣布总部已经接管这个副本。',

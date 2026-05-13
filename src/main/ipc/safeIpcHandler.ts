@@ -1,6 +1,7 @@
 import type { IpcMainInvokeEvent } from 'electron'
 import { getUserFriendlyError, logSafeError, redactSensitiveText } from '../../shared/errorUtils'
 import type { IpcFailure } from '../../shared/ipc/ipcTypes'
+import { LogService } from '../LogService'
 
 type AsyncIpcHandler<TArgs extends unknown[], TResult> = (
   event: IpcMainInvokeEvent,
@@ -14,6 +15,7 @@ export function safeIpcHandler<TArgs extends unknown[], TResult>(
     try {
       return await handler(event, ...args)
     } catch (error) {
+      LogService.error('IPC handler failed', error)
       logSafeError('IPC handler failed', error)
       return {
         ok: false,

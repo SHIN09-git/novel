@@ -27,6 +27,9 @@ import { QualityGateAI } from './ai/QualityGateAI'
 import { RevisionAI } from './ai/RevisionAI'
 import { StoryDirectionAI, type GenerateStoryDirectionGuideInput, type PolishStoryDirectionIdeaInput } from './ai/StoryDirectionAI'
 
+// Renderer/business AI workflow facade. The name is kept for existing imports;
+// conceptually this orchestrates feature-specific AI helpers, while the
+// main-process AITransportService owns credentials and HTTP transport.
 export class AIService {
   private readonly chapterReviewAI: ChapterReviewAI
   private readonly generationPipelineAI: GenerationPipelineAI
@@ -139,3 +142,5 @@ export class AIService {
     return context
   }
 }
+
+export { AIService as AIWorkflowService }

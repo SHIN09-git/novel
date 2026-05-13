@@ -10,6 +10,7 @@ const tests = [
   ['validate-app-data.mjs', 'tmp/rc-regression/novel-director-data.json'],
   ['validate-ai-modules.mjs'],
   ['validate-ai-schema-validator.mjs'],
+  ['validate-ai-retry-backoff.mjs'],
   ['validate-revision-merge.mjs'],
   ['validate-revision-writeback.mjs'],
   ['validate-revision-contract.mjs'],
@@ -37,6 +38,7 @@ const tests = [
   ['validate-sqlite-storage.mjs'],
   ['validate-prompt-compression-replacement.mjs'],
   ['validate-prompt-priority-stack.mjs'],
+  ['validate-foreshadowing-prompt-limit.mjs'],
   ['validate-writing-prompt-hygiene.mjs'],
   ['validate-novelty-guardrails.mjs'],
   ['validate-app-view-rendering-and-styles.mjs'],
@@ -44,6 +46,9 @@ const tests = [
   ['validate-lazy-views-and-scoped-styles.mjs'],
   ['validate-electron-security-p0.mjs'],
   ['validate-architecture-p2.mjs'],
+  ['validate-core-modularization.mjs'],
+  ['validate-release-p0-readiness.mjs'],
+  ['validate-no-mojibake.mjs'],
   ['validate-public-release-cleanup.mjs']
 ]
 

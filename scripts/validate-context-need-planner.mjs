@@ -220,10 +220,24 @@ async function main() {
   checks.push(assert(actionPlan.requiredForeshadowingIds.includes('fs-payoff'), 'payoff foreshadowing is required when allowed', actionPlan.requiredForeshadowingIds))
 
   const sourceFiles = {
-    types: await readFile(join(root, 'src/shared/types.ts'), 'utf-8'),
-    defaults: await readFile(join(root, 'src/shared/defaults.ts'), 'utf-8'),
-    promptBuilder: await readFile(join(root, 'src/services/PromptBuilderService.ts'), 'utf-8'),
-    runner: await readFile(join(root, 'src/renderer/src/views/generation/usePipelineRunner.ts'), 'utf-8'),
+    types: [
+      await readFile(join(root, 'src/shared/types.ts'), 'utf-8'),
+      await readFile(join(root, 'src/shared/types/appData.ts'), 'utf-8'),
+      await readFile(join(root, 'src/shared/types/generation.ts'), 'utf-8')
+    ].join('\n'),
+    defaults: [
+      await readFile(join(root, 'src/shared/defaults.ts'), 'utf-8'),
+      await readFile(join(root, 'src/shared/normalizers/appData.ts'), 'utf-8')
+    ].join('\n'),
+    promptBuilder: [
+      await readFile(join(root, 'src/services/PromptBuilderService.ts'), 'utf-8'),
+      await readFile(join(root, 'src/services/promptFormatters/characterFormatters.ts'), 'utf-8')
+    ].join('\n'),
+    runner: [
+      await readFile(join(root, 'src/renderer/src/views/generation/usePipelineRunner.ts'), 'utf-8'),
+      await readFile(join(root, 'src/renderer/src/views/generation/usePipelineRunnerCore.ts'), 'utf-8'),
+      await readFile(join(root, 'src/renderer/src/views/generation/pipelineUtils.ts'), 'utf-8')
+    ].join('\n'),
     promptView: await readFile(join(root, 'src/renderer/src/views/PromptBuilderView.tsx'), 'utf-8')
   }
   checks.push(assert(sourceFiles.types.includes('contextNeedPlans: ContextNeedPlan[]'), 'AppData includes contextNeedPlans'))

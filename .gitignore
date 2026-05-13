@@ -16,6 +16,7 @@ tmp/
 # Generated launchers, packaged apps, and local release artifacts
 dist-launcher/
 release/
+release-*/
 releases/
 *.exe
 *.msi

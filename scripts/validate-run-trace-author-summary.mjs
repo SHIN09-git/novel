@@ -151,7 +151,10 @@ async function main() {
   const sqliteModule = await bundle('src/storage/SqliteStorageService.ts', 'sqlite-storage.mjs')
   const jsonModule = await bundle('src/storage/JsonStorageService.ts', 'json-storage.mjs')
   const panelSource = await read('src/renderer/src/components/pipeline/PipelineTracePanel.tsx')
-  const fullPanelSource = await read('src/renderer/src/views/generation/RunTracePanel.tsx')
+  const fullPanelSource = [
+    await read('src/renderer/src/views/generation/RunTracePanel.tsx'),
+    await read('src/renderer/src/views/generation/RunTraceAuthorSummaryCard.tsx')
+  ].join('\n')
   const runTests = await read('scripts/run-tests.mjs')
 
   const data = defaultsModule.normalizeAppData(makeData())

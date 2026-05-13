@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { createEmptyBible } from '../../../shared/defaults'
-import type { ID, Project } from '../../../shared/types'
+import type { AppData, ID, Project } from '../../../shared/types'
 import { useConfirm } from '../components/ConfirmDialog'
 import { EmptyState, TextArea, TextInput } from '../components/FormFields'
 import { Header, type View } from '../components/Layout'
@@ -10,9 +10,11 @@ import type { PersistProps } from './viewTypes'
 export function HomeView({
   data,
   saveData,
+  replaceData,
   setProjectId,
   setView
 }: PersistProps & {
+  replaceData: (next: AppData, nextStoragePath?: string) => Promise<void>
   setProjectId: (id: ID) => void
   setView: (view: View) => void
 }) {
@@ -26,6 +28,7 @@ export function HomeView({
     style: ''
   })
   const [editing, setEditing] = useState<Project | null>(null)
+  const [importError, setImportError] = useState<string | null>(null)
 
   async function createProject() {
     if (!draft.name.trim()) return
@@ -49,6 +52,22 @@ export function HomeView({
     setDraft({ name: '', genre: '', description: '', targetReaders: '', coreAppeal: '', style: '' })
     setProjectId(project.id)
     setView('dashboard')
+  }
+
+  async function importExistingData() {
+    try {
+      setImportError(null)
+      const result = await window.novelDirector.data.import()
+      if (result.canceled || !result.data) return
+      await replaceData(result.data, result.storagePath)
+      const firstProject = result.data.projects[0]
+      if (firstProject) {
+        setProjectId(firstProject.id)
+        setView('dashboard')
+      }
+    } catch (error) {
+      setImportError(error instanceof Error ? error.message : String(error))
+    }
   }
 
   async function saveProjectEdit() {
@@ -131,11 +150,21 @@ export function HomeView({
           <button className="primary-button" onClick={createProject}>
             创建并进入工作台
           </button>
+          <button className="ghost-button" type="button" onClick={importExistingData}>
+            导入旧数据 JSON
+          </button>
+          {importError ? <p className="notice danger">导入失败：{importError}</p> : null}
         </div>
         <div className="panel project-list-panel">
           <h2>项目列表</h2>
           {data.projects.length === 0 ? (
-            <EmptyState title="还没有小说项目" description="创建一个项目后，就可以维护小说圣经、章节复盘和 Prompt 上下文。" />
+            <div className="stack">
+              <EmptyState title="还没有小说项目" description="创建新项目，或导入旧版 JSON 数据文件继续工作。" />
+              <button className="ghost-button" type="button" onClick={importExistingData}>
+                导入旧数据 JSON
+              </button>
+              {importError ? <p className="notice danger">导入失败：{importError}</p> : null}
+            </div>
           ) : (
             <div className="project-list">
               {data.projects.map((project) => (

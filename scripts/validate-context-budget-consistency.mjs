@@ -29,13 +29,39 @@ async function main() {
   const checks = []
   const { createPipelinePromptConfigFromSelection } = await loadTsModule('src/renderer/src/utils/contextSelectionConfig.ts')
   const promptContextSource = await readFile(join(root, 'src', 'renderer', 'src', 'utils', 'promptContext.ts'), 'utf-8')
-  const promptBuilderSource = await readFile(join(root, 'src', 'services', 'PromptBuilderService.ts'), 'utf-8')
-  const pipelineRunnerSource = await readFile(
+  const promptBuilderSource = [
+    await readFile(join(root, 'src', 'services', 'PromptBuilderService.ts'), 'utf-8'),
+    await readFile(join(root, 'src', 'services', 'promptFormatters', 'chapterFormatters.ts'), 'utf-8'),
+    await readFile(join(root, 'src', 'services', 'promptFormatters', 'characterFormatters.ts'), 'utf-8'),
+    await readFile(join(root, 'src', 'services', 'promptFormatters', 'foreshadowingFormatters.ts'), 'utf-8'),
+    await readFile(join(root, 'src', 'services', 'promptFormatters', 'promptUtils.ts'), 'utf-8')
+  ].join('\n')
+  const pipelineRunnerFacadeSource = await readFile(
     join(root, 'src', 'renderer', 'src', 'views', 'generation', 'usePipelineRunner.ts'),
     'utf-8'
   )
-  const typesSource = await readFile(join(root, 'src', 'shared', 'types.ts'), 'utf-8')
-  const budgetManagerSource = await readFile(join(root, 'src', 'services', 'ContextBudgetManager.ts'), 'utf-8')
+  const pipelineRunnerCoreSource = await readFile(
+    join(root, 'src', 'renderer', 'src', 'views', 'generation', 'usePipelineRunnerCore.ts'),
+    'utf-8'
+  )
+  const pipelineRunnerSource = [
+    pipelineRunnerFacadeSource,
+    pipelineRunnerCoreSource,
+    await readFile(join(root, 'src', 'renderer', 'src', 'views', 'generation', 'pipelineRunnerEngine.ts'), 'utf-8'),
+    await readFile(join(root, 'src', 'renderer', 'src', 'views', 'generation', 'pipelineSteps', 'contextPlanning.ts'), 'utf-8'),
+    await readFile(join(root, 'src', 'renderer', 'src', 'views', 'generation', 'pipelineSteps', 'chapterGeneration.ts'), 'utf-8')
+  ].join('\n')
+  const typesSource = [
+    await readFile(join(root, 'src', 'shared', 'types.ts'), 'utf-8'),
+    await readFile(join(root, 'src', 'shared', 'types', 'context.ts'), 'utf-8'),
+    await readFile(join(root, 'src', 'shared', 'types', 'appData.ts'), 'utf-8')
+  ].join('\n')
+  const budgetManagerSource = [
+    await readFile(join(root, 'src', 'services', 'ContextBudgetManager.ts'), 'utf-8'),
+    await readFile(join(root, 'src', 'services', 'contextBudget', 'selectionEngine.ts'), 'utf-8'),
+    await readFile(join(root, 'src', 'services', 'contextBudget', 'scoringEngine.ts'), 'utf-8'),
+    await readFile(join(root, 'src', 'services', 'contextBudget', 'traceBuilder.ts'), 'utf-8')
+  ].join('\n')
 
   const modules = {
     bible: true,
@@ -122,7 +148,8 @@ async function main() {
     assert(
       pipelineRunnerSource.includes('buildPipelineContextResultFromSelection(') &&
         pipelineRunnerSource.includes('budgetSelection') &&
-        pipelineRunnerSource.includes('const selectedCharacterIds = snapshot ? snapshot.selectedCharacterIds : budgetSelection?.selectedCharacterIds') &&
+        (pipelineRunnerSource.includes('const selectedCharacterIds = snapshot ? snapshot.selectedCharacterIds : budgetSelection?.selectedCharacterIds') ||
+          pipelineRunnerSource.includes('const selectedCharacterIds = snapshot ? snapshot.selectedCharacterIds : state.budgetSelection?.selectedCharacterIds')) &&
         pipelineRunnerSource.includes('selectedForeshadowingIds,') &&
         pipelineRunnerSource.includes('promptBlockOrder'),
       'GenerationPipelineView builds prompt context and Run Trace from the same budget selection'

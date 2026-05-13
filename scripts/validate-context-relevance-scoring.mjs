@@ -41,6 +41,10 @@ async function loadModules() {
     'src/services/TokenEstimator.ts',
     'src/services/StageSummaryService.ts',
     'src/services/ContextCompressionService.ts',
+    'src/services/contextBudget/types.ts',
+    'src/services/contextBudget/scoringEngine.ts',
+    'src/services/contextBudget/selectionEngine.ts',
+    'src/services/contextBudget/traceBuilder.ts',
     'src/services/ContextBudgetManager.ts'
   ])
   return import(`${pathToFileURL(join(outDir, 'src/services/ContextBudgetManager.mjs')).href}?t=${Date.now()}`)
