@@ -49,6 +49,8 @@ async function main() {
   const validator = await loadTsModule('src/services/ai/AISchemaValidator.ts')
   const clientSource = await readFile(join(root, 'src', 'services', 'ai', 'AIClient.ts'), 'utf-8')
   const normalizerSource = await readFile(join(root, 'src', 'services', 'ai', 'AIResponseNormalizer.ts'), 'utf-8')
+  const qualityGatePolicySource = await readFile(join(root, 'src', 'shared', 'qualityGatePolicy.ts'), 'utf-8')
+  const qualityGateServiceSource = await readFile(join(root, 'src', 'services', 'QualityGateService.ts'), 'utf-8')
   const chapterReviewSource = await readFile(join(root, 'src', 'services', 'ai', 'ChapterReviewAI.ts'), 'utf-8')
   const pipelineSource = await readFile(join(root, 'src', 'services', 'ai', 'GenerationPipelineAI.ts'), 'utf-8')
   const qualitySource = await readFile(join(root, 'src', 'services', 'ai', 'QualityGateAI.ts'), 'utf-8')
@@ -286,9 +288,10 @@ async function main() {
     assert(
       qualitySource.includes('score < 50') &&
         qualitySource.includes('score < 80') &&
-        normalizerSource.includes('overallScore >= 50') &&
-        (await readFile(join(root, 'src', 'services', 'QualityGateService.ts'), 'utf-8')).includes('QUALITY_GATE_PASS_SCORE = 50') &&
-        (await readFile(join(root, 'src', 'services', 'QualityGateService.ts'), 'utf-8')).includes('QUALITY_GATE_HUMAN_REVIEW_SCORE = 80'),
+        normalizerSource.includes('QUALITY_GATE_PASS_SCORE') &&
+        qualityGatePolicySource.includes('QUALITY_GATE_PASS_SCORE = 50') &&
+        qualityGatePolicySource.includes('QUALITY_GATE_HUMAN_REVIEW_SCORE = 80') &&
+        qualityGateServiceSource.includes('shouldQualityGateRequireHumanReview(report)'),
       'quality gate pass threshold is 50 and human review threshold is 80'
     )
   )

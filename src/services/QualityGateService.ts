@@ -16,14 +16,17 @@ import type {
 import { TokenEstimator } from './TokenEstimator'
 import { analyzeRedundancy } from './RedundancyService'
 import { NoveltyDetector } from './NoveltyDetector'
+import {
+  QUALITY_GATE_HUMAN_REVIEW_SCORE,
+  QUALITY_GATE_PASS_SCORE,
+  shouldQualityGateRequireHumanReview
+} from '../shared/qualityGatePolicy'
+export { QUALITY_GATE_HUMAN_REVIEW_SCORE, QUALITY_GATE_PASS_SCORE } from '../shared/qualityGatePolicy'
 
 export type QualityGateEvaluation = Pick<
   QualityGateReport,
   'overallScore' | 'pass' | 'dimensions' | 'issues' | 'requiredFixes' | 'optionalSuggestions'
 >
-
-export const QUALITY_GATE_PASS_SCORE = 50
-export const QUALITY_GATE_HUMAN_REVIEW_SCORE = 80
 
 interface QualityGateAI {
   generateQualityGateReport(
@@ -486,16 +489,7 @@ export class QualityGateService {
   }
 
   static shouldRequireHumanReview(report: QualityGateReport): boolean {
-    return (
-      !report.pass ||
-      report.overallScore < QUALITY_GATE_HUMAN_REVIEW_SCORE ||
-      report.dimensions.characterConsistency < 70 ||
-      report.dimensions.characterStateConsistency < 70 ||
-      report.dimensions.foreshadowingControl < 70 ||
-      report.dimensions.chapterContinuity < 70 ||
-      report.dimensions.contextRelevanceCompliance < 70 ||
-      report.issues.some((issue) => issue.severity === 'high')
-    )
+    return shouldQualityGateRequireHumanReview(report)
   }
 
   static generateRevisionInstructions(report: QualityGateReport): string[] {

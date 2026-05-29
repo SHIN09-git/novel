@@ -3,11 +3,11 @@ import { ContextBudgetManager } from '../../../../../services/ContextBudgetManag
 import { CharacterStateService } from '../../../../../services/CharacterStateService'
 import { TokenEstimator } from '../../../../../services/TokenEstimator'
 import { inferPromptBlockOrderFromPrompt } from '../../../../../services/PromptBuilderService'
+import { PromptLintService } from '../../../../../services/PromptLintService'
 import { formatContinuityBridgeForPrompt, resolveContinuityBridge } from '../../../../../services/ContinuityService'
-import { analyzeRedundancy } from '../../../../../services/RedundancyService'
-import { NoveltyDetector } from '../../../../../services/NoveltyDetector'
 import { PlanContextGapAnalyzerService } from '../../../../../services/PlanContextGapAnalyzerService'
 import { newId, now } from '../../../utils/format'
+import { analyzeRedundancyDiagnostic, auditNoveltyDiagnostic } from '../../../utils/diagnosticsApi'
 import { buildPipelineContextResultFromSelection, createContextBudgetProfile, selectBudgetContext } from '../../../utils/promptContext'
 import { buildForeshadowingTreatmentModes, estimateForcedContextTokens, upsertGenerationRunTrace } from '../../../utils/runTrace'
 import {
@@ -139,9 +139,14 @@ export function runRebuildContextWithPlanStep(ctx: PipelineStepHandlerContext) {
   const { project } = env
   let promptBlockOrder: PromptBlockOrderItem[] = []
   let hardCanonTrace = { itemCount: 0, tokenEstimate: 0, includedItemIds: [] as ID[], truncatedItemIds: [] as ID[] }
+  let promptLintWarnings: string[] = []
+  let promptLintIssueCount = 0
   if (job.contextSource === 'prompt_snapshot') {
     if (!snapshot) throw new Error('Prompt 上下文快照已丢失，请重新构建上下文。')
-    state.context = snapshot.finalPrompt
+    const lintGuard = PromptLintService.guardWritingPrompt(snapshot.finalPrompt)
+    state.context = lintGuard.guardedPrompt
+    promptLintWarnings = lintGuard.result.warnings
+    promptLintIssueCount = lintGuard.result.issueCount
     promptBlockOrder = inferPromptBlockOrderFromPrompt(state.context, 'prompt_context_snapshot')
     state.rebuiltContextFromPlan = true
   } else {
@@ -159,6 +164,8 @@ export function runRebuildContextWithPlanStep(ctx: PipelineStepHandlerContext) {
     )
     state.context = promptResult.finalPrompt
     promptBlockOrder = promptResult.promptBlockOrder
+    promptLintWarnings = promptResult.promptLintResult.warnings
+    promptLintIssueCount = promptResult.promptLintResult.issueCount
     hardCanonTrace = {
       itemCount: promptResult.hardCanonPrompt?.itemCount ?? 0,
       tokenEstimate: promptResult.hardCanonPrompt?.tokenEstimate ?? 0,
@@ -240,7 +247,7 @@ export function runRebuildContextWithPlanStep(ctx: PipelineStepHandlerContext) {
       selectedForeshadowingIds,
       selectedTimelineEventIds,
       includedCharacterStateFactIds: includedCharacterStateFacts.map((fact) => fact.id),
-      warnings: [...(state.budgetSelection?.warnings ?? []), ...continuityResult.warnings, ...(state.planGapAnalysis?.warnings ?? [])]
+      warnings: [...(state.budgetSelection?.warnings ?? []), ...continuityResult.warnings, ...(state.planGapAnalysis?.warnings ?? []), ...promptLintWarnings]
     })
   })
   state.working = upsertGenerationRunTrace(state.working, job, {
@@ -260,6 +267,7 @@ export function runRebuildContextWithPlanStep(ctx: PipelineStepHandlerContext) {
       ...(state.budgetSelection?.warnings ?? []),
       ...continuityResult.warnings,
       ...(state.planGapAnalysis?.warnings ?? []),
+      ...promptLintWarnings,
       ...(snapshot && snapshot.targetChapterOrder !== options.targetChapterOrder
         ? [`快照目标为第 ${snapshot.targetChapterOrder} 章，流水线目标为第 ${options.targetChapterOrder} 章。`]
         : [])
@@ -269,6 +277,8 @@ export function runRebuildContextWithPlanStep(ctx: PipelineStepHandlerContext) {
     compressionRecords: state.budgetSelection?.compressionRecords ?? [],
     promptBlockOrder,
     finalPromptTokenEstimate,
+    promptLintWarnings,
+    promptLintIssueCount,
     continuityBridgeId: continuityResult.bridge?.id ?? null,
     continuitySource: continuityResult.source,
     continuityWarnings: continuityResult.warnings,
@@ -329,7 +339,7 @@ export async function runGenerateChapterDraftStep(ctx: PipelineStepHandlerContex
     throw new Error(`${validationError} 请重试，或提高设置页 Max Tokens。`)
   }
   state.draftResult = result.data
-  state.noveltyAuditResult = NoveltyDetector.audit({
+  state.noveltyAuditResult = await auditNoveltyDiagnostic({
     generatedText: result.data.body,
     context: state.context,
     chapterPlan: state.plan
@@ -347,7 +357,7 @@ export async function runGenerateChapterDraftStep(ctx: PipelineStepHandlerContex
     createdAt: now(),
     updatedAt: now()
   }
-  const redundancyReport = analyzeRedundancy({
+  const redundancyReport = await analyzeRedundancyDiagnostic({
     projectId: project.id,
     chapterId: null,
     draftId: draft.id,

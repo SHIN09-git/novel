@@ -117,7 +117,7 @@ async function main() {
   checks.push(
     assert(
       runnerSource.includes('noveltyAuditResult') &&
-        runnerSource.includes('NoveltyDetector.audit') &&
+        runnerSource.includes('auditNoveltyDiagnostic') &&
         runnerSource.includes('noveltyWarnings') &&
         runnerSource.includes('noveltyAdjustedConfidence'),
       'pipeline stores novelty audit and marks memory candidates with novelty warnings'
@@ -213,6 +213,28 @@ async function main() {
     chapterPlan: strictPlan
   })
   checks.push(assert(costlyRuleAudit.severity === 'warning', 'unauthorized but costly new rule is downgraded to review warning, not hard fail', costlyRuleAudit))
+
+  const openingRuleAudit = NoveltyDetector.audit({
+    generatedText:
+      '\u516c\u544a\u724c\u4e0a\u5199\u7740\u65b0\u526f\u672c\u89c4\u5219\uff1a\u624b\u52a8\u8bc4\u5b9a\u53ef\u4ee5\u5f00\u542f\uff0c\u4f46\u6bcf\u6b21\u4f7f\u7528\u90fd\u9700\u8981\u5931\u53bb\u4e00\u6b21\u6295\u7968\u8d44\u683c\u3002',
+    context: '\u4e3b\u89d2\u521a\u8fdb\u5165\u65b0\u526f\u672c\u95e8\u5385\u3002',
+    chapterPlan: {
+      ...strictPlan,
+      chapterGoal: '\u65b0\u526f\u672c\u5f00\u573a\uff0c\u901a\u8fc7\u516c\u544a\u5448\u73b0\u5165\u573a\u89c4\u5219',
+      allowedNovelty: '\u5141\u8bb8\u65b0\u589e\u526f\u672c\u89c4\u5219\uff1a\u624b\u52a8\u8bc4\u5b9a\uff0c\u5fc5\u987b\u901a\u8fc7\u516c\u544a\u5448\u73b0\u5e76\u5e26\u6765\u4ee3\u4ef7',
+      forbiddenNovelty: ''
+    }
+  })
+  checks.push(assert(openingRuleAudit.severity === 'pass', 'new instance opening rule through an in-world medium with cost is not escalated', openingRuleAudit))
+
+  const climaxPatchAudit = NoveltyDetector.audit({
+    generatedText:
+      '\u7cfb\u7edf\u9762\u677f\u7a81\u7136\u5f39\u51fa\u8865\u5145\u6761\u6b3e\uff1a\u6838\u5fc3\u5355\u5143\u53ef\u7acb\u5373\u5f3a\u5236\u653e\u884c\uff0c\u6240\u6709\u60e9\u7f5a\u8c41\u514d\u3002',
+    context: '\u5df2\u77e5\u89c4\u5219\uff1a\u53ea\u80fd\u4f7f\u7528\u5df2\u6709\u8eab\u4efd\u901a\u8fc7\u95e8\u7981\u3002',
+    chapterPlan: { ...strictPlan, chapterGoal: '\u9ad8\u6f6e\u89e3\u6cd5\u7ae0\uff0c\u4e3b\u89d2\u5fc5\u987b\u5229\u7528\u5df2\u6709\u89c4\u5219\u8131\u56f0' }
+  })
+  checks.push(assert(climaxPatchAudit.severity === 'fail', 'climax solution still fails unearned rescue patches', climaxPatchAudit))
+  checks.push(assert(climaxPatchAudit.suspiciousDeusExRules.length > 0, 'climax rescue patches remain classified as deus-ex findings even when presented as system UI', climaxPatchAudit))
 
   const allowedNameAudit = NoveltyDetector.audit({
     generatedText: '\u95e8\u540e\u7684\u5973\u5b69\u540d\u53eb\u6797\u5c0f\u96e8\uff0c\u5979\u662f\u4efb\u52a1\u4e66\u5141\u8bb8\u51fa\u573a\u7684\u65b0\u89d2\u8272\u3002',

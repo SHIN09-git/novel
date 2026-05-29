@@ -24,6 +24,7 @@ import { ContextBudgetManager } from '../../../services/ContextBudgetManager'
 import { ContextNeedPlannerService } from '../../../services/ContextNeedPlannerService'
 import { endingExcerpt, resolveContinuityBridge } from '../../../services/ContinuityService'
 import { PromptBuilderService } from '../../../services/PromptBuilderService'
+import { PromptLintService } from '../../../services/PromptLintService'
 import { StoryDirectionService } from '../../../services/StoryDirectionService'
 import { TokenEstimator } from '../../../services/TokenEstimator'
 import { useConfirm } from '../components/ConfirmDialog'
@@ -241,6 +242,7 @@ export function PromptBuilderView({ data, project, saveData, onSendToPipeline }:
 
   async function savePromptVersion() {
     if (!prompt.trim()) return
+    const guardedPrompt = PromptLintService.guardWritingPrompt(prompt).guardedPrompt
     await saveData((current) => ({
       ...current,
       promptVersions: [
@@ -250,8 +252,8 @@ export function PromptBuilderView({ data, project, saveData, onSendToPipeline }:
           targetChapterOrder,
           title: `第 ${targetChapterOrder} 章 ${modeLabel(mode)} ${formatDate(now())}`,
           mode,
-          content: prompt,
-          tokenEstimate,
+          content: guardedPrompt,
+          tokenEstimate: TokenEstimator.estimate(guardedPrompt),
           moduleSelection: modules,
           task,
           createdAt: now()
@@ -263,7 +265,7 @@ export function PromptBuilderView({ data, project, saveData, onSendToPipeline }:
 
   async function saveContextSnapshot(source: PromptContextSnapshotSource = 'manual'): Promise<PromptContextSnapshot | null> {
     const result = buildPromptResult()
-    const finalPrompt = prompt.trim() ? prompt : result.finalPrompt
+    const finalPrompt = PromptLintService.guardWritingPrompt(prompt.trim() ? prompt : result.finalPrompt).guardedPrompt
     if (!finalPrompt.trim()) return null
     const timestamp = now()
     const snapshot: PromptContextSnapshot = {
@@ -297,7 +299,7 @@ export function PromptBuilderView({ data, project, saveData, onSendToPipeline }:
         ? current.contextBudgetProfiles
         : [budgetProfile, ...current.contextBudgetProfiles]
     }))
-    if (!prompt.trim()) setPrompt(finalPrompt)
+    if (!prompt.trim() || finalPrompt !== prompt) setPrompt(finalPrompt)
     return snapshot
   }
 

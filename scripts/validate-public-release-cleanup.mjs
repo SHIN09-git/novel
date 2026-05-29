@@ -33,6 +33,8 @@ const requiredFiles = [
   'CONTRIBUTING.md',
   'CHANGELOG.md',
   'THIRD_PARTY_NOTICES.md',
+  'docs/BEGINNER_TUTORIAL.md',
+  'docs/OPEN_SOURCE_GUIDE.md',
   'docs/UI_NOTES.md',
   '.github/workflows/ci.yml'
 ]
@@ -62,6 +64,13 @@ check('README mentions MIT license', /MIT License|MIT/i.test(readme))
 check('README documents privacy boundary', /Privacy and Local Data Boundary/.test(readme))
 check('README documents AI provider boundary', /AI Provider Setup/.test(readme) && /provider/i.test(readme))
 check('README declares synthetic test data', /Synthetic Test Data/.test(readme) && /雾城测试稿/.test(readme))
+check('README links beginner tutorial and open source guide', /BEGINNER_TUTORIAL\.md/.test(readme) && /OPEN_SOURCE_GUIDE\.md/.test(readme))
+
+const beginnerTutorial = read('docs/BEGINNER_TUTORIAL.md')
+check('beginner tutorial is bilingual and covers first-run workflow', /新手教程/.test(beginnerTutorial) && /Beginner Tutorial/.test(beginnerTutorial) && /质量门禁/.test(beginnerTutorial) && /Quality Gate/.test(beginnerTutorial))
+
+const openSourceGuide = read('docs/OPEN_SOURCE_GUIDE.md')
+check('open source guide documents repository boundaries', /仓库不应包含什么/.test(openSourceGuide) && /What the Repository Should Not Contain/.test(openSourceGuide))
 
 const testing = read('TESTING.md')
 check('TESTING declares fixture text synthetic', /synthetic test data/i.test(testing) && /雾城测试稿/.test(testing))

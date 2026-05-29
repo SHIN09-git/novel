@@ -81,6 +81,29 @@ contains(app, "import { ErrorBoundary } from './components/ErrorBoundary'", 'App
 contains(app, '<ErrorBoundary', 'Current view rendering must be wrapped by ErrorBoundary.')
 contains(app, '<Suspense', 'Lazy views must still be rendered inside Suspense.')
 
+const bridgePath = 'src/renderer/src/platform/novelDirectorBridge.ts'
+assert(existsSync(join(root, bridgePath)), 'renderer bridge accessor must exist.')
+const bridge = read(bridgePath)
+contains(bridge, 'getNovelDirectorBridge', 'renderer bridge accessor must expose getNovelDirectorBridge().')
+contains(bridge, '应用桥接未加载', 'renderer bridge accessor must provide a user-readable missing bridge error.')
+contains(bridge, 'getNovelDirectorDataApi', 'renderer bridge accessor must expose grouped data API access.')
+contains(bridge, 'getNovelDirectorAppApi', 'renderer bridge accessor must expose grouped app API access.')
+
+const settingsApiPath = 'src/renderer/src/settings/settingsApi.ts'
+assert(existsSync(join(root, settingsApiPath)), 'Settings IPC facade must exist.')
+const settingsApi = read(settingsApiPath)
+contains(settingsApi, "from '../platform/novelDirectorBridge'", 'Settings IPC facade must use the guarded bridge accessor.')
+for (const symbol of ['exportAppData', 'importAppData', 'migrateStoragePath', 'createBackup', 'restoreBackup', 'getLogPath']) {
+  contains(settingsApi, `function ${symbol}`, `Settings IPC facade must export ${symbol}().`)
+}
+
+const credentialApi = read('src/renderer/src/settings/credentialApi.ts')
+contains(credentialApi, 'getNovelDirectorCredentialsApi', 'Credential API must use the guarded bridge accessor.')
+
+const settingsView = read('src/renderer/src/views/SettingsView.tsx')
+assert(!settingsView.includes('window.novelDirector'), 'SettingsView must not call window.novelDirector directly.')
+contains(settingsView, "from '../settings/settingsApi'", 'SettingsView must depend on settingsApi facade.')
+
 const styles = read('src/renderer/src/styles/components.css')
 contains(styles, '.error-boundary', 'ErrorBoundary styles must exist.')
 contains(styles, '.view-error-boundary', 'View-level ErrorBoundary styles must exist.')

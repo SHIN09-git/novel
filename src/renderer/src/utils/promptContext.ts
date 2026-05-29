@@ -1,11 +1,12 @@
 import { defaultModulesForMode } from '../../../shared/defaults'
 import { shouldRecommendForeshadowing } from '../../../shared/foreshadowingTreatment'
-import type { AppData, BuildPromptResult, ChapterTask, Character, ContextBudgetMode, ContextBudgetProfile, ContextNeedPlan, ContextSelectionResult, Foreshadowing, ForeshadowingTreatmentMode, ID, Project, StoryDirectionGuide } from '../../../shared/types'
+import type { AppData, BuildPromptResult, ChapterTask, Character, ContextBudgetProfile, ContextNeedPlan, ContextSelectionResult, Foreshadowing, ForeshadowingTreatmentMode, ID, Project, StoryDirectionGuide } from '../../../shared/types'
 import { ContextBudgetManager } from '../../../services/ContextBudgetManager'
 import { parseChapterNumbersFromText, PromptBuilderService } from '../../../services/PromptBuilderService'
 import { createPipelinePromptConfigFromSelection } from './contextSelectionConfig'
-import { newId, now } from './format'
 import { projectData } from './projectData'
+
+export { createContextBudgetProfile } from './contextBudgetProfile'
 
 export function expectedPayoffNearText(text: string, targetChapterOrder: number): boolean {
   const numbers = parseChapterNumbersFromText(text)
@@ -19,33 +20,6 @@ export function recommendedForeshadowings(items: Foreshadowing[], targetChapterO
 export function recommendedCharacters(characters: Character[], foreshadowings: Foreshadowing[]): Character[] {
   const relatedIds = new Set(foreshadowings.flatMap((item) => item.relatedCharacterIds))
   return characters.filter((character) => character.isMain || relatedIds.has(character.id))
-}
-
-export function createContextBudgetProfile(
-  projectId: ID,
-  mode: ContextBudgetMode,
-  maxTokens: number,
-  name = '临时预算方案'
-): ContextBudgetProfile {
-  const timestamp = now()
-  const isLight = mode === 'light'
-  const isFull = mode === 'full'
-  return {
-    id: newId(),
-    projectId,
-    name,
-    maxTokens,
-    mode,
-    includeRecentChaptersCount: isLight ? 2 : isFull ? 5 : 3,
-    includeStageSummariesCount: isLight ? 0 : isFull ? 8 : 2,
-    includeMainCharacters: true,
-    includeRelatedCharacters: !isLight,
-    includeForeshadowingWeights: isLight ? ['high', 'payoff'] : isFull ? ['low', 'medium', 'high', 'payoff'] : ['medium', 'high', 'payoff'],
-    includeTimelineEventsCount: isLight ? 0 : isFull ? 20 : 6,
-    styleSampleMaxChars: isLight ? 600 : isFull ? 2000 : 1200,
-    createdAt: timestamp,
-    updatedAt: timestamp
-  }
 }
 
 export function selectBudgetContext(

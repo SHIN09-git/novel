@@ -215,6 +215,12 @@ export function RunTracePanel({
                 {trace.characterStateWarnings.map((warning) => (
                   <li key={`character-state-${warning}`}>{warning}</li>
                 ))}
+                {trace.promptLintIssueCount > 0 ? (
+                  <li>Prompt Lint：运行时已处理 {trace.promptLintIssueCount} 个写作 Prompt 卫生问题，避免占位符、重复禁令或诊断文字进入正文生成。</li>
+                ) : null}
+                {trace.promptLintWarnings.slice(0, 5).map((warning) => (
+                  <li key={`prompt-lint-${warning}`}>{warning}</li>
+                ))}
                 {trace.noveltyAuditResult ? (
                   <li>
                     新增内容审计：{trace.noveltyAuditResult.severity}，{trace.noveltyAuditResult.summary}

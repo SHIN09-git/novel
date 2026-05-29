@@ -4,6 +4,7 @@ import { ContextNeedPlannerService } from '../../../../../services/ContextNeedPl
 import { CharacterStateService } from '../../../../../services/CharacterStateService'
 import { TokenEstimator } from '../../../../../services/TokenEstimator'
 import { inferPromptBlockOrderFromPrompt } from '../../../../../services/PromptBuilderService'
+import { PromptLintService } from '../../../../../services/PromptLintService'
 import { formatContinuityBridgeForPrompt, resolveContinuityBridge } from '../../../../../services/ContinuityService'
 import { StoryDirectionService } from '../../../../../services/StoryDirectionService'
 import { buildPipelineContextResultFromSelection, createContextBudgetProfile, selectBudgetContext } from '../../../utils/promptContext'
@@ -110,9 +111,14 @@ export function runBuildContextStep(ctx: PipelineStepHandlerContext) {
   const { project } = env
   let promptBlockOrder: PromptBlockOrderItem[] = []
   let hardCanonTrace = { itemCount: 0, tokenEstimate: 0, includedItemIds: [] as ID[], truncatedItemIds: [] as ID[] }
+  let promptLintWarnings: string[] = []
+  let promptLintIssueCount = 0
   if (job.contextSource === 'prompt_snapshot') {
     if (!snapshot) throw new Error('Prompt 上下文快照已丢失，请重新构建上下文。')
-    state.context = snapshot.finalPrompt
+    const lintGuard = PromptLintService.guardWritingPrompt(snapshot.finalPrompt)
+    state.context = lintGuard.guardedPrompt
+    promptLintWarnings = lintGuard.result.warnings
+    promptLintIssueCount = lintGuard.result.issueCount
     promptBlockOrder = inferPromptBlockOrderFromPrompt(state.context, 'prompt_context_snapshot')
   } else {
     if (!state.budgetSelection) {
@@ -134,6 +140,8 @@ export function runBuildContextStep(ctx: PipelineStepHandlerContext) {
     )
     state.context = promptResult.finalPrompt
     promptBlockOrder = promptResult.promptBlockOrder
+    promptLintWarnings = promptResult.promptLintResult.warnings
+    promptLintIssueCount = promptResult.promptLintResult.issueCount
     hardCanonTrace = {
       itemCount: promptResult.hardCanonPrompt?.itemCount ?? 0,
       tokenEstimate: promptResult.hardCanonPrompt?.tokenEstimate ?? 0,
@@ -233,6 +241,7 @@ export function runBuildContextStep(ctx: PipelineStepHandlerContext) {
     contextWarnings: [
       ...(state.budgetSelection?.warnings ?? []),
       ...continuityResult.warnings,
+      ...promptLintWarnings,
       ...(snapshot && snapshot.targetChapterOrder !== options.targetChapterOrder
         ? [`快照目标为第 ${snapshot.targetChapterOrder} 章，流水线目标为第 ${options.targetChapterOrder} 章。`]
         : [])
@@ -242,6 +251,8 @@ export function runBuildContextStep(ctx: PipelineStepHandlerContext) {
     compressionRecords: state.budgetSelection?.compressionRecords ?? [],
     promptBlockOrder,
     finalPromptTokenEstimate,
+    promptLintWarnings,
+    promptLintIssueCount,
     continuityBridgeId: continuityResult.bridge?.id ?? null,
     continuitySource: continuityResult.source,
     continuityWarnings: continuityResult.warnings,

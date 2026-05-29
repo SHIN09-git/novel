@@ -21,9 +21,9 @@ async function main() {
   const appSource = await readFile(join(root, 'src/renderer/src/App.tsx'), 'utf-8')
   const appShellSource = await readFile(join(root, 'src/renderer/src/components/layoutParts/AppShell.tsx'), 'utf-8')
   const mainSource = await readFile(join(root, 'src/renderer/src/main.tsx'), 'utf-8')
-  const stylesSource = await readFile(join(root, 'src/renderer/src/styles.css'), 'utf-8')
   const promptBuilderSource = await readFile(join(root, 'src/renderer/src/views/PromptBuilderView.tsx'), 'utf-8')
   const foreshadowingViewSource = await readFile(join(root, 'src/renderer/src/views/ForeshadowingView.tsx'), 'utf-8')
+  const legacyStylesPath = 'src/renderer/src/styles.css'
   const indexCssPath = 'src/renderer/src/styles/index.css'
   const indexCss = await readFile(join(root, indexCssPath), 'utf-8')
 
@@ -49,10 +49,10 @@ async function main() {
 
   checks.push(
     assert(
-      stylesSource.split(/\r?\n/).filter((line) => line.trim()).length <= 3 &&
+      !(await exists(legacyStylesPath)) &&
         !mainSource.includes("import './styles.css'") &&
         mainSource.includes("import './styles/index.css'"),
-      'styles.css is no longer the giant entry and main imports styles/index.css'
+      'legacy styles.css shim is removed and main imports styles/index.css'
     )
   )
 

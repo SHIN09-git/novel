@@ -32,6 +32,7 @@ import type {
 } from '../../shared/types'
 import type { QualityGateEvaluation } from '../QualityGateService'
 import { normalizeTreatmentMode } from '../../shared/foreshadowingTreatment'
+import { QUALITY_GATE_PASS_SCORE } from '../../shared/qualityGatePolicy'
 
 export function fallbackResult<T>(data: T, error = '未配置 API Key，已生成本地结构化模板。'): AIResult<T> {
   return { ok: true, usedAI: false, data, error }
@@ -488,7 +489,7 @@ export function ensureQualityGateEvaluation(value: unknown): QualityGateEvaluati
   const issues = Array.isArray(obj.issues) ? obj.issues.map(ensureQualityGateIssue) : []
   return {
     overallScore,
-    pass: typeof obj.pass === 'boolean' ? obj.pass : overallScore >= 50 && !issues.some((issue) => issue.severity === 'high'),
+    pass: typeof obj.pass === 'boolean' ? obj.pass : overallScore >= QUALITY_GATE_PASS_SCORE && !issues.some((issue) => issue.severity === 'high'),
     dimensions,
     issues,
     requiredFixes: asStringArray(obj.requiredFixes),

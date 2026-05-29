@@ -5,8 +5,8 @@ import { LogService } from '../LogService'
 import type { TokenBucketRateLimiter } from '../RateLimiter'
 import type { SecureCredentialService } from '../SecureCredentialService'
 import { retryWithBackoff } from '../utils/retry'
+import { describeAiRetryError, isRetryableAiError } from '../utils/aiErrors'
 import { AIHttpClient } from './AIHttpClient'
-import { describeAiRetryError, isRetryableAiError } from './aiErrors'
 
 export interface ValidationResult {
   ok: boolean

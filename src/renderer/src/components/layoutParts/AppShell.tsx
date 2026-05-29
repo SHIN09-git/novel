@@ -2,6 +2,13 @@ import type { ReactNode } from 'react'
 import type { ID, Project } from '../../../../shared/types'
 import { type View, viewLabels } from './types'
 
+const navGroups: Array<{ label: string; items: View[] }> = [
+  { label: '总览', items: ['dashboard'] },
+  { label: '故事资产', items: ['bible', 'chapters', 'characters', 'foreshadowings', 'timeline', 'stages', 'hardCanon', 'direction'] },
+  { label: 'AI 工作流', items: ['prompt', 'pipeline', 'revision'] },
+  { label: '系统', items: ['settings'] }
+]
+
 function IconSvg({ children }: { children: ReactNode }) {
   return (
     <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
@@ -151,23 +158,28 @@ export function Shell({
     <div className="app-shell">
       <aside className="sidebar">
         <div className="brand-mark">
-          <div className="brand-symbol">ND</div>
+          <div className="brand-symbol" aria-hidden="true">ND</div>
           <div>
             <strong>Novel Director</strong>
-            <span>AI 长篇小说工作室</span>
+            <span>长篇小说导演台</span>
           </div>
         </div>
         <div className="project-badge">
-          <span>当前项目</span>
+          <span>当前创作项目</span>
           <strong>{project.name}</strong>
-          <small>{project.genre || '未设置题材'}</small>
+          <small>{project.genre || '未设置题材'}{project.coreAppeal ? ` · ${project.coreAppeal}` : ''}</small>
         </div>
         <nav className="nav-list">
-          {(Object.keys(viewLabels) as View[]).map((item) => (
-            <button key={item} className={item === view ? 'active' : ''} onClick={() => setView(item)}>
-              <span className="nav-icon"><NavIcon view={item} /></span>
-              <span>{viewLabels[item]}</span>
-            </button>
+          {navGroups.map((group) => (
+            <div className="nav-group" key={group.label}>
+              <span className="nav-group-label">{group.label}</span>
+              {group.items.map((item) => (
+                <button key={item} className={item === view ? 'active' : ''} onClick={() => setView(item)}>
+                  <span className="nav-icon"><NavIcon view={item} /></span>
+                  <span>{viewLabels[item]}</span>
+                </button>
+              ))}
+            </div>
           ))}
         </nav>
         <div className="sidebar-footer">
@@ -177,7 +189,23 @@ export function Shell({
           <span>{status || '本地自动保存就绪'}</span>
         </div>
       </aside>
-      <main className="main-panel">{children}</main>
+      <main className="main-panel">
+        <div className="workspace-topbar">
+          <div>
+            <span>Project</span>
+            <strong>{project.name}</strong>
+          </div>
+          <div>
+            <span>Current View</span>
+            <strong>{viewLabels[view]}</strong>
+          </div>
+          <div className="workspace-save-state">
+            <span>Storage</span>
+            <strong>{status || '本地自动保存就绪'}</strong>
+          </div>
+        </div>
+        <div className="workspace-content">{children}</div>
+      </main>
     </div>
   )
 }

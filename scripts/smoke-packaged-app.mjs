@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import { existsSync, rmSync } from 'node:fs'
+import { existsSync, readdirSync, readFileSync, rmSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { spawnSync } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
@@ -13,6 +13,26 @@ const smokeUserData = join(root, 'tmp', 'packaged-smoke-user-data')
 function fail(message) {
   console.error(`Packaged smoke test failed: ${message}`)
   process.exit(1)
+}
+
+function readSmokeStoragePath() {
+  const configPath = join(smokeUserData, 'app-config.json')
+  if (!existsSync(configPath)) return ''
+  try {
+    const config = JSON.parse(readFileSync(configPath, 'utf8'))
+    return typeof config.storagePath === 'string' ? config.storagePath : ''
+  } catch {
+    return ''
+  }
+}
+
+function listSmokeUserDataFiles() {
+  if (!existsSync(smokeUserData)) return ''
+  try {
+    return readdirSync(smokeUserData).join(', ')
+  } catch {
+    return ''
+  }
 }
 
 if (!existsSync(iconPng)) fail('missing build/icon.png')
@@ -50,7 +70,14 @@ if (result.status !== 0) {
 
 const sqlitePath = join(smokeUserData, 'novel-director-data.sqlite')
 if (!existsSync(sqlitePath)) {
-  fail('smoke userData did not create novel-director-data.sqlite')
+  const actualStoragePath = readSmokeStoragePath()
+  if (result.stdout) console.error(result.stdout)
+  if (result.stderr) console.error(result.stderr)
+  fail(
+    `smoke userData did not create novel-director-data.sqlite` +
+      `${actualStoragePath ? `; app storagePath was ${actualStoragePath}` : ''}` +
+      `${listSmokeUserDataFiles() ? `; userData files: ${listSmokeUserDataFiles()}` : ''}`
+  )
 }
 
 console.log('Packaged smoke test passed.')

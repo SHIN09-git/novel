@@ -50,6 +50,7 @@ async function loadPromptBuilder() {
     'src/services/ContextBudgetManager.ts',
     'src/services/StoryDirectionService.ts',
     'src/services/HardCanonPackService.ts',
+    'src/services/PromptLintService.ts',
     'src/services/promptFormatters/chapterFormatters.ts',
     'src/services/promptFormatters/characterFormatters.ts',
     'src/services/promptFormatters/foreshadowingFormatters.ts',

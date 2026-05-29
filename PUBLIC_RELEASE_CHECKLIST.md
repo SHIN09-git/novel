@@ -18,6 +18,8 @@
 - 移除已跟踪的 `ui-audit/screenshots/**`。
 - 声明 fixture 文本和 `《雾城测试稿》` / `Fog City Test Draft` 均为 synthetic test data。
 - 强化 `README.md`，补充项目状态、许可证、贡献、安全、隐私、AI provider 边界和构建产物说明。
+- 添加 `docs/BEGINNER_TUTORIAL.md`，作为作者第一次使用的完整教程。
+- 添加 `docs/OPEN_SOURCE_GUIDE.md`，说明仓库边界、发布二进制和开源贡献规则。
 - 添加 GitHub Actions CI workflow。
 - 添加 `CHANGELOG.md`。
 - 添加 `THIRD_PARTY_NOTICES.md`。
@@ -57,6 +59,8 @@ This checklist records the repository-local checks before the first public sourc
 - Removed tracked `ui-audit/screenshots/**`.
 - Declared fixture text and `《雾城测试稿》` / `Fog City Test Draft` as synthetic test data.
 - Strengthened `README.md` with status, license, contribution, security, privacy, AI provider boundary, and build artifact notes.
+- Added `docs/BEGINNER_TUTORIAL.md` as a full first-use tutorial for authors.
+- Added `docs/OPEN_SOURCE_GUIDE.md` to document repository boundaries, binary releases, and open-source contribution rules.
 - Added GitHub Actions CI workflow.
 - Added `CHANGELOG.md`.
 - Added `THIRD_PARTY_NOTICES.md`.

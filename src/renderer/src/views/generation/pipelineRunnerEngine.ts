@@ -10,29 +10,7 @@ import type {
   PlanContextGapAnalysisResult
 } from '../../../../shared/types'
 import { StoryDirectionService } from '../../../../services/StoryDirectionService'
-import { createContextBudgetProfile } from '../../utils/promptContext'
-import {
-  runBuildContextStep,
-  runContextBudgetSelectionStep,
-  runContextNeedPlanningStep
-} from './pipelineSteps/contextPlanning'
-import {
-  runContextBudgetDeltaStep,
-  runGenerateChapterDraftStep,
-  runGenerateChapterPlanStep,
-  runPlanContextNeedStep,
-  runRebuildContextWithPlanStep
-} from './pipelineSteps/chapterGeneration'
-import {
-  runChapterReviewStep,
-  runCharacterUpdateExtractionStep,
-  runForeshadowingUpdateExtractionStep
-} from './pipelineSteps/memoryExtraction'
-import {
-  runAwaitUserConfirmationStep,
-  runConsistencyReviewStep,
-  runQualityGateStep
-} from './pipelineSteps/qualityCheck'
+import { createContextBudgetProfile } from '../../utils/contextBudgetProfile'
 import {
   PIPELINE_STEP_ORDER,
   normalizePipelineOptions,
@@ -194,33 +172,33 @@ function restorePipelineStateFromCompletedSteps(
 async function runPipelineStep(type: ChapterGenerationStepType, ctx: PipelineStepHandlerContext) {
   switch (type) {
     case 'context_need_planning':
-      return runContextNeedPlanningStep(ctx)
+      return (await import('./pipelineSteps/contextPlanning')).runContextNeedPlanningStep(ctx)
     case 'context_budget_selection':
-      return runContextBudgetSelectionStep(ctx)
+      return (await import('./pipelineSteps/contextPlanning')).runContextBudgetSelectionStep(ctx)
     case 'build_context':
-      return runBuildContextStep(ctx)
+      return (await import('./pipelineSteps/contextPlanning')).runBuildContextStep(ctx)
     case 'generate_chapter_plan':
-      return runGenerateChapterPlanStep(ctx)
+      return (await import('./pipelineSteps/chapterGeneration')).runGenerateChapterPlanStep(ctx)
     case 'context_need_planning_from_plan':
-      return runPlanContextNeedStep(ctx)
+      return (await import('./pipelineSteps/chapterGeneration')).runPlanContextNeedStep(ctx)
     case 'context_budget_selection_delta':
-      return runContextBudgetDeltaStep(ctx)
+      return (await import('./pipelineSteps/chapterGeneration')).runContextBudgetDeltaStep(ctx)
     case 'rebuild_context_with_plan':
-      return runRebuildContextWithPlanStep(ctx)
+      return (await import('./pipelineSteps/chapterGeneration')).runRebuildContextWithPlanStep(ctx)
     case 'generate_chapter_draft':
-      return runGenerateChapterDraftStep(ctx)
+      return (await import('./pipelineSteps/chapterGeneration')).runGenerateChapterDraftStep(ctx)
     case 'generate_chapter_review':
-      return runChapterReviewStep(ctx)
+      return (await import('./pipelineSteps/memoryExtraction')).runChapterReviewStep(ctx)
     case 'propose_character_updates':
-      return runCharacterUpdateExtractionStep(ctx)
+      return (await import('./pipelineSteps/memoryExtraction')).runCharacterUpdateExtractionStep(ctx)
     case 'propose_foreshadowing_updates':
-      return runForeshadowingUpdateExtractionStep(ctx)
+      return (await import('./pipelineSteps/memoryExtraction')).runForeshadowingUpdateExtractionStep(ctx)
     case 'consistency_review':
-      return runConsistencyReviewStep(ctx)
+      return (await import('./pipelineSteps/qualityCheck')).runConsistencyReviewStep(ctx)
     case 'quality_gate':
-      return runQualityGateStep(ctx)
+      return (await import('./pipelineSteps/qualityCheck')).runQualityGateStep(ctx)
     case 'await_user_confirmation':
-      return runAwaitUserConfirmationStep(ctx)
+      return (await import('./pipelineSteps/qualityCheck')).runAwaitUserConfirmationStep(ctx)
     default:
       return undefined
   }

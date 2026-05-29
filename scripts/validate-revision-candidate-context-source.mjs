@@ -10,6 +10,7 @@ function assert(condition, message, details = {}) {
 async function main() {
   const checks = []
   const viewSource = await readFile(join(root, 'src', 'renderer', 'src', 'views', 'GenerationPipelineView.tsx'), 'utf-8')
+  const revisionContextSource = await readFile(join(root, 'src', 'renderer', 'src', 'views', 'generation', 'revisionCandidateContext.ts'), 'utf-8')
   const promptContextSource = await readFile(join(root, 'src', 'renderer', 'src', 'utils', 'promptContext.ts'), 'utf-8')
   const promptBuilderSource = await readFile(join(root, 'src', 'services', 'PromptBuilderService.ts'), 'utf-8')
   const typesSource = [
@@ -26,27 +27,36 @@ async function main() {
 
   checks.push(
     assert(
-      viewSource.includes('resolveRevisionCandidateContext') &&
-        viewSource.includes('reused_current_job_context') &&
-        viewSource.includes('rebuilt_from_explicit_selection'),
+      viewSource.includes("import('./generation/revisionCandidateContext')") &&
+        !viewSource.includes("from '../utils/promptContext'") &&
+        !viewSource.includes('buildPipelineContextFromSelection(project, data, targetOrder'),
+      'GenerationPipelineView lazy-loads revision candidate context rebuild logic instead of importing prompt builders'
+    )
+  )
+
+  checks.push(
+    assert(
+      revisionContextSource.includes('resolveRevisionCandidateContext') &&
+        revisionContextSource.includes('reused_current_job_context') &&
+        revisionContextSource.includes('rebuilt_from_explicit_selection'),
       'quality gate revision candidates record an explicit context source'
     )
   )
 
   checks.push(
     assert(
-      viewSource.includes("step.type === 'build_context'") &&
-        viewSource.includes('contextFromBuildContextOutput(buildContextStep.output)') &&
-        viewSource.includes('selectedTraceSnapshot.finalPrompt'),
+      revisionContextSource.includes("step.type === 'build_context'") &&
+        revisionContextSource.includes('contextFromBuildContextOutput(buildContextStep.output)') &&
+        revisionContextSource.includes('selectedTraceSnapshot.finalPrompt'),
       'revision candidate context first reuses current job build_context output or bound prompt snapshot'
     )
   )
 
   checks.push(
     assert(
-      viewSource.includes('selectBudgetContext(project, data, targetOrder, budgetProfile') &&
-        viewSource.includes('chapterTask: {') &&
-        viewSource.includes('buildPipelineContextFromSelection(project, data, targetOrder') &&
+      revisionContextSource.includes('selectBudgetContext(project, data, targetOrder, budgetProfile') &&
+        revisionContextSource.includes('chapterTask: {') &&
+        revisionContextSource.includes('buildPipelineContextFromSelection(project, data, targetOrder') &&
         promptContextSource.includes('explicitContextSelection: selection'),
       'context rebuild path uses ContextBudgetManager selection plus buildPipelineContextFromSelection'
     )
@@ -63,7 +73,7 @@ async function main() {
 
   checks.push(
     assert(
-      viewSource.includes("kind: 'quality_gate_issue'") &&
+      revisionContextSource.includes("kind: 'quality_gate_issue'") &&
         viewSource.includes('appendGenerationRunTraceForcedContextBlocks') &&
         viewSource.includes('contextSource: revisionContext.contextSource') &&
         viewSource.includes('contextWarnings: revisionContext.contextWarnings'),

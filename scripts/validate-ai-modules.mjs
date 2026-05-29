@@ -72,6 +72,11 @@ async function main() {
   }
 
   push(checks, contents.client.includes('window.novelDirector.ai.chatCompletion'), 'only AIClient talks to preload AI API')
+  push(
+    checks,
+    contents.client.includes('bridge?.ai?.chatCompletion') && contents.client.includes('AI 桥接未加载'),
+    'AIClient guards missing preload AI bridge before chat completion'
+  )
   const businessModules = ['chapterReview', 'generationPipeline', 'qualityGate', 'revision']
   for (const name of businessModules) {
     push(checks, !contents[name].includes('window.novelDirector'), `${name} does not call preload directly`)

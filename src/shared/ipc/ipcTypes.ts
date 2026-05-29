@@ -1,4 +1,24 @@
-import type { AppData, AppSettings, ChapterCommitBundle, DataMergePreview, GenerationRunBundle, RevisionCommitBundle } from '../types'
+import type {
+  AppData,
+  AppSettings,
+  ChapterCommitBundle,
+  DataMergePreview,
+  ChapterNoveltyPolicy,
+  ChapterDraftResult,
+  ChapterPlan,
+  ContextCompressionRecord,
+  ContextSelectionResult,
+  ForcedContextBlock,
+  GeneratedChapterDraft,
+  GenerationRunBundle,
+  NoveltyAuditResult,
+  PipelineContextSource,
+  Project,
+  PromptBlockOrderItem,
+  QualityGateReport,
+  RedundancyReport,
+  RevisionCommitBundle
+} from '../types'
 
 export type IpcResult<T> = { ok: true; data: T } | IpcFailure
 
@@ -211,3 +231,43 @@ export interface ChatCompletionResult {
   error?: string
   finishReason?: string
 }
+
+export interface DiagnosticsAnalyzeRedundancyRequest {
+  projectId: string
+  chapterId: string | null
+  draftId: string | null
+  body: string
+}
+
+export type DiagnosticsAnalyzeRedundancyResult = RedundancyReport
+
+export interface DiagnosticsAuditNoveltyRequest {
+  generatedText: string
+  context: string
+  chapterPlan: ChapterPlan | null
+  noveltyPolicy?: ChapterNoveltyPolicy
+  project?: Project | null
+  appData?: AppData | null
+  contextSelection?: ContextSelectionResult | null
+  promptBlockOrder?: PromptBlockOrderItem[] | null
+  forcedContextBlocks?: ForcedContextBlock[] | null
+  compressionRecords?: ContextCompressionRecord[] | null
+}
+
+export type DiagnosticsAuditNoveltyResult = NoveltyAuditResult
+
+export interface DiagnosticsEvaluateQualityGateRequest {
+  settings: AppSettings
+  projectId: string
+  jobId: string
+  chapterId: string | null
+  draftId: string | null
+  chapterDraft: ChapterDraftResult | GeneratedChapterDraft
+  context: string
+  chapterPlan: ChapterPlan | null
+  consistencyReports?: AppData['consistencyReviewReports']
+  promptContextSnapshotId?: string | null
+  contextSource?: PipelineContextSource
+}
+
+export type DiagnosticsEvaluateQualityGateResult = QualityGateReport

@@ -1,7 +1,6 @@
 import type { ConsistencyReviewReport } from '../../../../../shared/types'
-import { QualityGateService } from '../../../../../services/QualityGateService'
-import { NoveltyDetector } from '../../../../../services/NoveltyDetector'
 import { newId, now } from '../../../utils/format'
+import { auditNoveltyDiagnostic, evaluateQualityGateDiagnostic } from '../../../utils/diagnosticsApi'
 import { upsertGenerationRunTrace } from '../../../utils/runTrace'
 import { serializeOutput } from '../pipelineUtils'
 import type { PipelineStepHandlerContext } from '../pipelineRunnerTypes'
@@ -37,12 +36,13 @@ export async function runQualityGateStep(ctx: PipelineStepHandlerContext) {
   if (!state.draftResult) throw new Error('缺少章节正文草稿，无法执行质量门禁')
   state.noveltyAuditResult =
     state.noveltyAuditResult ??
-    NoveltyDetector.audit({
+    await auditNoveltyDiagnostic({
       generatedText: (state.draftRecord ?? state.draftResult).body,
       context: state.context,
       chapterPlan: state.plan
     })
-  const report = await QualityGateService.evaluateChapterDraft({
+  const report = await evaluateQualityGateDiagnostic({
+    settings: env.data.settings,
     projectId: project.id,
     jobId: job.id,
     chapterId: state.draftRecord?.chapterId ?? null,
@@ -52,8 +52,7 @@ export async function runQualityGateStep(ctx: PipelineStepHandlerContext) {
     chapterPlan: state.plan,
     consistencyReports: state.working.consistencyReviewReports.filter((item) => item.jobId === job.id),
     promptContextSnapshotId: job.promptContextSnapshotId ?? null,
-    contextSource: job.contextSource,
-    aiService
+    contextSource: job.contextSource
   })
   state.working = {
     ...updateStepInData(state.working, step.id, { status: 'completed', output: serializeOutput(report) }),

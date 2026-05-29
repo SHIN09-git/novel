@@ -50,6 +50,7 @@ async function loadModules() {
     'src/services/ContextBudgetManager.ts',
     'src/services/StoryDirectionService.ts',
     'src/services/HardCanonPackService.ts',
+    'src/services/PromptLintService.ts',
     'src/services/promptFormatters/chapterFormatters.ts',
     'src/services/promptFormatters/characterFormatters.ts',
     'src/services/promptFormatters/foreshadowingFormatters.ts',
@@ -355,6 +356,7 @@ async function main() {
     await readFile(join(root, 'src/renderer/src/views/generation/pipelineSteps/chapterGeneration.ts'), 'utf-8')
   ].join('\n')
   const generationViewSource = await readFile(join(root, 'src/renderer/src/views/GenerationPipelineView.tsx'), 'utf-8')
+  const revisionContextSource = await readFile(join(root, 'src/renderer/src/views/generation/revisionCandidateContext.ts'), 'utf-8')
   const tracePanelSource = await readFile(join(root, 'src/renderer/src/views/generation/RunTracePanel.tsx'), 'utf-8')
 
   checks.push(assert(compressionSource.includes('compressChapterRecapsForBudget'), 'compression service exposes deterministic chapter recap compression'))
@@ -379,7 +381,8 @@ async function main() {
     assert(
       generationViewSource.includes('upsertGenerationRunTraceByJobId') &&
         generationViewSource.includes('compressionRecords: revisionContext.compressionRecords') &&
-        generationViewSource.includes('buildPipelineContextFromSelection(project, data, targetOrder'),
+        generationViewSource.includes("import('./generation/revisionCandidateContext')") &&
+        revisionContextSource.includes('buildPipelineContextFromSelection(project, data, targetOrder'),
       'quality gate revision candidate context rebuild uses explicit selection and records compressionRecords when rebuilt'
     )
   )

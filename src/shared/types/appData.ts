@@ -1,6 +1,6 @@
 import type { ApiProvider, ContinuitySource, ID, PromptMode, StageSummary, TimelineEvent } from './base'
 import type { Character, CharacterStateChangeCandidate, CharacterStateFact, CharacterStateLog, CharacterStateTransaction } from './character'
-import type { ContextBudgetProfile, ContextCompressionRecord, ContextNeedPlan, ContextSelectionResult, PromptConfig, PromptContextSnapshot, PromptModuleSelection } from './context'
+import type { ContextBudgetProfile, ContextCompressionRecord, ContextNeedPlan, ContextSelectionResult, PromptConfig, PromptContextSnapshot, PromptLintResult, PromptModuleSelection } from './context'
 import type { Foreshadowing, ForeshadowingTreatmentMode } from './foreshadowing'
 import type { ChapterGenerationJob, ChapterGenerationStep, GeneratedChapterDraft } from './generation'
 import type { ChapterContinuityBridge, MemoryUpdateCandidate } from './memory'
@@ -38,6 +38,7 @@ export interface BuildPromptResult {
   continuityBridge: ChapterContinuityBridge | null
   continuitySource: ContinuitySource | null
   compressionRecords: ContextCompressionRecord[]
+  promptLintResult: PromptLintResult
   warnings: string[]
 }
 

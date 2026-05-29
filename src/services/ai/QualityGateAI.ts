@@ -1,4 +1,3 @@
-import { AIClient } from './AIClient'
 import type {
   AIResult,
   Character,
@@ -28,9 +27,10 @@ import type { QualityGateEvaluation } from '../QualityGateService'
 import { REVIEW_SYSTEM_PROMPT } from './AIPromptTemplates'
 import { ensureQualityGateEvaluation, ensureRevisionCandidate } from './AIResponseNormalizer'
 import { validateQualityGateSchema, validateRevisionCandidateSchema } from './AISchemaValidator'
+import type { AIJsonClient } from './AIJsonClient'
 
 export class QualityGateAI {
-  constructor(private readonly client: AIClient) {}
+  constructor(private readonly client: AIJsonClient) {}
 
   async generateQualityGateReport(
     chapterDraft: ChapterDraftResult,

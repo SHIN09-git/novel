@@ -112,6 +112,22 @@ const hardFailurePatterns = [
   '棰勭'
 ]
 
+const extraHardFailurePatterns = [
+  '搴旂敤妗ユ帴',
+  '璇诲彇鏁版嵁',
+  '淇濆瓨澶辫触',
+  '姝ｅ湪淇濆瓨',
+  '姝ｅ湪鎻愪氦',
+  '鐢熸垚杩愯',
+  'AI 璋冪敤',
+  'AI 杈撳嚭',
+  'AI 杩斿洖',
+  '瑙ｆ瀽澶辫触',
+  'AI 妯″瀷',
+  '鏈厤缃',
+  '璺宠繃杩滅▼'
+]
+
 function walk(target, files = []) {
   const absolute = path.join(root, target)
   if (!fs.existsSync(absolute)) return files
@@ -157,7 +173,7 @@ for (const file of files) {
   const lines = text.split(/\r?\n/)
   for (let index = 0; index < lines.length; index += 1) {
     const line = lines[index]
-    const match = [...hardFailurePatterns, ...mojibakePatterns].find((pattern) => line.includes(pattern))
+    const match = [...hardFailurePatterns, ...extraHardFailurePatterns, ...mojibakePatterns].find((pattern) => line.includes(pattern))
     if (match) {
       failures.push(`${rel}:${index + 1}: suspicious mojibake marker ${JSON.stringify(match)} in ${JSON.stringify(line.slice(0, 180))}`)
       break

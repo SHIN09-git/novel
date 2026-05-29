@@ -4,6 +4,8 @@
 
 这份指南会带你创建一个小型虚构小说项目，准备上下文，生成第一章草稿，并进入修订流程。所有示例名称和故事片段都是 synthetic demo data。如果你在 fixture 或文档中看到 `Fog City Test Draft` / `《雾城测试稿》`，它只是公开测试用的虚构项目。
 
+如果你是第一次使用 Novel Director，建议先读更完整的 [新手教程](./docs/BEGINNER_TUTORIAL.md)。本文件适合已经知道基本概念后快速跑通一次流程。
+
 ### 1. 启动应用
 
 ```bash
@@ -170,6 +172,8 @@ Context Need Planner 可以选择这些事实，并把它们作为硬约束放�
 ## English
 
 This walkthrough creates a small synthetic fiction project, prepares context, generates a first draft, and revises it. All example names and story fragments are synthetic demo data. If you see `Fog City Test Draft` / `《雾城测试稿》` in fixtures or docs, it is a fictional public test project.
+
+If this is your first time using Novel Director, start with the fuller [Beginner Tutorial](./docs/BEGINNER_TUTORIAL.md). This quickstart is for running through the workflow once you know the basic concepts.
 
 ### 1. Start the App
 

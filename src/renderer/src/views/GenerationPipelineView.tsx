@@ -5,9 +5,6 @@ import type {
   ConsistencyReviewIssue,
   ConsistencyReviewReport,
   ContextBudgetMode,
-  ContextNeedPlan,
-  ContextSelectionResult,
-  ForcedContextBlock,
   GenerationRunBundle,
   GeneratedChapterDraft,
   GenerationRunTrace,
@@ -19,30 +16,25 @@ import type {
   QualityGateIssue,
   QualityGateReport,
   RevisionCandidate,
-  RevisionCandidateContextSource,
   RevisionRequest,
   RevisionRequestType,
   RevisionSession
 } from '../../../shared/types'
 import { AIService } from '../../../services/AIService'
-import { safeParseJson } from '../../../services/AIJsonParser'
 import { buildRunTraceAuthorSummary, upsertRunTraceAuthorSummaryToAppData } from '../../../services/RunTraceAuthorSummaryService'
 import { TokenEstimator } from '../../../services/TokenEstimator'
 import { useConfirm } from '../components/ConfirmDialog'
 import type { PipelineArtifactTab } from '../components/pipeline/PipelineCurrentArtifactPanel'
 import { newId, now } from '../utils/format'
 import { projectData } from '../utils/projectData'
-import { buildPipelineContextFromSelection, createContextBudgetProfile, selectBudgetContext } from '../utils/promptContext'
 import { addReaderEmotionPreset, loadReaderEmotionState, rememberReaderEmotionTarget } from '../utils/readerEmotionPresets'
 import { appendGenerationRunTraceForcedContextBlocks, appendGenerationRunTraceIds, upsertGenerationRunTraceByJobId } from '../utils/runTrace'
 import type { SaveDataInput } from '../utils/saveDataState'
 import { buildRunTraceSummary } from './generation/RunTracePanel'
 import { GenerationPipelineConsole } from './generation/GenerationPipelineConsole'
 import {
-  budgetSelectionFromStepOutput,
   consistencyIssueToRevisionType,
   consistencyRevisionInstruction,
-  contextFromBuildContextOutput,
   updateProjectTimestamp
 } from './generation/generationPipelineHelpers'
 import { useDraftAcceptance } from './generation/useDraftAcceptance'
@@ -308,84 +300,24 @@ export function GenerationPipelineView({
     onOpenRevision?.({ chapterId: targetChapter?.id ?? null, draftId: draft.id, requestId: request.id })
   }
 
-  function resolveRevisionCandidateContext(issue: QualityGateIssue, report: QualityGateReport): {
-    context: string
-    contextSource: RevisionCandidateContextSource
-    contextWarnings: string[]
-    compressionRecords?: ContextSelectionResult['compressionRecords']
-    forcedBlock: ForcedContextBlock
-  } {
-    const targetOrder = selectedJob?.targetChapterOrder ?? targetChapterOrder
-    const issueText = JSON.stringify(issue, null, 2)
-    const forcedBlock: ForcedContextBlock = {
-      kind: 'quality_gate_issue',
-      sourceId: report.id,
-      sourceType: issue.type,
-      sourceChapterId: report.chapterId ?? null,
-      sourceChapterOrder: targetOrder,
-      title: `质量门禁问题：${issue.description || issue.type}`,
-      tokenEstimate: TokenEstimator.estimate(issueText)
-    }
-
-    const buildContextStep = selectedSteps.find((step) => step.type === 'build_context' && step.status === 'completed' && step.output.trim())
-    if (buildContextStep) {
-      const context = contextFromBuildContextOutput(buildContextStep.output)
-      if (context.trim()) return { context, contextSource: 'reused_current_job_context', contextWarnings: [], forcedBlock }
-    }
-
-    if (selectedTraceSnapshot?.finalPrompt?.trim()) {
-      return {
-        context: selectedTraceSnapshot.finalPrompt,
-        contextSource: 'reused_current_job_context',
-        contextWarnings: ['当前 job 的 build_context 输出不可用，已复用绑定的 Prompt 快照。'],
-        forcedBlock
-      }
-    }
-
-    const budgetStep = selectedSteps.find((step) => step.type === 'context_budget_selection' && step.status === 'completed' && step.output.trim())
-    const parsedBudget = budgetStep ? budgetSelectionFromStepOutput(budgetStep.output) : { profile: null, selection: null }
-    const needPlanStep = selectedSteps.find((step) => step.type === 'context_need_planning' && step.status === 'completed' && step.output.trim())
-    const parsedNeedPlan = needPlanStep ? safeParseJson<ContextNeedPlan>(needPlanStep.output, 'pipeline context need plan output') : { ok: false, data: null }
-    const contextNeedPlan = selectedTraceSnapshot?.contextNeedPlan ?? (parsedNeedPlan.ok ? parsedNeedPlan.data : null)
-    const budgetProfile = parsedBudget.profile ?? createContextBudgetProfile(project.id, budgetMode, budgetMaxTokens, '修订候选上下文')
-    const budgetSelection =
-      parsedBudget.selection ??
-      selectBudgetContext(project, data, targetOrder, budgetProfile, {
-        chapterTask: {
-          goal: `生成第 ${targetOrder} 章草稿`,
-          conflict: issue.description,
-          suspenseToKeep: '',
-          allowedPayoffs: '',
-          forbiddenPayoffs: '',
-          endingHook: '',
-          readerEmotion: readerEmotionTarget,
-          targetWordCount: estimatedWordCount,
-          styleRequirement: project.style
-        },
-        contextNeedPlan
-      })
-    const context = buildPipelineContextFromSelection(project, data, targetOrder, readerEmotionTarget, estimatedWordCount, budgetProfile, budgetSelection, contextNeedPlan)
-    return {
-      context,
-      contextSource: 'rebuilt_from_explicit_selection',
-      contextWarnings: parsedBudget.selection ? [] : ['当前 job 缺少可复用上下文，已通过 ContextBudgetManager 重新生成显式 selection。'],
-      compressionRecords: budgetSelection.compressionRecords,
-      forcedBlock
-    }
-  }
-
   async function generateRevisionCandidate(issue: QualityGateIssue, report: QualityGateReport, draft: GeneratedChapterDraft) {
     setPipelineMessage('')
-    const revisionContext = resolveRevisionCandidateContext(issue, report)
-    const context = revisionContext.context
-    void [
+    const { resolveRevisionCandidateContext } = await import('./generation/revisionCandidateContext')
+    const revisionContext = resolveRevisionCandidateContext({
       project,
       data,
-      selectedJob?.targetChapterOrder ?? targetChapterOrder,
+      selectedJob,
+      selectedSteps,
+      selectedTraceSnapshot,
+      targetChapterOrder,
       readerEmotionTarget,
       estimatedWordCount,
-      createContextBudgetProfile(project.id, budgetMode, budgetMaxTokens, '修订候选上下文')
-    ]
+      budgetMode,
+      budgetMaxTokens,
+      issue,
+      report
+    })
+    const context = revisionContext.context
     const result = await aiService.generateRevisionCandidate({ title: draft.title, body: draft.body }, issue, context)
     if (!result.data) {
       setPipelineMessage(result.error || result.parseError || '修订候选生成失败')

@@ -155,6 +155,8 @@ export function normalizeGenerationRunTrace(value: GenerationRunTrace | Record<s
     compressionRecords: normalizeContextCompressionRecords(trace.compressionRecords),
     promptBlockOrder: normalizePromptBlockOrder(trace.promptBlockOrder),
     finalPromptTokenEstimate: typeof trace.finalPromptTokenEstimate === 'number' ? trace.finalPromptTokenEstimate : 0,
+    promptLintWarnings: stringArrayValue(trace.promptLintWarnings),
+    promptLintIssueCount: typeof trace.promptLintIssueCount === 'number' && Number.isFinite(trace.promptLintIssueCount) ? Math.max(0, trace.promptLintIssueCount) : 0,
     generatedDraftId: stringValue(trace.generatedDraftId) || null,
     consistencyReviewReportId: stringValue(trace.consistencyReviewReportId) || null,
     qualityGateReportId: stringValue(trace.qualityGateReportId) || null,
@@ -306,4 +308,3 @@ export function normalizeRunTraceAuthorSummary(value: unknown): RunTraceAuthorSu
     }
   }
 }
-

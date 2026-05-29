@@ -56,6 +56,8 @@ export interface GenerationRunTrace {
   compressionRecords: ContextCompressionRecord[]
   promptBlockOrder: PromptBlockOrderItem[]
   finalPromptTokenEstimate: number
+  promptLintWarnings: string[]
+  promptLintIssueCount: number
   generatedDraftId: ID | null
   consistencyReviewReportId: ID | null
   qualityGateReportId: ID | null

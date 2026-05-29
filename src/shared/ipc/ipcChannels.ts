@@ -35,7 +35,11 @@ export const IPC_CHANNELS = {
   CREDENTIALS_DELETE_API_KEY: 'credentials:deleteApiKey',
   CREDENTIALS_MIGRATE_LEGACY_API_KEY: 'credentials:migrateLegacyApiKey',
 
-  AI_CHAT_COMPLETION: 'ai:chatCompletion'
+  AI_CHAT_COMPLETION: 'ai:chatCompletion',
+
+  DIAGNOSTICS_ANALYZE_REDUNDANCY: 'diagnostics:analyze-redundancy',
+  DIAGNOSTICS_AUDIT_NOVELTY: 'diagnostics:audit-novelty',
+  DIAGNOSTICS_EVALUATE_QUALITY_GATE: 'diagnostics:evaluate-quality-gate'
 } as const
 
 export type IpcChannel = (typeof IPC_CHANNELS)[keyof typeof IPC_CHANNELS]

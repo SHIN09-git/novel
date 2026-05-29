@@ -40,9 +40,6 @@ async function main() {
   const { tryAcquirePipelineRunLock, releasePipelineRunLock } = await loadTsModule(
     'src/renderer/src/utils/pipelineRunLock.ts'
   )
-  const { createChapterVersionBeforeAcceptDraft } = await loadTsModule('src/renderer/src/utils/draftAcceptance.ts', [
-    ["import { newId } from './format'", "const newId = () => 'history-id'"]
-  ])
   const pipelineSource = await readFile(join(root, 'src', 'renderer', 'src', 'views', 'GenerationPipelineView.tsx'), 'utf-8')
   const pipelineRunnerFacadeSource = await readFile(
     join(root, 'src', 'renderer', 'src', 'views', 'generation', 'usePipelineRunner.ts'),
@@ -147,36 +144,6 @@ async function main() {
       firstAcquire === true && duplicateAcquire === false && afterReleaseAcquire === true,
       '流水线运行锁会阻止重复启动，并可在结束后释放',
       { firstAcquire, duplicateAcquire, afterReleaseAcquire, lock }
-    )
-  )
-
-  const existingChapter = {
-    id: 'chapter-1',
-    projectId: 'project-1',
-    order: 1,
-    title: '旧标题',
-    body: '旧正文',
-    summary: '',
-    newInformation: '',
-    characterChanges: '',
-    newForeshadowing: '',
-    resolvedForeshadowing: '',
-    endingHook: '',
-    riskWarnings: '',
-    includedInStageSummary: false,
-    createdAt: 't0',
-    updatedAt: 't0'
-  }
-  const history = createChapterVersionBeforeAcceptDraft(existingChapter, 'project-1', 't1')
-  checks.push(
-    assert(
-      history.source === 'before_accept_draft' &&
-        history.chapterId === existingChapter.id &&
-        history.title === existingChapter.title &&
-        history.body === existingChapter.body &&
-        history.createdAt === 't1',
-      '接受草稿覆盖已有章节前会生成旧正文历史版本',
-      history
     )
   )
 

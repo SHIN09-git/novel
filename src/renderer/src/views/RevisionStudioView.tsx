@@ -19,7 +19,7 @@ import { newId, now, statusLabel, weightLabel } from '../utils/format'
 import { projectData } from '../utils/projectData'
 import { upsertGenerationRunTraceByJobId } from '../utils/runTrace'
 import { applyRevisionCommitBundleToAppData, buildRevisionCommitBundle } from '../../../services/RevisionCommitBundleService'
-import { QUALITY_GATE_HUMAN_REVIEW_SCORE, QualityGateService } from '../../../services/QualityGateService'
+import { AuthorDecisionPolicyService } from '../../../services/AuthorDecisionPolicyService'
 import { LocalRevisionMergeError, looksLikeFullChapterRevision, mergeLocalRevisionSafely } from '../utils/revisionMerge'
 import { applyAcceptedRevisionWriteback, resolveDraftLinkedChapter } from '../utils/revisionWriteback'
 import type { SaveDataInput } from '../utils/saveDataState'
@@ -321,17 +321,9 @@ export function RevisionStudioView({ data, project, saveData, saveRevisionCommit
       setMessage('请先选择一个草稿。')
       return
     }
-    const lowScoreReport = latestQualityReports.find((report) => QualityGateService.shouldRequireHumanReview(report))
+    const lowScoreReport = latestQualityReports.find((report) => AuthorDecisionPolicyService.assessQualityGate(report).requiresHumanReview)
     if (lowScoreReport) {
-      const requiresReviewButPassed = lowScoreReport.pass
-      const forced = await confirmAction({
-        title: requiresReviewButPassed ? '需要人工确认' : '质量门禁未通过',
-        message: requiresReviewButPassed
-          ? `该章节最近质量门禁为 ${lowScoreReport.overallScore} 分，已通过 50 分门禁，但低于人工确认线 ${QUALITY_GATE_HUMAN_REVIEW_SCORE} 分或存在关键维度风险。仍要接受修订版本吗？`
-          : `该章节最近质量门禁为 ${lowScoreReport.overallScore} 分且未通过，仍要接受修订版本吗？`,
-        confirmLabel: '继续接受',
-        tone: requiresReviewButPassed ? 'default' : 'danger'
-      })
+      const forced = await confirmAction(AuthorDecisionPolicyService.revisionAcceptancePrompt(lowScoreReport))
       if (!forced) return
     }
     const confirmMessage =

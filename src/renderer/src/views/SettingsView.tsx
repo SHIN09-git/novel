@@ -6,6 +6,24 @@ import { useConfirm } from '../components/ConfirmDialog'
 import { Field, NumberInput, SelectField, TextInput, Toggle } from '../components/FormFields'
 import { Header } from '../components/Layout'
 import { deleteApiKey, getApiKeyState, saveApiKey } from '../settings/credentialApi'
+import {
+  confirmMigrationMerge as confirmMigrationMergeRequest,
+  createBackup as createBackupRequest,
+  createMigrationMergePreview,
+  deleteBackup as deleteBackupRequest,
+  exportAppData,
+  getLogPath,
+  getStoragePath,
+  importAppData,
+  listBackups,
+  migrateStoragePath as migrateStoragePathRequest,
+  openBackupFolder as openBackupFolderRequest,
+  openLogFile as openLogFileRequest,
+  openStorageFolder as openStorageFolderRequest,
+  resetStoragePath as resetStoragePathRequest,
+  restoreBackup as restoreBackupRequest,
+  selectStoragePath
+} from '../settings/settingsApi'
 import type { ProjectProps } from './viewTypes'
 
 function formatBackupTime(timestamp: number): string {
@@ -51,8 +69,7 @@ export function SettingsView({
   }, [storagePath])
 
   useEffect(() => {
-    window.novelDirector.app
-      .getStoragePath()
+    getStoragePath()
       .then((result) => {
         setDefaultStoragePath(result.defaultStoragePath)
         setPendingStoragePath(result.storagePath)
@@ -121,7 +138,7 @@ export function SettingsView({
   }
 
   async function exportData() {
-    await window.novelDirector.data.export(data)
+    await exportAppData(data)
   }
 
   async function importData() {
@@ -132,14 +149,14 @@ export function SettingsView({
       tone: 'danger'
     })
     if (!confirmed) return
-    const result = await window.novelDirector.data.import()
+    const result = await importAppData()
     if (!result.canceled && result.data) {
       await replaceData(result.data, result.storagePath)
     }
   }
 
   async function chooseStoragePath() {
-    const result = await window.novelDirector.app.selectStoragePath()
+    const result = await selectStoragePath()
     if (!result.canceled && result.storagePath) {
       setPendingStoragePath(result.storagePath)
       setStorageMessage('已选择新路径，点击“迁移当前数据到新位置”后生效。')
@@ -150,11 +167,11 @@ export function SettingsView({
     setMergePreview(null)
     setStorageMessage('正在保存当前数据并迁移...')
     await saveData((current) => current)
-    const result = await window.novelDirector.app.migrateStoragePath(targetPath, data, overwrite)
+    const result = await migrateStoragePathRequest(targetPath, data, overwrite)
     if (result.needsOverwrite && result.targetPath) {
       const preview =
         result.mergePreview ??
-        (await window.novelDirector.app.createMigrationMergePreview(storagePath, result.targetPath)).preview ??
+        (await createMigrationMergePreview(storagePath, result.targetPath)).preview ??
         null
       setMergeSourcePath(storagePath)
       setMergeTargetPath(result.targetPath)
@@ -178,11 +195,11 @@ export function SettingsView({
     setMergePreview(null)
     setStorageMessage('正在恢复默认路径...')
     await saveData((current) => current)
-    const result = await window.novelDirector.app.resetStoragePath(data, false)
+    const result = await resetStoragePathRequest(data, false)
     if (result.needsOverwrite && result.targetPath) {
       const preview =
         result.mergePreview ??
-        (await window.novelDirector.app.createMigrationMergePreview(storagePath, result.targetPath)).preview ??
+        (await createMigrationMergePreview(storagePath, result.targetPath)).preview ??
         null
       setMergeSourcePath(storagePath)
       setMergeTargetPath(result.targetPath)
@@ -206,7 +223,7 @@ export function SettingsView({
       return
     }
     setStorageMessage('正在备份并合并数据文件...')
-    const result = await window.novelDirector.app.confirmMigrationMerge(mergeSourcePath, mergeTargetPath)
+    const result = await confirmMigrationMergeRequest(mergeSourcePath, mergeTargetPath)
     if (!result.ok || !result.data) {
       setStorageMessage(`合并迁移失败：${result.error || '未知错误'}`)
       return
@@ -239,14 +256,14 @@ export function SettingsView({
   }
 
   async function openStorageFolder() {
-    const result = await window.novelDirector.app.openStorageFolder(storagePath)
+    const result = await openStorageFolderRequest(storagePath)
     setStorageMessage(result.ok ? '已打开数据文件所在位置。' : `打开失败：${result.error || '未知错误'}`)
   }
 
   async function createBackup() {
     setBackupMessage('正在创建备份...')
     try {
-      const result = await window.novelDirector.backup.create()
+      const result = await createBackupRequest()
       setBackupMessage(`备份已创建：${result.backupPath}`)
       await refreshBackups()
     } catch (error) {
@@ -256,7 +273,7 @@ export function SettingsView({
 
   async function refreshBackups() {
     try {
-      const result = await window.novelDirector.backup.list()
+      const result = await listBackups()
       setBackups(result.backups)
       if (!result.backups.length) setBackupMessage('暂无备份。')
     } catch (error) {
@@ -273,7 +290,7 @@ export function SettingsView({
     })
     if (!confirmed) return
     try {
-      const result = await window.novelDirector.backup.restore(backup.path)
+      const result = await restoreBackupRequest(backup.path)
       await replaceData(result.data, result.storagePath)
       setBackupMessage(`已恢复备份。${result.preRestoreBackupPath ? `恢复前备份：${result.preRestoreBackupPath}` : ''}`)
       await refreshBackups()
@@ -291,7 +308,7 @@ export function SettingsView({
     })
     if (!confirmed) return
     try {
-      await window.novelDirector.backup.delete(backup.path)
+      await deleteBackupRequest(backup.path)
       setBackupMessage('备份已删除。')
       await refreshBackups()
     } catch (error) {
@@ -300,14 +317,14 @@ export function SettingsView({
   }
 
   async function openBackupFolder() {
-    const result = await window.novelDirector.backup.openFolder()
+    const result = await openBackupFolderRequest()
     setBackupMessage(result.ok ? '已打开备份文件夹。' : `打开备份文件夹失败：${result.error || '未知错误'}`)
   }
 
   async function openLogFile() {
     try {
-      const result = await window.novelDirector.logs.getPath()
-      await window.novelDirector.logs.open()
+      const result = await getLogPath()
+      await openLogFileRequest()
       setLogMessage(`日志文件：${result.logPath}`)
     } catch (error) {
       setLogMessage(`打开日志失败：${getUserFriendlyError(error)}`)
@@ -316,7 +333,7 @@ export function SettingsView({
 
   async function copyLogPath() {
     try {
-      const result = await window.novelDirector.logs.getPath()
+      const result = await getLogPath()
       await navigator.clipboard.writeText(result.logPath)
       setLogMessage('日志路径已复制到剪贴板。')
     } catch (error) {

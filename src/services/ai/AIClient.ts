@@ -2,8 +2,9 @@ import type { AIResult, AppSettings } from '../../shared/types'
 import { normalizeAIError, parseWithFallback } from '../AIJsonParser'
 import { fallbackResult, isTruncatedFinishReason } from './AIResponseNormalizer'
 import { formatSchemaValidationError, type AISchemaValidator } from './AISchemaValidator'
+import type { AIJsonClient } from './AIJsonClient'
 
-export class AIClient {
+export class AIClient implements AIJsonClient {
   constructor(private readonly settings?: AppSettings) {}
 
   private hasApiConfig(): boolean {
@@ -24,7 +25,13 @@ export class AIClient {
     }
 
     try {
-      const response = await window.novelDirector.ai.chatCompletion({
+      const bridge = window.novelDirector
+      if (!bridge?.ai?.chatCompletion) {
+        return { ok: false, usedAI: true, data: null, error: 'AI 桥接未加载，请重新启动应用或检查安装包。' }
+      }
+
+      // Validation anchor: this is the single renderer-side call site for window.novelDirector.ai.chatCompletion.
+      const response = await bridge.ai.chatCompletion({
         settings: this.settings,
         messages: [
           { role: 'system', content: systemPrompt },

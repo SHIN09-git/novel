@@ -46,6 +46,13 @@ npm.cmd run build
 - 涉及数据安全的改动需要新增或更新验证脚本。
 - AI 输出写入项目数据前必须先校验和 normalize。
 
+### 文档贡献
+
+- 面向作者的新功能请同步更新 [新手教程](./docs/BEGINNER_TUTORIAL.md) 或 `QUICKSTART.md`。
+- 面向贡献者、发布、安全和仓库边界的变更请同步更新 [开源说明](./docs/OPEN_SOURCE_GUIDE.md)、`README.md`、`SECURITY.md` 或 `TESTING.md`。
+- 文档示例必须使用 synthetic demo data，不要引用真实稿件、真实 API Key、本机绝对路径或私有截图。
+- 如果新增公开文档，请确认它出现在 `README.md` 的文档入口中，并考虑更新 `scripts/validate-public-release-cleanup.mjs`。
+
 ### 打包和二进制
 
 不要把 `.exe`、`.msi`、`.zip` 或生成的 launcher 二进制提交到源码仓库。构建产物应发布到 GitHub Releases，并附带构建说明和校验和。
@@ -101,6 +108,13 @@ npm.cmd run build
 - Keep renderer file access behind the preload/main IPC boundary.
 - Add or update validation scripts for safety-sensitive changes.
 - For AI output handling, validate and normalize model responses before writing project data.
+
+### Documentation Contributions
+
+- User-facing features should update [Beginner Tutorial](./docs/BEGINNER_TUTORIAL.md) or `QUICKSTART.md`.
+- Contributor, release, security, and repository-boundary changes should update [Open Source Guide](./docs/OPEN_SOURCE_GUIDE.md), `README.md`, `SECURITY.md`, or `TESTING.md`.
+- Examples must use synthetic demo data. Do not reference real manuscripts, real API keys, local absolute paths, or private screenshots.
+- If you add a public document, link it from `README.md` and consider updating `scripts/validate-public-release-cleanup.mjs`.
 
 ### Packaging and Binaries
 

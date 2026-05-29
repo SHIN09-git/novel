@@ -52,6 +52,8 @@ export function createEmptyGenerationRunTrace(job: ChapterGenerationJob): Genera
     compressionRecords: [],
     promptBlockOrder: [],
     finalPromptTokenEstimate: 0,
+    promptLintWarnings: [],
+    promptLintIssueCount: 0,
     generatedDraftId: null,
     consistencyReviewReportId: null,
     qualityGateReportId: null,

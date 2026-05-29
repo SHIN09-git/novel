@@ -13,6 +13,12 @@ import type {
   CredentialHasApiKeyResult,
   CredentialMigrateLegacyApiKeyResult,
   CredentialSetApiKeyResult,
+  DiagnosticsAnalyzeRedundancyRequest,
+  DiagnosticsAnalyzeRedundancyResult,
+  DiagnosticsAuditNoveltyRequest,
+  DiagnosticsAuditNoveltyResult,
+  DiagnosticsEvaluateQualityGateRequest,
+  DiagnosticsEvaluateQualityGateResult,
   ExportDataResult,
   GetStoragePathResult,
   ImportDataResult,
@@ -136,6 +142,14 @@ const novelDirector = {
   ai: {
     chatCompletion: (request: ChatCompletionRequest) =>
       ipcRenderer.invoke(IPC_CHANNELS.AI_CHAT_COMPLETION, request) as Promise<ChatCompletionResult>
+  },
+  diagnostics: {
+    analyzeRedundancy: (request: DiagnosticsAnalyzeRedundancyRequest) =>
+      invokeOrThrow<DiagnosticsAnalyzeRedundancyResult>(IPC_CHANNELS.DIAGNOSTICS_ANALYZE_REDUNDANCY, request),
+    auditNovelty: (request: DiagnosticsAuditNoveltyRequest) =>
+      invokeOrThrow<DiagnosticsAuditNoveltyResult>(IPC_CHANNELS.DIAGNOSTICS_AUDIT_NOVELTY, request),
+    evaluateQualityGate: (request: DiagnosticsEvaluateQualityGateRequest) =>
+      invokeOrThrow<DiagnosticsEvaluateQualityGateResult>(IPC_CHANNELS.DIAGNOSTICS_EVALUATE_QUALITY_GATE, request)
   }
 }
 

@@ -28,6 +28,12 @@ import type {
   CredentialMigrateLegacyApiKeyResult,
   CredentialSetApiKeyRequest,
   CredentialSetApiKeyResult,
+  DiagnosticsAnalyzeRedundancyRequest,
+  DiagnosticsAnalyzeRedundancyResult,
+  DiagnosticsAuditNoveltyRequest,
+  DiagnosticsAuditNoveltyResult,
+  DiagnosticsEvaluateQualityGateRequest,
+  DiagnosticsEvaluateQualityGateResult,
   ExportDataResult,
   GetStoragePathResult,
   ImportDataResult,
@@ -62,6 +68,7 @@ import type { IAIService } from '../services/AIService'
 import type { StorageService } from '../../storage/StorageService'
 import { SQLITE_DATA_FILE_NAME } from '../../storage/StorageService'
 import { createStorageService } from '../../storage/SqliteStorageService'
+import { DiagnosticsService } from '../services/DiagnosticsService'
 import { safeIpcHandler } from './safeIpcHandler'
 
 interface IpcHandlerContext {
@@ -354,6 +361,8 @@ async function migrateStoragePath(
 }
 
 export function registerIpcHandlers(context: IpcHandlerContext): void {
+  const diagnosticsService = new DiagnosticsService(context.aiService)
+
   ipcMain.handle(
     IPC_CHANNELS.STORAGE_GET,
     safeIpcHandler(async (): Promise<StorageGetResult> => {
@@ -677,6 +686,45 @@ export function registerIpcHandlers(context: IpcHandlerContext): void {
       ok: true,
       hasApiKey: await context.credentialService.migrateLegacyApiKey(validateApiKey(apiKey))
     }))
+  )
+
+  ipcMain.handle(
+    IPC_CHANNELS.DIAGNOSTICS_ANALYZE_REDUNDANCY,
+    safeIpcHandler(async (_event, request: DiagnosticsAnalyzeRedundancyRequest): Promise<DiagnosticsAnalyzeRedundancyResult> => {
+      const body = validateString(request.body, 'Draft body', { minLength: 1, maxLength: 1_000_000, trim: false })
+      return diagnosticsService.analyzeRedundancy({
+        projectId: validateString(request.projectId, 'projectId', { minLength: 1, maxLength: 200 }),
+        chapterId: request.chapterId === null ? null : validateString(request.chapterId, 'chapterId', { minLength: 1, maxLength: 200 }),
+        draftId: request.draftId === null ? null : validateString(request.draftId, 'draftId', { minLength: 1, maxLength: 200 }),
+        body
+      })
+    })
+  )
+
+  ipcMain.handle(
+    IPC_CHANNELS.DIAGNOSTICS_AUDIT_NOVELTY,
+    safeIpcHandler(async (_event, request: DiagnosticsAuditNoveltyRequest): Promise<DiagnosticsAuditNoveltyResult> => {
+      return diagnosticsService.auditNovelty({
+        ...request,
+        generatedText: validateString(request.generatedText, 'generatedText', { minLength: 0, maxLength: 1_000_000, trim: false }),
+        context: validateString(request.context, 'context', { minLength: 0, maxLength: 1_000_000, trim: false })
+      })
+    })
+  )
+
+  ipcMain.handle(
+    IPC_CHANNELS.DIAGNOSTICS_EVALUATE_QUALITY_GATE,
+    safeIpcHandler(async (_event, request: DiagnosticsEvaluateQualityGateRequest): Promise<DiagnosticsEvaluateQualityGateResult> => {
+      return diagnosticsService.evaluateQualityGate({
+        ...request,
+        settings: validateChatCompletionRequest({ settings: request.settings, messages: [{ role: 'user', content: 'diagnostics' }] }).settings,
+        projectId: validateString(request.projectId, 'projectId', { minLength: 1, maxLength: 200 }),
+        jobId: validateString(request.jobId, 'jobId', { minLength: 1, maxLength: 200 }),
+        chapterId: request.chapterId === null ? null : validateString(request.chapterId, 'chapterId', { minLength: 1, maxLength: 200 }),
+        draftId: request.draftId === null ? null : validateString(request.draftId, 'draftId', { minLength: 1, maxLength: 200 }),
+        context: validateString(request.context, 'context', { minLength: 0, maxLength: 1_000_000, trim: false })
+      })
+    })
   )
 
   ipcMain.handle(

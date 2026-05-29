@@ -139,6 +139,25 @@ const COST_OR_LIMIT_KEYWORDS = unique([
   '不可逆'
 ])
 
+const AUTHORIZED_RULE_MEDIUM_KEYWORDS = unique([
+  '公告',
+  '广播',
+  '票据',
+  '地图',
+  '门禁提示',
+  '系统提示',
+  '说明牌',
+  '记录',
+  '档案',
+  '墙面文字',
+  '环境线索',
+  '任务书允许',
+  '前文线索',
+  '已铺垫'
+])
+
+type ChapterNoveltyMode = 'new_instance_opening' | 'reveal' | 'climax_solution' | 'standard'
+
 const COMMON_FALSE_NAMES = new Set([
   '系统',
   '规则',
@@ -312,7 +331,31 @@ function broadlyForbiddenByText(plan: ChapterPlan | null, policy: ChapterNovelty
 }
 
 function hasCostOrLimit(evidenceExcerpt: string): boolean {
+  if (/(豁免|免除|无需|无须|不用|不需要|没有).{0,10}(代价|惩罚|扣除|消耗|风险)|(?:代价|惩罚|扣除|消耗|风险).{0,10}(豁免|免除)/.test(evidenceExcerpt)) {
+    return false
+  }
   return includesAny(evidenceExcerpt, COST_OR_LIMIT_KEYWORDS)
+}
+
+function hasAuthorizedRuleMedium(evidenceExcerpt: string): boolean {
+  return includesAny(evidenceExcerpt, AUTHORIZED_RULE_MEDIUM_KEYWORDS)
+}
+
+function inferChapterNoveltyMode(plan: ChapterPlan | null): ChapterNoveltyMode {
+  const text = [
+    plan?.chapterTitle,
+    plan?.chapterGoal,
+    plan?.conflictToPush,
+    plan?.openingContinuationBeat,
+    allowedNoveltyText(plan?.allowedNovelty),
+    forbiddenNoveltyText(plan?.forbiddenNovelty)
+  ]
+    .filter(Boolean)
+    .join('\n')
+  if (/高潮|最终解法|脱困|危机解除|通关|逃离|破局/.test(text)) return 'climax_solution'
+  if (/新副本|副本开场|规则公告|入场规则|开场章|第一次进入/.test(text)) return 'new_instance_opening'
+  if (/揭露|揭示|真相|回收|解释谜团|设定揭示/.test(text)) return 'reveal'
+  return 'standard'
 }
 
 function findingSeverity(input: {
@@ -321,13 +364,19 @@ function findingSeverity(input: {
   hasPriorForeshadowing: boolean
   explicitlyForbidden: boolean
   costOrLimit: boolean
+  authorizedMedium: boolean
+  chapterMode: ChapterNoveltyMode
 }): NoveltyFindingSeverity {
-  const { kind, allowedByTask, hasPriorForeshadowing, explicitlyForbidden, costOrLimit } = input
+  const { kind, allowedByTask, hasPriorForeshadowing, explicitlyForbidden, costOrLimit, authorizedMedium, chapterMode } = input
   if (explicitlyForbidden) return 'fail'
   if (allowedByTask) return 'info'
   if (kind === 'deus_ex_rule' || kind === 'suspicious_deus_ex_rule') return 'fail'
   if (kind === 'new_named_character' || kind === 'untraced_name') return hasPriorForeshadowing ? 'info' : 'warning'
   if (hasPriorForeshadowing) return kind === 'major_lore_reveal' ? 'warning' : 'info'
+  if (chapterMode === 'new_instance_opening' && authorizedMedium && costOrLimit && (kind === 'new_world_rule' || kind === 'new_system_mechanic')) return 'info'
+  if (chapterMode === 'reveal' && authorizedMedium && kind === 'major_lore_reveal') return 'warning'
+  if (chapterMode === 'climax_solution' && (kind === 'new_world_rule' || kind === 'new_system_mechanic') && !costOrLimit) return 'fail'
+  if (authorizedMedium && costOrLimit && (kind === 'new_world_rule' || kind === 'new_system_mechanic' || kind === 'new_organization_or_rank')) return 'warning'
   if (costOrLimit && (kind === 'new_world_rule' || kind === 'new_system_mechanic' || kind === 'new_organization_or_rank')) return 'warning'
   return 'fail'
 }
@@ -337,10 +386,12 @@ function sourceHintFor(input: {
   hasPriorForeshadowing: boolean
   explicitlyForbidden: boolean
   costOrLimit: boolean
+  authorizedMedium: boolean
 }): string | null {
   if (input.explicitlyForbidden) return 'chapter_forbidden_novelty'
   if (input.allowedByTask) return 'chapter_allowed_novelty'
   if (input.hasPriorForeshadowing) return 'selected_context_or_foreshadowing'
+  if (input.authorizedMedium) return 'draft_contains_rule_medium'
   if (input.costOrLimit) return 'draft_contains_cost_or_limit'
   return null
 }
@@ -356,20 +407,28 @@ function createFinding(
 ): NoveltyFinding {
   const hasPriorForeshadowing = textMatches(context, text)
   const costOrLimit = hasCostOrLimit(evidenceExcerpt)
+  const authorizedMedium = hasAuthorizedRuleMedium(evidenceExcerpt)
+  const chapterMode = inferChapterNoveltyMode(plan)
   const allowedByTask = allowedByText(plan, policy, text, kind)
   const directForbidden = directlyForbiddenByText(plan, policy, text)
   const broadForbidden = broadlyForbiddenByText(plan, policy, kind)
   const explicitlyForbidden = directForbidden || (broadForbidden && !allowedByTask && !hasPriorForeshadowing && !costOrLimit)
-  const severity = findingSeverity({ kind, allowedByTask, hasPriorForeshadowing, explicitlyForbidden, costOrLimit })
+  const severity = findingSeverity({ kind, allowedByTask, hasPriorForeshadowing, explicitlyForbidden, costOrLimit, authorizedMedium, chapterMode })
+  const reviewReason =
+    authorizedMedium && costOrLimit && severity !== 'fail'
+      ? `${reason} The draft presents this through an in-world medium and attaches a cost or limitation, so it is recorded for review instead of treated as an automatic hard fail.`
+      : costOrLimit && severity !== 'fail'
+        ? `${reason} The draft also states a cost or limitation, so this is recorded for review instead of treated as an automatic hard fail.`
+        : reason
   return {
     kind,
     text,
     evidenceExcerpt,
-    reason: costOrLimit && severity !== 'fail' ? `${reason} The draft also states a cost or limitation, so this is recorded for review instead of treated as an automatic hard fail.` : reason,
+    reason: reviewReason,
     severity,
     allowedByTask,
     hasPriorForeshadowing,
-    sourceHint: sourceHintFor({ allowedByTask, hasPriorForeshadowing, explicitlyForbidden, costOrLimit }),
+    sourceHint: sourceHintFor({ allowedByTask, hasPriorForeshadowing, explicitlyForbidden, costOrLimit, authorizedMedium }),
     suggestedAction:
       severity === 'fail'
         ? 'Remove this novelty, revise it into an already foreshadowed rule/entity, or explicitly add it to the chapter task before accepting.'
@@ -525,8 +584,10 @@ function buildDeusExFindings(text: string, context: string, plan: ChapterPlan | 
       const allowed = allowedByText(plan, policy, keyword, baseKind)
       const prior = textMatches(context, keyword)
       const cost = hasCostOrLimit(excerpt)
+      const authorizedMedium = hasAuthorizedRuleMedium(excerpt)
+      const chapterMode = inferChapterNoveltyMode(plan)
       const convenience = includesAny(excerpt, DEUS_EX_CUE_KEYWORDS)
-      if (!convenience || allowed || prior || cost) return null
+      if (!convenience || allowed || prior || cost || (authorizedMedium && chapterMode !== 'climax_solution')) return null
       return createFinding(
         baseKind,
         keyword,

@@ -1,4 +1,4 @@
-import { AiHttpError } from './aiErrors'
+import { AiHttpError } from '../utils/aiErrors'
 
 export interface AIHttpClientOptions {
   timeoutMs?: number

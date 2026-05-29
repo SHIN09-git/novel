@@ -135,6 +135,9 @@ Novel Director 是本地优先工具。项目数据存储在你的机器上，�
 ### 文档
 
 - [快速开始](./QUICKSTART.md)
+- [新手教程](./docs/BEGINNER_TUTORIAL.md)
+- [开源说明](./docs/OPEN_SOURCE_GUIDE.md)
+- [AI 工作流与 Prompt 风险施工计划](./docs/AI_WORKFLOW_PROMPT_REPAIR_PLAN.md)
 - [测试指南](./TESTING.md)
 - [路线图](./ROADMAP.md)
 - [安全策略](./SECURITY.md)
@@ -297,6 +300,9 @@ The regression project sometimes appears as `Fog City Test Draft` / `《雾城�
 ### Documentation
 
 - [Quickstart](./QUICKSTART.md)
+- [Beginner tutorial](./docs/BEGINNER_TUTORIAL.md)
+- [Open source guide](./docs/OPEN_SOURCE_GUIDE.md)
+- [AI workflow and prompt repair plan](./docs/AI_WORKFLOW_PROMPT_REPAIR_PLAN.md)
 - [Testing guide](./TESTING.md)
 - [Roadmap](./ROADMAP.md)
 - [Security policy](./SECURITY.md)

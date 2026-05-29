@@ -9,7 +9,7 @@ import type {
 } from '../../../../shared/types'
 import { normalizeMemoryUpdatePatch } from '../../../../shared/normalizers/memoryUpdate'
 import { normalizeTreatmentMode } from '../../../../shared/foreshadowingTreatment'
-import { QUALITY_GATE_HUMAN_REVIEW_SCORE, QualityGateService } from '../../../../services/QualityGateService'
+import { AuthorDecisionPolicyService } from '../../../../services/AuthorDecisionPolicyService'
 import type { ConfirmFn } from '../../components/ConfirmDialog'
 import { newId, now } from '../../utils/format'
 import { projectData } from '../../utils/projectData'
@@ -262,25 +262,9 @@ export function useMemoryCandidates({ project, selectedJob, qualityGateReports, 
   }
 
   async function confirmQualityGateBypass(candidates: MemoryUpdateCandidate[], title: string, confirmLabel: string): Promise<boolean> {
-    const reviewReports = [
-      ...new Map(
-        candidates
-          .map((candidate) => qualityGateReports.find((item) => item.jobId === candidate.jobId && QualityGateService.shouldRequireHumanReview(item)) ?? null)
-          .filter((item): item is QualityGateReport => Boolean(item))
-          .map((report) => [report.id, report] as const)
-      ).values()
-    ]
-    if (!reviewReports.length) return true
-    const scoreText = reviewReports.map((report) => `${report.overallScore} 分`).join('、')
-    const hasFailedReport = reviewReports.some((report) => !report.pass)
-    return confirmAction({
-      title,
-      message: hasFailedReport
-        ? `相关流水线质量门禁未通过（${scoreText}）。确认仍要应用这些长期记忆更新吗？`
-        : `相关流水线质量门禁低于人工确认线 ${QUALITY_GATE_HUMAN_REVIEW_SCORE} 分或存在关键维度风险（${scoreText}）。确认仍要应用这些长期记忆更新吗？`,
-      confirmLabel,
-      tone: hasFailedReport ? 'danger' : 'default'
-    })
+    const reviewReports = AuthorDecisionPolicyService.reportsForMemoryCandidates(candidates, qualityGateReports)
+    const prompt = AuthorDecisionPolicyService.memoryCandidatePrompt(reviewReports, title, confirmLabel)
+    return prompt ? confirmAction(prompt) : true
   }
 
   async function applyCandidate(candidate: MemoryUpdateCandidate) {

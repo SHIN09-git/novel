@@ -12,6 +12,7 @@ import { formatContinuityBridgeForPrompt, resolveContinuityBridge } from './Cont
 import { TokenEstimator } from './TokenEstimator'
 import { StoryDirectionService } from './StoryDirectionService'
 import { HardCanonPackService } from './HardCanonPackService'
+import { PromptLintService } from './PromptLintService'
 import { dedupeAgainstBridge, formatCompressedChapterRecap, formatStageSummary, formatTimeline, summarizeChapter } from './promptFormatters/chapterFormatters'
 import { formatCharacter, formatCharacterNeedSlice, formatCharacterStateLedgerSlice } from './promptFormatters/characterFormatters'
 import { formatForeshadowingOperationTable, selectedCharacters, selectedForeshadowings, uniqueById } from './promptFormatters/foreshadowingFormatters'
@@ -358,15 +359,17 @@ export class PromptBuilderService {
       }
     ]
 
-    const finalPrompt = [`# 第 ${target} 章写作 Prompt`, ...blocks.map(renderPromptBlock)]
+    const rawPrompt = [`# 第 ${target} 章写作 Prompt`, ...blocks.map(renderPromptBlock)]
       .filter(Boolean)
       .join('\n')
       .trim()
+    const promptLintGuard = PromptLintService.guardWritingPrompt(rawPrompt)
+    const finalPrompt = promptLintGuard.guardedPrompt
     const promptBlockOrder = blocks.map(blockToOrderItem)
 
     return {
       finalPrompt,
-      estimatedTokens: TokenEstimator.estimate(finalPrompt),
+      estimatedTokens: promptLintGuard.result.guardedTokenEstimate,
       promptBlockOrder,
       contextSelectionResult: budgetSelection as ContextSelectionResult | null,
       selectedCharacterIds: config.selectedCharacterIds,
@@ -379,7 +382,8 @@ export class PromptBuilderService {
       continuityBridge: continuity.bridge,
       continuitySource: continuity.source,
       compressionRecords: budgetSelection?.compressionRecords ?? [],
-      warnings: [...(budgetSelection?.warnings ?? []), ...continuity.warnings, ...taskWarnings]
+      promptLintResult: promptLintGuard.result,
+      warnings: [...(budgetSelection?.warnings ?? []), ...continuity.warnings, ...taskWarnings, ...promptLintGuard.result.warnings]
     }
   }
 

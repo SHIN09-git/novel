@@ -152,6 +152,34 @@ export interface PromptContextSnapshot {
   updatedAt: string
 }
 
+export type PromptLintIssueKind =
+  | 'placeholder'
+  | 'empty_label'
+  | 'audit_tone'
+  | 'diagnostic_text'
+  | 'duplicate_guardrail'
+  | 'english_duplicate_guardrail'
+
+export interface PromptLintIssue {
+  kind: PromptLintIssueKind
+  severity: 'info' | 'warning'
+  lineNumber: number | null
+  excerpt: string
+  action: 'removed' | 'deduped' | 'rewritten' | 'warning'
+  message: string
+}
+
+export interface PromptLintResult {
+  issueCount: number
+  removedLineCount: number
+  dedupedLineCount: number
+  rewrittenLineCount: number
+  originalTokenEstimate: number
+  guardedTokenEstimate: number
+  issues: PromptLintIssue[]
+  warnings: string[]
+}
+
 export interface ContextBudgetProfile {
   id: ID
   projectId: ID

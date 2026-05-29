@@ -177,21 +177,21 @@
 
 .generation-view .pipeline-top-status {
   position: sticky;
-  top: 0;
+  top: 72px;
   z-index: 4;
-  border: 1px solid rgba(40, 118, 111, 0.16);
-  border-radius: var(--radius-lg);
-  background: rgba(252, 250, 245, 0.92);
+  border: 1px solid rgba(45, 130, 120, 0.18);
+  border-radius: 18px;
+  background: rgba(255, 253, 248, 0.92);
   box-shadow: var(--shadow-soft);
   backdrop-filter: blur(14px);
 }
 
 .generation-view .pipeline-top-status-inner {
   display: grid;
-  grid-template-columns: minmax(170px, 0.9fr) minmax(0, 2.6fr) auto;
+  grid-template-columns: minmax(190px, 0.8fr) minmax(0, 2.4fr) auto;
   gap: var(--space-4);
   align-items: center;
-  padding: 14px 16px;
+  padding: 15px 16px;
 }
 
 .generation-view .pipeline-top-status-main h2 {
@@ -201,13 +201,17 @@
 .generation-view .pipeline-status-cluster {
   display: grid;
   grid-template-columns: repeat(4, minmax(110px, 1fr));
-  gap: 10px;
+  gap: 8px;
 }
 
 .generation-view .pipeline-status-cluster > div {
   display: grid;
   gap: 3px;
   min-width: 0;
+  padding: 9px 10px;
+  border: 1px solid rgba(218, 212, 200, 0.72);
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.45);
 }
 
 .generation-view .pipeline-status-cluster span,
@@ -226,8 +230,8 @@
 
 .generation-view .pipeline-console-grid {
   display: grid;
-  grid-template-columns: minmax(260px, 310px) minmax(0, 1fr) minmax(280px, 340px);
-  gap: var(--space-4);
+  grid-template-columns: minmax(300px, 340px) minmax(580px, 1fr) minmax(320px, 380px);
+  gap: 18px;
   align-items: start;
 }
 
@@ -245,10 +249,10 @@
 
 .generation-view .pipeline-card {
   border: 1px solid var(--line);
-  border-radius: var(--radius-lg);
-  background: var(--surface);
+  border-radius: 16px;
+  background: rgba(255, 253, 248, 0.94);
   box-shadow: var(--shadow-soft);
-  padding: 16px;
+  padding: 17px;
 }
 
 .generation-view .pipeline-card-title,
@@ -291,7 +295,7 @@
 
 .generation-view .pipeline-job-item {
   border: 1px solid var(--line);
-  border-radius: var(--radius);
+  border-radius: 13px;
   background: var(--surface-strong);
   color: var(--ink);
   text-align: left;
@@ -302,8 +306,9 @@
 }
 
 .generation-view .pipeline-job-item.active {
-  border-color: rgba(40, 118, 111, 0.42);
+  border-color: rgba(45, 130, 120, 0.42);
   background: var(--color-accent-soft);
+  box-shadow: inset 3px 0 var(--color-accent);
 }
 
 .generation-view .pipeline-context-snapshot {
@@ -369,22 +374,26 @@
 .generation-view .pipeline-artifact-tabs {
   display: flex;
   gap: 8px;
-  border-bottom: 1px solid var(--line);
+  padding: 4px;
+  border: 1px solid var(--line);
+  border-radius: 13px;
+  background: var(--color-surface-soft);
 }
 
 .generation-view .pipeline-artifact-tabs button {
   border: 0;
-  border-bottom: 2px solid transparent;
+  border-radius: 10px;
   background: transparent;
   color: var(--muted);
   cursor: pointer;
   font-weight: 800;
-  padding: 8px 10px;
+  padding: 8px 12px;
 }
 
 .generation-view .pipeline-artifact-tabs button.active {
-  border-color: var(--teal);
   color: var(--ink);
+  background: var(--color-surface-elevated);
+  box-shadow: 0 5px 14px rgba(28, 35, 31, 0.06);
 }
 
 .generation-view .pipeline-artifact-body pre,
@@ -412,6 +421,9 @@
   min-height: 430px;
   line-height: 1.9;
   font-size: 15px;
+  background:
+    linear-gradient(90deg, rgba(45, 130, 120, 0.04), transparent 28%),
+    var(--color-surface-elevated);
 }
 
 .generation-view .pipeline-draft-actions {
@@ -454,8 +466,8 @@
 .generation-view .pipeline-risk-banner {
   display: grid;
   gap: 8px;
-  border: 1px solid rgba(185, 111, 54, 0.36);
-  border-radius: var(--radius-lg);
+  border: 1px solid rgba(168, 109, 37, 0.36);
+  border-radius: 16px;
   padding: 14px;
 }
 
@@ -497,7 +509,7 @@
 
 @media (max-width: 1500px) {
   .generation-view .pipeline-console-grid {
-    grid-template-columns: minmax(250px, 310px) minmax(0, 1fr);
+    grid-template-columns: minmax(280px, 330px) minmax(0, 1fr);
   }
 
   .generation-view .pipeline-inspector {

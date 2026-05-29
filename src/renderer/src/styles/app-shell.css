@@ -21,56 +21,60 @@ code {
 }
 
 .home {
-  min-height: 100vh;
-  padding: 40px;
-  max-width: 1380px;
+  min-height: 100dvh;
+  padding: 42px;
+  max-width: 1420px;
   margin: 0 auto;
 }
 
 .app-shell {
-  min-height: 100vh;
+  min-height: 100dvh;
   display: grid;
-  grid-template-columns: 260px 1fr;
+  grid-template-columns: 286px minmax(0, 1fr);
 }
 
 .sidebar {
-  background:
-    radial-gradient(circle at top left, rgba(114, 196, 183, 0.16), transparent 18rem),
-    linear-gradient(180deg, #192523 0%, var(--sidebar) 100%);
+  background: linear-gradient(180deg, #12201d 0%, var(--sidebar) 100%);
   color: #f4f5f0;
-  padding: 22px 18px;
+  padding: 16px 16px;
   display: flex;
   flex-direction: column;
-  gap: 20px;
+  gap: 12px;
   position: sticky;
   top: 0;
-  height: 100vh;
+  height: 100dvh;
+  overflow: auto;
   box-shadow: inset -1px 0 rgba(255, 255, 255, 0.06);
 }
 
 .brand-mark {
   display: grid;
-  grid-template-columns: 44px 1fr;
-  gap: 12px;
+  grid-template-columns: 42px 1fr;
+  gap: 11px;
   align-items: center;
-  padding: 4px 4px 2px;
+  padding: 2px 6px 5px;
 }
 
 .brand-symbol {
   width: 42px;
   height: 42px;
-  border-radius: 12px;
+  border-radius: 13px;
   display: grid;
   place-items: center;
-  background: linear-gradient(135deg, rgba(246, 213, 160, 0.92), rgba(114, 196, 183, 0.82));
-  color: #14201e;
+  border: 1px solid rgba(151, 236, 222, 0.32);
+  background:
+    linear-gradient(135deg, rgba(151, 236, 222, 0.20), rgba(255, 255, 255, 0.05)),
+    rgba(255, 255, 255, 0.06);
+  color: #dffcf7;
   font-weight: 900;
-  box-shadow: 0 10px 26px rgba(0, 0, 0, 0.26);
+  letter-spacing: 0.04em;
+  box-shadow: inset 0 1px rgba(255, 255, 255, 0.12), 0 14px 30px rgba(0, 0, 0, 0.24);
 }
 
 .brand-mark strong {
   display: block;
   font-size: 17px;
+  letter-spacing: 0.01em;
 }
 
 .brand-mark span {
@@ -81,12 +85,13 @@ code {
 }
 
 .project-badge {
-  background: rgba(255, 255, 255, 0.07);
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  border-radius: var(--radius);
-  padding: 16px;
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.10);
+  border-radius: 16px;
+  padding: 12px 14px;
   display: grid;
-  gap: 6px;
+  gap: 5px;
+  box-shadow: inset 0 1px rgba(255, 255, 255, 0.06);
 }
 
 .project-badge span,
@@ -95,22 +100,37 @@ code {
 }
 
 .project-badge strong {
-  font-size: 18px;
+  font-size: 17px;
   line-height: 1.35;
 }
 
 .nav-list {
   display: grid;
-  gap: 7px;
+  gap: 10px;
+}
+
+.nav-group {
+  display: grid;
+  gap: 5px;
+}
+
+.nav-group-label {
+  padding: 0 10px;
+  color: rgba(244, 245, 240, 0.42);
+  font-size: 11px;
+  font-weight: 900;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
 }
 
 .nav-list button,
 .back-button {
-  color: rgba(244, 245, 240, 0.86);
+  color: rgba(244, 245, 240, 0.78);
   background: transparent;
   text-align: left;
-  padding: 11px 12px;
-  border-radius: var(--radius);
+  padding: 7px 10px;
+  border: 1px solid transparent;
+  border-radius: 13px;
   display: flex;
   align-items: center;
   gap: 10px;
@@ -123,12 +143,16 @@ code {
 .nav-list button:hover,
 .back-button:hover,
 .nav-list button.active {
-  background: rgba(114, 196, 183, 0.18);
+  border-color: rgba(151, 236, 222, 0.15);
+  background: rgba(151, 236, 222, 0.10);
   color: #ffffff;
 }
 
 .nav-list button.active {
-  box-shadow: inset 3px 0 var(--color-accent);
+  background:
+    linear-gradient(90deg, rgba(151, 236, 222, 0.20), rgba(151, 236, 222, 0.08)),
+    rgba(255, 255, 255, 0.05);
+  box-shadow: inset 3px 0 #95e6dc, 0 10px 24px rgba(0, 0, 0, 0.18);
 }
 
 .nav-icon {
@@ -160,12 +184,68 @@ code {
   font-size: 12px;
   line-height: 1.5;
   display: grid;
-  gap: 8px;
+  gap: 7px;
+}
+
+.back-button {
+  border-color: rgba(255, 255, 255, 0.08);
+  background: rgba(255, 255, 255, 0.04);
 }
 
 .main-panel {
-  padding: 34px 36px 42px;
+  min-width: 0;
+  padding: 22px 28px 42px;
   overflow: auto;
+}
+
+.workspace-topbar {
+  position: sticky;
+  top: 0;
+  z-index: 20;
+  display: grid;
+  grid-template-columns: minmax(220px, 1fr) minmax(160px, 0.7fr) minmax(220px, 1fr);
+  gap: 1px;
+  max-width: 1720px;
+  margin: 0 auto 22px;
+  overflow: hidden;
+  border: 1px solid rgba(218, 212, 200, 0.78);
+  border-radius: 16px;
+  background: rgba(255, 253, 248, 0.88);
+  box-shadow: var(--shadow-soft);
+  backdrop-filter: blur(14px);
+}
+
+.workspace-topbar > div {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+  padding: 12px 15px;
+  background: rgba(255, 253, 248, 0.72);
+}
+
+.workspace-topbar span {
+  color: var(--color-text-muted);
+  font-size: 11px;
+  font-weight: 900;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.workspace-topbar strong {
+  overflow: hidden;
+  color: var(--ink);
+  font-size: 14px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.workspace-save-state strong {
+  color: var(--color-accent-strong);
+}
+
+.workspace-content {
+  max-width: 1720px;
+  margin: 0 auto;
 }
 
 .page-header {
@@ -173,12 +253,12 @@ code {
   align-items: flex-start;
   justify-content: space-between;
   gap: 24px;
-  margin-bottom: 24px;
+  margin-bottom: 22px;
 }
 
 .page-header h1 {
   margin: 0;
-  font-size: 32px;
+  font-size: 34px;
   line-height: 1.2;
   letter-spacing: 0;
 }
