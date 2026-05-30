@@ -1,6 +1,6 @@
 # 路线图 / Roadmap
 
-最后审阅日期：2026-05-13
+最后审阅日期：2026-05-30
 
 这份路线图基于当前仓库代码、验证脚本、公开文档和本轮重新检测结果整理。它面向公开读者、贡献者和后续维护者，不包含本机路径、私有稿件、真实密钥或内部敏感细节。
 
@@ -20,7 +20,7 @@
 当前验证基线：
 
 - `npm.cmd run typecheck`：通过
-- `npm.cmd test`：通过，当前 44 个验证脚本
+- `npm.cmd test`：通过，当前 48 个验证脚本
 - `npm.cmd run build`：通过
 - `validate-no-mojibake.mjs`：通过
 - `validate-release-p0-readiness.mjs`：通过
@@ -48,7 +48,9 @@
 - `PromptBuilderService.ts` 已拆出 `src/services/promptFormatters/*`。
 - `ContextBudgetManager.ts` 已拆出 `src/services/contextBudget/*`。
 - 生成流水线执行器已拆成 `pipelineRunnerEngine.ts`、`pipelineRunnerTypes.ts` 和 `pipelineSteps/*`，`usePipelineRunnerCore.ts` 已降到可维护体量。
-- NoveltyDetector 已从简单关键词命中升级为分层判定：任务书许可、已有上下文、显式禁止、代价/限制、机械降神便利性会共同决定风险等级。
+- NoveltyDetector 已从简单关键词命中升级为分层判定：任务书许可、已有上下文、显式禁止、来源媒介、章节模式、代价/限制、机械降神便利性会共同决定风险等级。
+- 质量门禁、Novelty Audit 和冗余诊断已收敛到 main process diagnostics IPC；renderer 侧不再保留重型服务动态 fallback。
+- 写作 Prompt Guard 已升级为运行时防护：清理占位符、重复禁令和审稿口吻，并把有价值的风险提示转译成当前写作限制。
 
 ### 当前产品状态
 
@@ -142,10 +144,13 @@ npm.cmd run smoke:packaged
 - Prompt Priority Stack 已将上一章衔接、本章任务、角色硬状态、伏笔规则和 HardCanon 前置。
 - StageSummary 职责已收窄为远期剧情压缩背景。
 - 写作 Prompt 已去除空字段、占位符、重复英文 guardrail 和风险审稿口吻。
+- 运行时 Prompt Guard 会在最终正文 prompt 生成后执行 lint，阻止诊断文字回流，并在 Run Trace 中记录 prompt lint 结果。
 - 伏笔按 treatmentMode 分组，可推进数量限制为 10。
 - NoveltyDetector 已能区分：
   - 任务书许可的新信息；
   - 已在上下文或伏笔中出现的规则复用；
+  - 通过系统提示、广播、票据、公告、环境线索等合理媒介出现的新规则；
+  - 新副本开场、揭露章和高潮解法章的不同风险阈值；
   - 带明确代价/限制的新规则；
   - 未授权、无铺垫、无代价且刚好解围的机械降神式规则补丁；
   - 编号管理员/组织层级与普通命名角色。
@@ -170,8 +175,8 @@ npm.cmd run smoke:packaged
 
 4. 继续降低 NoveltyDetector 漏判。
    - 增加“规则变体同义词”与“规则作用对象”识别。
-   - 对“系统提示、广播、票据、公告、环境线索”作为合理新规则媒介进行更细分判断。
-   - 对“揭露章 / 新副本开场章 / 高潮解法章”采用不同风险阈值。
+   - 继续细化“规则触发对象 / 受益对象 / 解除危机方式”的解析。
+   - 为不同题材和副本类型补充可维护的规则词典，降低误报和漏报。
 
 ### P3：作者体验
 
@@ -241,7 +246,7 @@ npm.cmd run smoke:packaged
 
 ## English
 
-Last reviewed: 2026-05-13.
+Last reviewed: 2026-05-30.
 
 This roadmap reflects the current repository, validation scripts, public documentation, and this review pass. It is public-facing and avoids local paths, private manuscripts, real credentials, and internal sensitive details.
 
@@ -257,7 +262,7 @@ This pass reviewed:
 Current validation baseline:
 
 - `npm.cmd run typecheck`: passing
-- `npm.cmd test`: passing, currently 44 validation scripts
+- `npm.cmd test`: passing, currently 48 validation scripts
 - `npm.cmd run build`: passing
 - `validate-no-mojibake.mjs`: passing
 - `validate-release-p0-readiness.mjs`: passing
@@ -283,7 +288,9 @@ Structural progress:
 - Shared types and defaults have been split into domain modules with compatibility exports.
 - Prompt formatting and context budget logic have been split into focused modules.
 - The generation pipeline runner has been split into an engine, shared runner types, and phase-specific step handlers.
-- Novelty detection has moved from simple keyword hits toward layered judgment using chapter permission, prior context, explicit forbiddance, cost/limits, and deus-ex convenience signals.
+- Novelty detection has moved from simple keyword hits toward layered judgment using chapter permission, prior context, explicit forbiddance, source media, chapter mode, cost/limits, and deus-ex convenience signals.
+- Quality Gate, Novelty Audit, and redundancy diagnostics now go through main-process diagnostics IPC; renderer-side heavy-service fallback has been removed.
+- Runtime Prompt Guard now lints final writing prompts, removes placeholders / duplicate guardrails / review tone, and rewrites useful risks into current writing constraints.
 
 ### Current State
 
@@ -353,15 +360,16 @@ Completed baseline:
 - Prompt Priority Stack protects previous-chapter bridge, chapter task, character hard state, foreshadowing rules, and HardCanon.
 - StageSummary has been narrowed to long-range plot compression.
 - Writing prompts remove empty placeholders, duplicate English guardrails, and review-tone risk text.
+- Runtime Prompt Guard runs after final writing prompt assembly and records prompt lint results in Run Trace.
 - Foreshadowing is grouped by treatmentMode and progression is capped at 10 items.
-- NoveltyDetector now separates task-authorized novelty, previously traced rule reuse, costly-but-unauthorized novelty, and unearned deus-ex rule patches.
+- NoveltyDetector now separates task-authorized novelty, previously traced rule reuse, source-media-supported rules, chapter-mode allowances, costly-but-unauthorized novelty, and unearned deus-ex rule patches.
 
 Next:
 
 1. Add stronger uncertainty handling to Context Need Planner.
 2. Improve ContextBudgetManager dropped / unmet explanations.
 3. Add prompt block preview with token estimates, source, priority, truncation, forced state, and compression state.
-4. Continue improving NoveltyDetector with rule synonyms, rule targets, media/source channels, and chapter-type-specific thresholds.
+4. Continue improving NoveltyDetector with rule synonyms, rule targets, beneficiary / crisis-resolution parsing, and maintainable genre-specific dictionaries.
 
 ### P3: Author Experience
 

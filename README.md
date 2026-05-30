@@ -22,6 +22,8 @@ Novel Director 是一个实验性的、本地优先的 AI 长篇小说工作台�
 - 角色卡、角色状态账本、伏笔账本、时间线和阶段摘要。
 - Prompt 构建器，支持 token 预算、上下文快照、伏笔处理方式和优先级 Prompt 组装。
 - 章节生产流水线，包含章节计划、正文草稿、章节复盘、记忆候选、一致性审稿、质量门禁和 Run Trace。
+- 运行时写作 Prompt Guard，会清理占位符、重复禁令和审稿口吻，并把有价值的风险提示转译成当前写作限制。
+- 质量门禁、Novelty Audit 和冗余诊断通过 main process 诊断接口执行，renderer 只接收结构化报告。
 - 修订工作台，支持版本历史和差异对比。
 - 本地数据路径管理，支持备份、迁移和合并预览。
 - 在 Electron `safeStorage` 可用时，使用安全存储保存 API Key。
@@ -187,6 +189,8 @@ This repository is an early `0.1.0` preview. It is useful for local trials and d
 - Character cards, character state ledger, foreshadowing ledger, timeline, and stage summaries.
 - Prompt Builder with token budgeting, context snapshots, foreshadowing treatment modes, and priority-ordered prompt assembly.
 - Generation Pipeline for chapter plan, draft, review, memory candidates, consistency review, quality gate, and run trace.
+- Runtime writing prompt guard that removes placeholders, duplicate guardrails, and review-tone text, while rewriting useful risks into current writing constraints.
+- Quality Gate, Novelty Audit, and redundancy diagnostics run through the main-process diagnostics API; the renderer receives structured reports.
 - Revision workbench with version history and diff view.
 - Local data path management with backup, migration, and merge preview.
 - Secure API key storage through Electron `safeStorage` when available.

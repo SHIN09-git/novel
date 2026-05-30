@@ -24,6 +24,8 @@
 - 添加 `CHANGELOG.md`。
 - 添加 `THIRD_PARTY_NOTICES.md`。
 - 添加 `scripts/validate-public-release-cleanup.mjs`，防止这些清理项回退。
+- 当前本地验证基线：`npm.cmd run typecheck`、`npm.cmd test`（48 个验证脚本）和 `npm.cmd run build` 均通过。
+- 运行时 Prompt Guard、main process diagnostics IPC、Novelty Guardrails 和 packaged smoke test 已纳入验证脚本覆盖。
 
 ### 需要在 GitHub 仓库设置中完成
 
@@ -37,6 +39,7 @@
 
 - 生成二进制应附加到 GitHub Releases，不应提交到源码仓库。
 - Release artifact 应提供校验和。
+- 发布安装包前应重新运行 `npm.cmd run dist:win` 与 `npm.cmd run smoke:packaged`，并确认 `release/` 产物没有被提交到源码仓库。
 - 如果未来添加公开截图，应使用干净的 synthetic demo，并放在 `docs/assets/`。
 
 ---
@@ -65,6 +68,8 @@ This checklist records the repository-local checks before the first public sourc
 - Added `CHANGELOG.md`.
 - Added `THIRD_PARTY_NOTICES.md`.
 - Added `scripts/validate-public-release-cleanup.mjs` to keep these checks from regressing.
+- Current local validation baseline: `npm.cmd run typecheck`, `npm.cmd test` (48 validation scripts), and `npm.cmd run build` pass.
+- Runtime Prompt Guard, main-process diagnostics IPC, Novelty Guardrails, and packaged smoke coverage are included in validation scripts.
 
 ### Must Be Completed In GitHub Repository Settings
 
@@ -78,4 +83,5 @@ This checklist records the repository-local checks before the first public sourc
 
 - Generated binaries should be attached to GitHub Releases, not committed to source.
 - Release artifacts should include checksums.
+- Before publishing installers, rerun `npm.cmd run dist:win` and `npm.cmd run smoke:packaged`, then confirm `release/` artifacts are not committed to source.
 - Public screenshots, if added later, should be clean synthetic demos under `docs/assets/`.

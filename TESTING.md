@@ -62,7 +62,8 @@ tmp/rc-regression/novel-director-data.json
 - 是否引入了未授权救命规则、命名角色、组织层级或重大设定揭示。
 - 长期记忆候选是否在用户明确接受前保持 pending。
 - 质量门禁和一致性 issue 是否能进入修订流程。
-- Run Trace 是否解释了 selected context、forced context blocks、compression records、prompt block order 和 novelty audit。
+- Run Trace 是否解释了 selected context、forced context blocks、compression records、prompt block order、novelty audit 和 prompt lint 结果。
+- 最终写作 Prompt 是否没有“待补充”、重复禁令、审稿口吻或低价值诊断文字。
 
 ### 数据安全检查
 
@@ -182,7 +183,8 @@ For each generated chapter, verify:
 - No unapproved rescue rule, named character, organization tier, or major lore reveal is introduced.
 - Long-term memory candidates remain pending until explicitly accepted.
 - Quality gate and consistency issues can enter revision.
-- Run Trace explains selected context, forced context blocks, compression records, prompt block order, and novelty audit.
+- Run Trace explains selected context, forced context blocks, compression records, prompt block order, novelty audit, and prompt lint results.
+- Final writing prompts do not contain placeholders, duplicate guardrails, review-tone prose, or low-value diagnostic text.
 
 ### Data Safety Checks
 
