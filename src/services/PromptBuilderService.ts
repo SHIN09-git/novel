@@ -13,13 +13,12 @@ import { TokenEstimator } from './TokenEstimator'
 import { StoryDirectionService } from './StoryDirectionService'
 import { HardCanonPackService } from './HardCanonPackService'
 import { PromptLintService } from './PromptLintService'
+import { activeChapters } from './ChapterLifecycleService'
 import { dedupeAgainstBridge, formatCompressedChapterRecap, formatStageSummary, formatTimeline, summarizeChapter } from './promptFormatters/chapterFormatters'
 import { formatCharacter, formatCharacterNeedSlice, formatCharacterStateLedgerSlice } from './promptFormatters/characterFormatters'
 import { formatForeshadowingOperationTable, selectedCharacters, selectedForeshadowings, uniqueById } from './promptFormatters/foreshadowingFormatters'
-import { blockToOrderItem, fieldLine, isPlaceholderText, priorityRuleText, renderPromptBlock, styleSampleLimit, truncateText, valueOrEmpty, formatStyleEnvelope, type PromptBlockDraft } from './promptFormatters/promptUtils'
-
+import { chapterNoveltyPolicyLines, fieldLine, filterPromptLinesByExclusionText, isPlaceholderText, priorityRuleText, promptBlockOrderFromFinalPrompt, renderPromptBlock, styleSampleLimit, truncateText, valueOrEmpty, formatStyleEnvelope, type PromptBlockDraft } from './promptFormatters/promptUtils'
 export { inferPromptBlockOrderFromPrompt, parseChapterNumbersFromText } from './promptFormatters/promptUtils'
-
 export class PromptBuilderService {
   static selectBudgetContext(input: PromptBuildInput, budgetProfile: ContextBudgetProfile) {
     return ContextBudgetManager.selectContext(
@@ -39,12 +38,14 @@ export class PromptBuilderService {
         foreshadowingIds: input.config.selectedForeshadowingIds,
         chapterTask: input.config.task,
         foreshadowingTreatmentOverrides: input.config.foreshadowingTreatmentOverrides,
-        contextNeedPlan: input.contextNeedPlan ?? null
+        contextNeedPlan: input.contextNeedPlan ?? null,
+        selectionMode: 'explicit'
       }
     )
   }
 
   static buildResult(input: PromptBuildInput): BuildPromptResult {
+    input = { ...input, chapters: activeChapters(input.chapters) }
     let workingInput = input
     const budgetSelection =
       input.explicitContextSelection ?? (input.budgetProfile ? PromptBuilderService.selectBudgetContext(input, input.budgetProfile) : null)
@@ -71,7 +72,6 @@ export class PromptBuilderService {
         }
       }
     }
-
     const { project, bible, chapters, characters, characterStateLogs, characterStateFacts, foreshadowings, timelineEvents, stageSummaries, config } =
       workingInput
     const target = config.targetChapterOrder
@@ -95,11 +95,25 @@ export class PromptBuilderService {
     const characterSelection = uniqueById(selectedCharacters(characters, foreshadowingSelection, config))
     const contextNeedPlan = workingInput.contextNeedPlan ?? null
 
+    const task = config.task
+    const isOpeningChapter = target === 1
     const styleLimit = input.budgetProfile?.styleSampleMaxChars ?? styleSampleLimit(config.mode)
     const styleSample = bible?.styleSample ? truncateText(bible.styleSample, styleLimit) : ''
-    const hardCanonPrompt = HardCanonPackService.compressHardCanonPackForPrompt(workingInput.hardCanonPack ?? null)
-    const styleEnvelopeText = formatStyleEnvelope(project, bible, styleSample)
-
+    const allowedHardCanonItemIds = contextNeedPlan
+      ? (contextNeedPlan.contextNeeds ?? [])
+          .filter((need) => need.sourceHint === 'hardCanon' && Boolean(need.sourceId))
+          .map((need) => need.sourceId as string)
+      : undefined
+    const hardCanonPrompt = HardCanonPackService.compressHardCanonPackForPrompt(workingInput.hardCanonPack ?? null, {
+      exclusionText: task.forbiddenPayoffs,
+      allowedItemIds: allowedHardCanonItemIds,
+      isOpeningChapter
+    })
+    const styleEnvelopeFilter = filterPromptLinesByExclusionText(
+      formatStyleEnvelope(project, bible, styleSample, isOpeningChapter),
+      task.forbiddenPayoffs
+    )
+    const styleEnvelopeText = styleEnvelopeFilter.text
     const latestProgress =
       previousChapters
         .slice(-1)
@@ -108,14 +122,13 @@ export class PromptBuilderService {
         .join('\n')
     const dedupedLatestProgress = dedupeAgainstBridge(latestProgress, continuity.bridge)
 
-    const task = config.task
     const taskText = [
       fieldLine('本章目标：', task.goal),
       fieldLine('本章必须推进的冲突：', task.conflict),
-      fieldLine('本章必须保留的悬念：', task.suspenseToKeep),
-      fieldLine('本章允许回收的伏笔：', task.allowedPayoffs),
-      fieldLine('本章禁止回收的伏笔：', task.forbiddenPayoffs),
-      fieldLine('本章结尾钩子：', task.endingHook),
+      fieldLine(isOpeningChapter ? '本章信息边界：' : '本章必须保留的悬念：', task.suspenseToKeep),
+      fieldLine(isOpeningChapter ? '本章唯一允许出现的信息：' : '本章允许回收的伏笔：', task.allowedPayoffs),
+      fieldLine(isOpeningChapter ? '本章禁止调用的既有资料：' : '本章禁止回收的伏笔：', task.forbiddenPayoffs),
+      fieldLine(isOpeningChapter ? '本章结尾收束：' : '本章结尾钩子：', task.endingHook),
       fieldLine('本章读者应该产生的情绪：', task.readerEmotion),
       fieldLine('本章预计字数：', task.targetWordCount),
       fieldLine('文风要求：', task.styleRequirement)
@@ -131,20 +144,28 @@ export class PromptBuilderService {
       .filter(([, value]) => isPlaceholderText(value))
       .map(([label]) => `章节任务字段缺失：${label}`)
 
-    const characterStateText = [
-      '【角色状态账本切片】',
-      formatCharacterStateLedgerSlice(characterSelection, characterStateFacts ?? [], contextNeedPlan, target),
-      '【角色卡按需切片】',
-      characterSelection.length
-        ? characterSelection
-            .map((character) =>
-              contextNeedPlan ? formatCharacterNeedSlice(character, characterStateLogs, contextNeedPlan) : formatCharacter(character, characterStateLogs)
-            )
-            .join('\n\n')
-        : ''
-    ]
+    const characterCardText = characterSelection.length
+      ? characterSelection
+          .map((character) =>
+            contextNeedPlan ? formatCharacterNeedSlice(character, characterStateLogs, contextNeedPlan) : formatCharacter(character, characterStateLogs)
+          )
+          .join('\n\n')
+      : ''
+    const rawCharacterStateText = (isOpeningChapter
+      ? [
+          '【本章任务点名人物】',
+          characterCardText
+        ]
+      : [
+          '【角色状态账本切片】',
+          formatCharacterStateLedgerSlice(characterSelection, characterStateFacts ?? [], contextNeedPlan, target),
+          '【角色卡按需切片】',
+          characterCardText
+        ])
       .filter(Boolean)
       .join('\n\n')
+    const characterStateFilter = filterPromptLinesByExclusionText(rawCharacterStateText, task.forbiddenPayoffs)
+    const characterStateText = characterStateFilter.text
 
     const recentChapterText = recentChapters
       .map((chapter) => {
@@ -156,11 +177,29 @@ export class PromptBuilderService {
       .join('\n\n')
 
     const storyDirectionGuide = workingInput.storyDirectionGuide ?? null
-    const storyDirectionText = StoryDirectionService.formatForPrompt(storyDirectionGuide, target)
+    // The service also supports standalone rendering, where it owns the heading.
+    // Here the surrounding prompt block already owns that heading.
+    const storyDirectionText = StoryDirectionService.formatForPrompt(storyDirectionGuide, target).replace(/^##\s+[^\r\n]+\r?\n?/u, '')
 
     const remoteSummaryText = selectedSummaries.length
       ? selectedSummaries.map(formatStageSummary).join('\n\n')
       : ''
+    const timelineText = formatTimeline(timelineEvents, target)
+    const legacyForbiddenPolicyFilter = filterPromptLinesByExclusionText(
+      [fieldLine('禁用套路：', bible?.bannedTropes), fieldLine('不可违背设定：', bible?.immutableFacts)]
+        .filter(Boolean)
+        .join('\n'),
+      task.forbiddenPayoffs
+    )
+    const noveltyPolicyLines = chapterNoveltyPolicyLines(isOpeningChapter)
+    const forbiddenPolicyText = [
+      legacyForbiddenPolicyFilter.text,
+      '本章具体禁止回收项以第 3 节任务契约原文为准；本节不重复展开，避免把禁写内容误当作可用素材。',
+      isOpeningChapter ? '不得补造任务未提供的既往认知、力量规则或阶段进度；未写入任务契约的旧资料一律视为不可用。' : '不得让已明确的角色认知突然消失；不得无铺垫改变力量体系规则；不得把阶段摘要已经归档的信息重新写成新发现。',
+      ...noveltyPolicyLines
+    ]
+      .filter(Boolean)
+      .join('\n')
 
     const blocks: PromptBlockDraft[] = [
       {
@@ -170,19 +209,8 @@ export class PromptBuilderService {
         priority: 0,
         source: 'prompt_builder',
         enabled: true,
-        body: priorityRuleText(),
+        body: priorityRuleText(isOpeningChapter),
         reason: '先声明上下文权威顺序，防止低优先级设定或风格覆盖章节执行。'
-      },
-      {
-        id: 'hard-canon-pack',
-        title: '1. 不可违背设定 HardCanonPack',
-        kind: 'hard_canon',
-        priority: 1,
-        source: 'hard_canon_packs',
-        sourceIds: hardCanonPrompt.includedItemIds,
-        enabled: hardCanonPrompt.itemCount > 0,
-        body: hardCanonPrompt.body,
-        reason: '用户维护的不可违背硬设定，高于普通摘要、旧章节回顾和模型临时发挥；不得静默覆盖上一章衔接、本章任务、角色硬状态和伏笔规则。'
       },
       {
         id: 'writing-task',
@@ -192,8 +220,10 @@ export class PromptBuilderService {
         source: 'project',
         sourceIds: [project.id],
         enabled: true,
-        body: `你是一名长篇小说续写助手。请严格续写《${project.name}》第 ${target} 章。写作时先接住上一章最后一幕，再执行本章任务契约，并优先保证角色硬状态、伏笔 treatmentMode、章节目标和长篇一致性。`,
-        reason: '明确本次是章节续写任务，而不是资料整理或世界观扩写。'
+        body: isOpeningChapter
+          ? '你是一名长篇小说作者。请创作本项目第一章。直接从本章任务指定的场景自然开场；不存在上一章，不得伪造前情、未发生动作或需要承接的钩子。优先执行本章任务契约，并维持人物关系、信息边界、章节目标和长篇一致性。'
+          : `你是一名长篇小说续写助手。请严格续写《${project.name}》第 ${target} 章。写作时先接住上一章最后一幕，再执行本章任务契约，并优先保证角色硬状态、伏笔 treatmentMode、章节目标和长篇一致性。`,
+        reason: isOpeningChapter ? '明确本次是第一章创作任务，并禁止模型伪造不存在的前情。' : '明确本次是章节续写任务，而不是资料整理或世界观扩写。'
       },
       {
         id: 'continuity-bridge',
@@ -202,7 +232,7 @@ export class PromptBuilderService {
         priority: 2,
         source: continuity.source ?? 'continuity_service',
         sourceIds: continuity.bridge ? [continuity.bridge.id] : [],
-        enabled: config.useContinuityBridge !== false,
+        enabled: !isOpeningChapter && config.useContinuityBridge !== false,
         body: formatContinuityBridgeForPrompt(continuity.bridge, config.continuityInstructions),
         forced: Boolean(continuity.bridge),
         reason: '正文开头必须直接承接上一章最后一幕，防止章节像重新启动。'
@@ -218,21 +248,36 @@ export class PromptBuilderService {
         reason: '本章目标、冲突、悬念、结尾钩子和情绪目标是正文执行契约。'
       },
       {
-        id: 'character-hard-state',
-        title: '4. 当前角色硬状态',
-        kind: 'character_state',
+        id: 'hard-canon-pack',
+        title: '4. 不可违背设定 HardCanonPack',
+        kind: 'hard_canon',
         priority: 4,
-        source: 'characters_and_state_ledger',
+        source: 'hard_canon_packs',
+        sourceIds: hardCanonPrompt.includedItemIds,
+        enabled: hardCanonPrompt.itemCount > 0,
+        body: hardCanonPrompt.body,
+        reason: isOpeningChapter
+          ? '用户维护的不可违背硬设定，高于普通摘要和模型临时发挥；不得覆盖第一章自然开场、本章任务、角色状态和伏笔规则。'
+          : '用户维护的不可违背硬设定，高于普通摘要、旧章节回顾和模型临时发挥；不得静默覆盖上一章衔接、本章任务、角色硬状态和伏笔规则。'
+      },
+      {
+        id: 'character-hard-state',
+        title: isOpeningChapter ? '5. 本章任务点名人物' : '5. 当前角色硬状态',
+        kind: 'character_state',
+        priority: 5,
+        source: isOpeningChapter ? 'authoritative_chapter_task' : 'characters_and_state_ledger',
         sourceIds: characterSelection.map((character) => character.id),
         enabled: config.modules.characters,
         body: characterStateText,
-        reason: '角色位置、伤势、物品、资源、知识、承诺和能力限制必须早于章节回顾进入模型。'
+        reason: isOpeningChapter
+          ? '第一章只提供任务点名人物的最小身份，不承接旧人物状态或后续剧情功能。'
+          : '角色位置、伤势、物品、资源、知识、承诺和能力限制必须早于章节回顾进入模型。'
       },
       {
         id: 'foreshadowing-operation-rules',
-        title: '5. 本章伏笔操作规则',
+        title: '6. 本章伏笔操作规则',
         kind: 'foreshadowing_rules',
-        priority: 5,
+        priority: 6,
         source: 'foreshadowing_treatment',
         sourceIds: foreshadowingSelection.map((item) => item.id),
         enabled: config.modules.foreshadowing,
@@ -241,9 +286,9 @@ export class PromptBuilderService {
       },
       {
         id: 'story-direction-guide',
-        title: '6. 中期剧情导向 StoryDirectionGuide',
+        title: '7. 中期剧情导向 StoryDirectionGuide',
         kind: 'story_direction',
-        priority: 6,
+        priority: 7,
         source: 'story_direction_guides',
         sourceIds: storyDirectionGuide ? [storyDirectionGuide.id] : [],
         enabled: Boolean(storyDirectionGuide),
@@ -252,9 +297,9 @@ export class PromptBuilderService {
       },
       {
         id: 'current-progress',
-        title: '6. 当前剧情状态',
+        title: '8. 当前剧情状态',
         kind: 'current_progress',
-        priority: 6,
+        priority: 8,
         source: 'chapter_recaps',
         sourceIds: previousChapters.slice(-1).map((chapter) => chapter.id),
         enabled: config.modules.progress,
@@ -263,9 +308,9 @@ export class PromptBuilderService {
       },
       {
         id: 'recent-chapters',
-        title: '7. 最近章节详细回顾',
+        title: '9. 最近章节详细回顾',
         kind: 'recent_chapters',
-        priority: 7,
+        priority: 9,
         source: 'chapters',
         sourceIds: recentChapters.map((chapter) => chapter.id),
         enabled: config.modules.recentChapters,
@@ -275,9 +320,9 @@ export class PromptBuilderService {
       },
       {
         id: 'remote-compressed-summary',
-        title: '8. 远期压缩摘要',
+        title: '10. 远期压缩摘要',
         kind: 'remote_summary',
-        priority: 8,
+        priority: 10,
         source: 'stage_summaries',
         sourceIds: selectedSummaries.map((summary) => summary.id),
         enabled: config.modules.stageSummaries,
@@ -287,72 +332,50 @@ export class PromptBuilderService {
       },
       {
         id: 'timeline-events',
-        title: '9. 时间线事件',
+        title: '11. 时间线事件',
         kind: 'timeline',
-        priority: 9,
+        priority: 11,
         source: 'timeline_events',
         sourceIds: timelineEvents.map((event) => event.id),
-        enabled: config.modules.timeline,
-        body: formatTimeline(timelineEvents, target) || '暂无时间线事件。',
+        enabled: config.modules.timeline && Boolean(timelineText),
+        body: timelineText,
         reason: '时间线只作为校验参考，不能覆盖更高优先级的章节任务和角色硬状态。'
       },
       {
-        id: 'legacy-story-bible-hard-canon',
-        title: '10. 最小硬设定 HardCanonPack',
-        kind: 'story_bible_reference',
-        priority: 10,
-        source: 'story_bible',
-        sourceIds: bible ? [bible.projectId] : [],
-        enabled: false,
-        body: '',
-        omittedReason: '硬设定已迁移到用户可维护的 HardCanonPack；普通 Story Bible 不再整块进入正文 prompt。',
-        reason: '只保留不可违背规则和本章强相关硬设定，避免大段世界观置顶诱导重复解释。'
-      },
-      {
         id: 'style-envelope',
-        title: '11. 风格要求 StyleEnvelope',
+        title: '12. 风格要求 StyleEnvelope',
         kind: 'style',
-        priority: 11,
+        priority: 12,
         source: 'story_bible_style',
         sourceIds: bible ? [bible.projectId] : [],
-        enabled: config.modules.bible,
+        enabled: config.modules.bible && Boolean(styleEnvelopeText),
         body: styleEnvelopeText,
         reason: '风格作为表达滤镜后置，不得压过剧情执行、连续性和硬状态。'
       },
       {
         id: 'forbidden-novelty-policy',
-        title: '12. 禁止事项与 NoveltyPolicy',
+        title: '13. 写作限制与 NoveltyPolicy',
         kind: 'forbidden_and_novelty',
-        priority: 12,
+        priority: 13,
         source: 'story_bible_and_task',
         sourceIds: bible ? [bible.projectId] : [],
-        enabled: config.modules.forbidden,
-        body: [
-          fieldLine('禁用套路：', bible?.bannedTropes),
-          fieldLine('不可违背设定：', bible?.immutableFacts),
-          fieldLine('禁止提前回收：', task.forbiddenPayoffs),
-          '不得让已明确的角色认知突然消失；不得无铺垫改变力量体系规则；不得把阶段摘要已经归档的信息重新写成新发现。',
-          'NoveltyPolicy：不得新增未铺垫救命规则、临时系统权限、新管理员层级、新核心机制或给未知人物随意命名，除非本章任务明确允许。',
-          '不得为了让主角脱困而临时新增刚好可用的规则；解决危机必须来自已提供规则、已铺垫伏笔、角色已有能力或本章任务明确允许的机制。',
-          '新规则如果出现，必须带来代价或更大风险，不能只提供便利；不得把“系统面板补充条款”当作无代价救命工具。',
-          '副本规则不得在没有公告、记录、前文线索或任务书许可的情况下突然展开；新管理员 / 新组织层级出现时，必须有前文信号或任务书许可。',
-          '不得新增未授权命名角色；不得给未知人物擅自命名，除非任务书允许或正文解释系统识别来源。',
-          '不得提前解释 hidden / pause 状态伏笔；不得将未授权新设定写成已经存在的长期事实。'
-        ].join('\n'),
+        enabled: config.modules.forbidden && Boolean(forbiddenPolicyText),
+        body: forbiddenPolicyText,
         reason: '集中放置禁止事项和新增设定约束，防止机械降神或记忆污染。'
       },
       {
         id: 'output-format',
-        title: '13. 输出格式要求',
+        title: '14. 输出格式要求',
         kind: 'output_format',
-        priority: 13,
+        priority: 14,
         source: 'prompt_builder',
         enabled: config.modules.outputFormat,
         body: [
           `请直接输出第 ${target} 章正文。`,
           '保留清晰场景推进、人物动作、对话和心理变化。',
-          '章节结尾必须形成钩子，但不要用作者说明替代正文。',
-          '不得新增无铺垫救命规则、临时权限、新管理员、新组织层级或新核心机制；所有新规则必须来自已有线索、本章任务许可，并带来代价或更大风险。',
+          isOpeningChapter
+            ? '章节结尾只执行任务契约指定的生活动作与信息边界，不额外强化危险、宿命或网文式钩子。'
+            : '章节结尾必须形成任务指定的钩子，但不要用作者说明替代正文。',
           '不要输出大纲、分析、注释或 Markdown 标题，除非用户另行要求。'
         ].join('\n'),
         reason: '最后限定输出形态，避免模型输出分析、任务书或 Markdown 大纲。'
@@ -365,7 +388,7 @@ export class PromptBuilderService {
       .trim()
     const promptLintGuard = PromptLintService.guardWritingPrompt(rawPrompt)
     const finalPrompt = promptLintGuard.guardedPrompt
-    const promptBlockOrder = blocks.map(blockToOrderItem)
+    const promptBlockOrder = promptBlockOrderFromFinalPrompt(blocks, finalPrompt)
 
     return {
       finalPrompt,
@@ -383,7 +406,22 @@ export class PromptBuilderService {
       continuitySource: continuity.source,
       compressionRecords: budgetSelection?.compressionRecords ?? [],
       promptLintResult: promptLintGuard.result,
-      warnings: [...(budgetSelection?.warnings ?? []), ...continuity.warnings, ...taskWarnings, ...promptLintGuard.result.warnings]
+      warnings: [
+        ...(budgetSelection?.warnings ?? []),
+        ...(isOpeningChapter ? [] : continuity.warnings),
+        ...taskWarnings,
+        ...(characterStateFilter.omittedLineCount
+          ? [`本章禁止项已从角色卡/状态账本切片隔离 ${characterStateFilter.omittedLineCount} 行（${characterStateFilter.matchedTerms.join('、')}）。`]
+          : []),
+        ...(styleEnvelopeFilter.omittedLineCount
+          ? [`本章禁止项已从风格包络隔离 ${styleEnvelopeFilter.omittedLineCount} 行（${styleEnvelopeFilter.matchedTerms.join('、')}）。`]
+          : []),
+        ...(legacyForbiddenPolicyFilter.omittedLineCount
+          ? [`本章禁止项已从旧版 StoryBible 禁止/硬设定字段隔离 ${legacyForbiddenPolicyFilter.omittedLineCount} 行（${legacyForbiddenPolicyFilter.matchedTerms.join('、')}）。`]
+          : []),
+        ...hardCanonPrompt.warnings,
+        ...promptLintGuard.result.warnings
+      ]
     }
   }
 

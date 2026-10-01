@@ -1,50 +1,46 @@
-import { useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import type { Foreshadowing, ForeshadowingStatus, ForeshadowingTreatmentMode, ForeshadowingWeight, ID } from '../../../shared/types'
 import { FORESHADOWING_TREATMENT_OPTIONS, normalizeTreatmentMode, treatmentDescription } from '../../../shared/foreshadowingTreatment'
 import { useConfirm } from '../components/ConfirmDialog'
 import { EmptyState, NumberInput, SelectField, TextArea, TextInput, Toggle } from '../components/FormFields'
 import { Header } from '../components/Layout'
 import { StatCard, StatusBadge, WeightBadge } from '../components/UI'
+import { useProjectData } from '../hooks/useProjectData'
+import { compareForeshadowingByStatusWeightUpdatedAt } from '../utils/foreshadowingSort'
+import { expectedPayoffNearText } from '../utils/foreshadowingRecommendations'
 import { newId, now, statusLabel, treatmentModeLabel, weightLabel } from '../utils/format'
-import { projectData } from '../utils/projectData'
-import { expectedPayoffNearText } from '../utils/promptContext'
 import type { ProjectProps } from './viewTypes'
 import { updateProjectTimestamp } from './viewTypes'
 
-const FORESHADOWING_WEIGHT_ORDER: Record<ForeshadowingWeight, number> = {
-  payoff: 4,
-  high: 3,
-  medium: 2,
-  low: 1
-}
-
-function archivedForeshadowingRank(item: Foreshadowing): number {
-  return item.status === 'resolved' || item.status === 'abandoned' ? 1 : 0
-}
-
-function compareForeshadowingForLedger(a: Foreshadowing, b: Foreshadowing): number {
-  const archiveDelta = archivedForeshadowingRank(a) - archivedForeshadowingRank(b)
-  if (archiveDelta !== 0) return archiveDelta
-  const weightDelta = FORESHADOWING_WEIGHT_ORDER[b.weight] - FORESHADOWING_WEIGHT_ORDER[a.weight]
-  if (weightDelta !== 0) return weightDelta
-  return b.updatedAt.localeCompare(a.updatedAt)
-}
-
 export function ForeshadowingView({ data, project, saveData }: ProjectProps) {
   const confirmAction = useConfirm()
-  const scoped = projectData(data, project.id)
+  const scoped = useProjectData(data, project.id)
   const [statusFilter, setStatusFilter] = useState<'all' | ForeshadowingStatus>('all')
   const [weightFilter, setWeightFilter] = useState<'all' | ForeshadowingWeight>('all')
   const [treatmentFilter, setTreatmentFilter] = useState<'all' | ForeshadowingTreatmentMode>('all')
   const [nearChapter, setNearChapter] = useState<number | null>(null)
   const [selectedId, setSelectedId] = useState<ID | null>(null)
-  const foreshadowings = scoped.foreshadowings
-    .filter((item) => statusFilter === 'all' || item.status === statusFilter)
-    .filter((item) => weightFilter === 'all' || item.weight === weightFilter)
-    .filter((item) => treatmentFilter === 'all' || normalizeTreatmentMode(item.treatmentMode, item.status, item.weight) === treatmentFilter)
-    .filter((item) => !nearChapter || !item.expectedPayoff || expectedPayoffNearText(item.expectedPayoff, nearChapter))
-    .sort(compareForeshadowingForLedger)
-  const selected = scoped.foreshadowings.find((item) => item.id === selectedId) ?? foreshadowings[0] ?? null
+  const foreshadowings = useMemo(
+    () =>
+      scoped.foreshadowings
+        .filter((item) => statusFilter === 'all' || item.status === statusFilter)
+        .filter((item) => weightFilter === 'all' || item.weight === weightFilter)
+        .filter((item) => treatmentFilter === 'all' || normalizeTreatmentMode(item.treatmentMode, item.status, item.weight) === treatmentFilter)
+        .filter((item) => !nearChapter || !item.expectedPayoff || expectedPayoffNearText(item.expectedPayoff, nearChapter))
+        .sort(compareForeshadowingByStatusWeightUpdatedAt),
+    [nearChapter, scoped.foreshadowings, statusFilter, treatmentFilter, weightFilter]
+  )
+  const selected = useMemo(
+    () => foreshadowings.find((item) => item.id === selectedId) ?? foreshadowings[0] ?? null,
+    [foreshadowings, selectedId]
+  )
+
+  useEffect(() => {
+    if (!selectedId && foreshadowings[0]) setSelectedId(foreshadowings[0].id)
+    if (selectedId && !foreshadowings.some((item) => item.id === selectedId)) {
+      setSelectedId(foreshadowings[0]?.id ?? null)
+    }
+  }, [foreshadowings, selectedId])
 
   async function addForeshadowing() {
     const timestamp = now()
@@ -66,16 +62,17 @@ export function ForeshadowingView({ data, project, saveData }: ProjectProps) {
       createdAt: timestamp,
       updatedAt: timestamp
     }
-    await saveData((current) => ({
+    const saved = await saveData((current) => ({
       ...current,
       projects: updateProjectTimestamp(current, project.id),
       foreshadowings: [...current.foreshadowings, item]
     }))
+    if (!saved.ok) return
     setSelectedId(item.id)
   }
 
   async function updateForeshadowing(id: ID, patch: Partial<Foreshadowing>) {
-    await saveData((current) => ({
+    return saveData((current) => ({
       ...current,
       projects: updateProjectTimestamp(current, project.id),
       foreshadowings: current.foreshadowings.map((item) => (item.id === id ? { ...item, ...patch, updatedAt: now() } : item))
@@ -90,11 +87,12 @@ export function ForeshadowingView({ data, project, saveData }: ProjectProps) {
       tone: 'danger'
     })
     if (!confirmed) return
-    await saveData((current) => ({
+    const saved = await saveData((current) => ({
       ...current,
       projects: updateProjectTimestamp(current, project.id),
       foreshadowings: current.foreshadowings.filter((candidate) => candidate.id !== item.id)
     }))
+    if (!saved.ok) return
     setSelectedId(null)
   }
 
@@ -179,7 +177,7 @@ export function ForeshadowingView({ data, project, saveData }: ProjectProps) {
           ) : (
             <>
               <div className="form-grid compact">
-                <TextInput label="伏笔标题" value={selected.title} onChange={(title) => updateForeshadowing(selected.id, { title })} />
+                <TextInput label="伏笔标题" value={selected.title} debounceMs={500} bufferKey={selected.id} onChange={(title) => updateForeshadowing(selected.id, { title })} />
                 <NumberInput label="首次出现章节" value={selected.firstChapterOrder} onChange={(firstChapterOrder) => updateForeshadowing(selected.id, { firstChapterOrder })} />
                 <SelectField<ForeshadowingStatus>
                   label="当前状态"
@@ -214,12 +212,12 @@ export function ForeshadowingView({ data, project, saveData }: ProjectProps) {
               {selected.weight === 'payoff' && normalizeTreatmentMode(selected.treatmentMode, selected.status, selected.weight) !== 'payoff' ? (
                 <p className="notice">该伏笔权重较高，但当前未设置为回收。本章不会默认把它当作兑现项推进。</p>
               ) : null}
-              <TextArea label="伏笔描述" value={selected.description} onChange={(description) => updateForeshadowing(selected.id, { description })} />
+              <TextArea label="伏笔描述" value={selected.description} debounceMs={500} bufferKey={selected.id} onChange={(description) => updateForeshadowing(selected.id, { description })} />
               <div className="form-grid">
-                <TextArea label="预计回收章节或范围" value={selected.expectedPayoff} onChange={(expectedPayoff) => updateForeshadowing(selected.id, { expectedPayoff })} />
-                <TextArea label="回收方式" value={selected.payoffMethod} onChange={(payoffMethod) => updateForeshadowing(selected.id, { payoffMethod })} />
-                <TextArea label="关联主线" value={selected.relatedMainPlot} onChange={(relatedMainPlot) => updateForeshadowing(selected.id, { relatedMainPlot })} />
-                <TextArea label="注意事项" value={selected.notes} onChange={(notes) => updateForeshadowing(selected.id, { notes })} />
+                <TextArea label="预计回收章节或范围" value={selected.expectedPayoff} debounceMs={500} bufferKey={selected.id} onChange={(expectedPayoff) => updateForeshadowing(selected.id, { expectedPayoff })} />
+                <TextArea label="回收方式" value={selected.payoffMethod} debounceMs={500} bufferKey={selected.id} onChange={(payoffMethod) => updateForeshadowing(selected.id, { payoffMethod })} />
+                <TextArea label="关联主线" value={selected.relatedMainPlot} debounceMs={500} bufferKey={selected.id} onChange={(relatedMainPlot) => updateForeshadowing(selected.id, { relatedMainPlot })} />
+                <TextArea label="注意事项" value={selected.notes} debounceMs={500} bufferKey={selected.id} onChange={(notes) => updateForeshadowing(selected.id, { notes })} />
               </div>
               <NumberInput label="实际回收章节" value={selected.actualPayoffChapter} onChange={(actualPayoffChapter) => updateForeshadowing(selected.id, { actualPayoffChapter })} />
               <div className="checkbox-grid">

@@ -1,7 +1,8 @@
 import { readdir, readFile, stat } from 'node:fs/promises'
 import { join, resolve } from 'node:path'
+import { repoRoot } from './utils/repo-root.mjs'
 
-const root = resolve('.')
+const root = repoRoot
 
 function assert(condition, message, details = {}) {
   return condition ? { ok: true, message } : { ok: false, message, details }
@@ -54,6 +55,10 @@ async function main() {
   const viewFiles = await listFiles('src/renderer/src/views', '.tsx')
   const componentFiles = await listFiles('src/renderer/src/components', '.tsx')
   const hookFiles = await listFiles('src/renderer/src/views/generation', '.ts')
+  const rendererTsFiles = [
+    ...(await listFiles('src/renderer/src', '.ts')),
+    ...(await listFiles('src/renderer/src', '.tsx'))
+  ]
 
   for (const file of viewFiles) {
     const source = await readSource(file)
@@ -66,6 +71,16 @@ async function main() {
     const source = await readSource(file)
     checks.push(
       assert(!/\bconfirm\s*\(/.test(source), `${file} uses ConfirmDialog instead of native confirm()`)
+    )
+    checks.push(
+      assert(!/\balert\s*\(/.test(source), `${file} uses app-level dialog/notice UI instead of native alert()`)
+    )
+  }
+
+  for (const file of rendererTsFiles) {
+    const source = await readSource(file)
+    checks.push(
+      assert(!/\bwindow\.(?:alert|confirm|prompt)\s*\(/.test(source), `${file} does not call native window dialog APIs`)
     )
   }
 

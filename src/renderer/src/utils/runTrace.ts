@@ -1,13 +1,17 @@
 import type {
+  AiCallTelemetry,
   AppData,
   ChapterGenerationJob,
+  ChapterGenerationStep,
   Foreshadowing,
   ForeshadowingTreatmentMode,
   ForcedContextBlock,
   GenerationRunTrace,
-  ID
+  ID,
+  PipelineAIRole
 } from '../../../shared/types'
 import { normalizeTreatmentMode } from '../../../shared/foreshadowingTreatment'
+import { PipelineRecipeService } from '../../../services/PipelineRecipeService'
 import { newId, now } from './format'
 
 export function uniqueIds(ids: ID[]): ID[] {
@@ -37,6 +41,10 @@ export function createEmptyGenerationRunTrace(job: ChapterGenerationJob): Genera
     targetChapterOrder: job.targetChapterOrder,
     promptContextSnapshotId: job.promptContextSnapshotId ?? null,
     contextSource: job.contextSource,
+    pipelineRecipeId: job.pipelineRecipeId ?? null,
+    pipelineRecipeVersion: job.pipelineRecipeVersion ?? null,
+    pipelineRecipeExplanation: PipelineRecipeService.explainRecipe(job.pipelineRecipe ?? job.pipelineRecipeId),
+    aiCalls: [],
     selectedChapterIds: [],
     selectedStageSummaryIds: [],
     selectedCharacterIds: [],
@@ -52,11 +60,15 @@ export function createEmptyGenerationRunTrace(job: ChapterGenerationJob): Genera
     compressionRecords: [],
     promptBlockOrder: [],
     finalPromptTokenEstimate: 0,
+    promptCompositionMetrics: null,
     promptLintWarnings: [],
     promptLintIssueCount: 0,
     generatedDraftId: null,
     consistencyReviewReportId: null,
     qualityGateReportId: null,
+    editorialVerdictId: null,
+    editorialVerdictDraftId: null,
+    editorialVerdictDraftContentHash: null,
     revisionSessionIds: [],
     acceptedRevisionVersionId: null,
     acceptedMemoryCandidateIds: [],
@@ -120,6 +132,37 @@ export function upsertGenerationRunTraceByJobId(
 ): AppData {
   const job = data.chapterGenerationJobs.find((item) => item.id === jobId)
   return job ? upsertGenerationRunTrace(data, job, patch) : data
+}
+
+export function appendGenerationRunTraceAiCall(
+  data: AppData,
+  jobId: ID,
+  step: Pick<ChapterGenerationStep, 'id' | 'type'>,
+  role: PipelineAIRole,
+  telemetry: AiCallTelemetry | undefined,
+  outcome: 'success' | 'failed'
+): AppData {
+  if (!telemetry) return data
+  const existing = data.generationRunTraces.find((trace) => trace.jobId === jobId)
+  const calls = existing?.aiCalls ?? []
+  const callId = telemetry.callId?.trim() || `${step.id}:ai-call:${calls.length + 1}`
+  if (calls.some((call) => call.id === callId)) return data
+  const logicalCallIndex = calls.filter((call) => call.stepId === step.id).length + 1
+  return upsertGenerationRunTraceByJobId(data, jobId, {
+    aiCalls: [
+      ...calls,
+      {
+        ...telemetry,
+        id: callId,
+        stepId: step.id,
+        stepType: step.type,
+        role,
+        logicalCallIndex,
+        outcome,
+        createdAt: now()
+      }
+    ]
+  })
 }
 
 function forcedBlockKey(block: ForcedContextBlock): string {

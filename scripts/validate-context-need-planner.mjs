@@ -2,8 +2,9 @@ import { mkdir, readFile, rm, writeFile } from 'node:fs/promises'
 import { dirname, join, resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import ts from 'typescript'
+import { repoRoot } from './utils/repo-root.mjs'
 
-const root = resolve('.')
+const root = repoRoot
 const outDir = join(root, 'tmp', 'context-need-planner-test')
 const timestamp = '2026-01-01T00:00:00.000Z'
 
@@ -35,9 +36,29 @@ async function compileTsTree(files) {
   }
 }
 
-async function loadPlanner() {
-  await compileTsTree(['src/services/StageSummaryService.ts', 'src/services/StoryDirectionService.ts', 'src/services/ContextNeedPlannerService.ts'])
-  return import(`${pathToFileURL(join(outDir, 'src/services/ContextNeedPlannerService.mjs')).href}?t=${Date.now()}`)
+async function loadPlannerModules() {
+  await compileTsTree([
+    'src/shared/chapterText.ts',
+    'src/shared/foreshadowingTreatment.ts',
+    'src/shared/defaults/index.ts',
+    'src/services/StageSummaryService.ts',
+    'src/services/StoryDirectionService.ts',
+    'src/services/contextNeedPlanner/rules.ts',
+    'src/services/contextNeedPlanner/characterInference.ts',
+    'src/services/contextNeedPlanner/characterNeeds.ts',
+    'src/services/ContextNeedPlannerService.ts',
+    'src/renderer/src/utils/format.ts',
+    'src/renderer/src/views/promptBuilder/promptBuilderNeedPlan.ts',
+    'src/renderer/src/views/promptBuilder/promptBuilderHistoryState.ts',
+    'src/renderer/src/views/promptBuilder/promptBuilderSnapshotConsistency.ts',
+    'src/renderer/src/utils/foreshadowingRecommendations.ts'
+  ])
+  const cacheKey = Date.now()
+  const planner = await import(`${pathToFileURL(join(outDir, 'src/services/ContextNeedPlannerService.mjs')).href}?t=${cacheKey}`)
+  const editor = await import(`${pathToFileURL(join(outDir, 'src/renderer/src/views/promptBuilder/promptBuilderNeedPlan.mjs')).href}?t=${cacheKey}`)
+  const history = await import(`${pathToFileURL(join(outDir, 'src/renderer/src/views/promptBuilder/promptBuilderHistoryState.mjs')).href}?t=${cacheKey}`)
+  const recommendations = await import(`${pathToFileURL(join(outDir, 'src/renderer/src/utils/foreshadowingRecommendations.mjs')).href}?t=${cacheKey}`)
+  return { ...planner, ...editor, ...history, ...recommendations }
 }
 
 function character(id, name, overrides = {}) {
@@ -181,7 +202,13 @@ function baseInput(task) {
 
 async function main() {
   const checks = []
-  const { ContextNeedPlannerService } = await loadPlanner()
+  const {
+    ContextNeedPlannerService,
+    recommendedForeshadowings,
+    restorePromptBuilderFromSnapshot,
+    toggleNeedPlanCharacter,
+    toggleNeedPlanForeshadowing
+  } = await loadPlannerModules()
 
   const relationPlan = ContextNeedPlannerService.buildFromChapterIntent(
     baseInput({
@@ -218,6 +245,220 @@ async function main() {
   checks.push(assert((actionPlan.requiredCharacterCardFields['char-hero'] ?? []).includes('abilitiesAndResources'), 'action chapter requests abilities/resources', actionPlan.requiredCharacterCardFields))
   checks.push(assert((actionPlan.requiredStateFactCategories['char-hero'] ?? []).includes('physical'), 'action chapter requests physical state', actionPlan.requiredStateFactCategories))
   checks.push(assert(actionPlan.requiredForeshadowingIds.includes('fs-payoff'), 'payoff foreshadowing is required when allowed', actionPlan.requiredForeshadowingIds))
+  checks.push(assert(!actionPlan.expectedCharacters.some((item) => item.characterId === 'char-zelda'), 'unmentioned main characters are not automatically treated as onstage', actionPlan.expectedCharacters))
+
+  const scheduledInput = baseInput({
+    goal: '林克检查未来钟声的来历。', conflict: '', suspenseToKeep: '', allowedPayoffs: '未来钟声', forbiddenPayoffs: '', endingHook: '', readerEmotion: '', targetWordCount: '3000', styleRequirement: ''
+  })
+  scheduledInput.foreshadowing.push(foreshadowing('fs-future', '未来钟声', {
+    firstChapterOrder: 8, treatmentMode: 'payoff', weight: 'payoff', relatedCharacterIds: ['char-merchant']
+  }))
+  const scheduledPlan = ContextNeedPlannerService.buildFromChapterIntent(scheduledInput)
+  checks.push(assert(
+    !scheduledPlan.requiredForeshadowingIds.includes('fs-future') &&
+      !scheduledPlan.expectedCharacters.some((item) => item.characterId === 'char-merchant') &&
+      scheduledPlan.warnings.some((warning) => warning.includes('章节门禁')),
+    'future foreshadowing cannot create a required need or pull related characters before first appearance',
+    scheduledPlan
+  ))
+  const recommendationItems = [
+    foreshadowing('fs-future-recommendation', '未来推荐', { firstChapterOrder: 8, treatmentMode: 'advance' }),
+    foreshadowing('fs-current-recommendation', '本章推荐', { firstChapterOrder: 4, treatmentMode: 'advance' }),
+    foreshadowing('fs-unscheduled-recommendation', '未排期推荐', { firstChapterOrder: null, treatmentMode: 'advance' })
+  ]
+  const recommendationIds = recommendedForeshadowings(recommendationItems, 4).map((item) => item.id)
+  checks.push(assert(!recommendationIds.includes('fs-future-recommendation') && recommendationIds.includes('fs-current-recommendation') && recommendationIds.includes('fs-unscheduled-recommendation'), 'Prompt Builder auto recommendations honor the first-chapter gate', recommendationIds))
+
+  const negativeConstraintPlan = ContextNeedPlannerService.buildFromChapterIntent(
+    baseInput({
+      goal: '林克检查门后的痕迹；不得出现商人。',
+      conflict: '', suspenseToKeep: '', allowedPayoffs: '', forbiddenPayoffs: '商人、银灰钥匙、战斗真相', endingHook: '', readerEmotion: '', targetWordCount: '3000', styleRequirement: ''
+    })
+  )
+  checks.push(assert(
+    !negativeConstraintPlan.expectedCharacters.some((item) => item.characterId === 'char-merchant') &&
+      !negativeConstraintPlan.requiredForeshadowingIds.includes('fs-payoff') &&
+      negativeConstraintPlan.forbiddenForeshadowingIds.includes('fs-payoff') &&
+      negativeConstraintPlan.expectedSceneType !== 'action' &&
+      negativeConstraintPlan.warnings.some((warning) => warning.includes('自由文本含否定约束')),
+    'negative free text and forbiddenPayoffs never become positive character, foreshadowing, or scene-type retrieval signals',
+    negativeConstraintPlan
+  ))
+
+  const positiveCharacterWithNegativeSecretPlan = ContextNeedPlannerService.buildFromChapterIntent(
+    baseInput({
+      goal: '林克和塞尔达一起做晚饭。',
+      conflict: '只处理两人的生活小摩擦。',
+      suspenseToKeep: '',
+      allowedPayoffs: '',
+      forbiddenPayoffs: '禁止揭示林克的未来身份、塞尔达的未来秘密。',
+      endingHook: '',
+      readerEmotion: '轻松',
+      targetWordCount: '3000',
+      styleRequirement: '生活化'
+    })
+  )
+  checks.push(assert(
+    positiveCharacterWithNegativeSecretPlan.expectedCharacters.some((item) => item.characterId === 'char-hero') &&
+      positiveCharacterWithNegativeSecretPlan.expectedCharacters.some((item) => item.characterId === 'char-zelda'),
+    'a character required by positive task text stays selected when only their future secret is forbidden',
+    positiveCharacterWithNegativeSecretPlan.expectedCharacters
+  ))
+
+  const mixedClausePlan = ContextNeedPlannerService.buildFromChapterIntent(
+    baseInput({
+      goal: '林克和塞尔达一起做饭，但不要揭示塞尔达的秘密。',
+      conflict: '', suspenseToKeep: '', allowedPayoffs: '', forbiddenPayoffs: '', endingHook: '', readerEmotion: '轻松', targetWordCount: '3000', styleRequirement: '生活化'
+    })
+  )
+  checks.push(assert(
+    mixedClausePlan.expectedCharacters.some((item) => item.characterId === 'char-hero') &&
+      mixedClausePlan.expectedCharacters.some((item) => item.characterId === 'char-zelda') &&
+      !mixedClausePlan.exclusionRules.some((rule) => rule.type === 'character' && (rule.id === 'char-hero' || rule.id === 'char-zelda')),
+    'positive and negative clauses in one sentence are separated before character exclusion',
+    mixedClausePlan
+  ))
+
+  const closedForeshadowingPlan = ContextNeedPlannerService.buildFromChapterIntent(
+    baseInput({
+      goal: '林克和塞尔达做晚饭。',
+      conflict: '', suspenseToKeep: '', allowedPayoffs: '', forbiddenPayoffs: '本章不调用任何现有伏笔。', endingHook: '', readerEmotion: '轻松', targetWordCount: '3000', styleRequirement: '生活化'
+    })
+  )
+  checks.push(assert(
+    closedForeshadowingPlan.requiredForeshadowingIds.length === 0 &&
+      ['fs-payoff', 'fs-hidden'].every((id) => closedForeshadowingPlan.forbiddenForeshadowingIds.includes(id)),
+    'a generic closed-scope rule blocks every existing foreshadowing without naming future clues in the model prompt',
+    closedForeshadowingPlan
+  ))
+
+  const openingInput = baseInput({
+    goal: '林克和塞尔达在家做晚饭。',
+    conflict: '', suspenseToKeep: '', allowedPayoffs: '', forbiddenPayoffs: '本章不调用任何现有伏笔。', endingHook: '', readerEmotion: '轻松', targetWordCount: '3000', styleRequirement: '生活化'
+  })
+  openingInput.targetChapterOrder = 1
+  openingInput.previousChapter = null
+  openingInput.continuityBridge = null
+  openingInput.isolateOpeningLegacyContext = true
+  openingInput.timelineEvents = [
+    {
+      id: 'event-unscoped-opening-future',
+      projectId: 'project-1',
+      title: '晚饭',
+      chapterOrder: null,
+      storyTime: '',
+      narrativeOrder: 99,
+      participantCharacterIds: ['char-hero'],
+      result: '未来才会确认的结果',
+      downstreamImpact: '未来剧情后效',
+      createdAt: timestamp,
+      updatedAt: timestamp
+    }
+  ]
+  const openingPlan = ContextNeedPlannerService.buildFromChapterIntent(openingInput)
+  checks.push(assert(
+    !openingPlan.contextNeeds.some((need) => need.needType === 'previous_chapter_ending' || need.sourceHint === 'character_state') &&
+      !openingPlan.warnings.some((warning) => warning.includes('缺少上一章')) &&
+      Object.keys(openingPlan.requiredStateFactCategories).length === 0 &&
+      openingPlan.requiredTimelineEventIds.length === 0,
+    'an authoritative opening task requests neither previous-chapter/state context nor chapter-unscoped legacy timeline facts',
+    openingPlan
+  ))
+
+  const mentionPlan = ContextNeedPlannerService.buildFromChapterIntent(
+    baseInput({
+      goal: '林克必须打开密室门，档案只提到商人，商人不在场。',
+      conflict: '门后的追兵逼近。',
+      suspenseToKeep: '',
+      allowedPayoffs: '',
+      forbiddenPayoffs: '',
+      endingHook: '',
+      readerEmotion: '紧张',
+      targetWordCount: '3000',
+      styleRequirement: ''
+    })
+  )
+  const merchantNeed = mentionPlan.expectedCharacters.find((item) => item.characterId === 'char-merchant')
+  checks.push(assert(merchantNeed?.involvement === 'mentioned' && merchantNeed.expectedPresence !== 'onstage', 'reference-only character is distinguished from an onstage character', merchantNeed))
+  checks.push(assert(merchantNeed?.stateCheckRequired === false, 'reference-only character does not require a full state-ledger lookup', merchantNeed))
+  checks.push(assert(!('char-merchant' in mentionPlan.requiredStateFactCategories), 'reference-only character has no forced state categories', mentionPlan.requiredStateFactCategories))
+
+  const directionOnlyInput = baseInput({
+    goal: '林克检查门后的痕迹。',
+    conflict: '',
+    suspenseToKeep: '',
+    allowedPayoffs: '',
+    forbiddenPayoffs: '',
+    endingHook: '',
+    readerEmotion: '警惕',
+    targetWordCount: '3000',
+    styleRequirement: ''
+  })
+  directionOnlyInput.storyDirectionPromptText = '未来方向可能提到塞尔达，但本章是否让她在场尚未确认。'
+  const directionOnlyPlan = ContextNeedPlannerService.buildFromChapterIntent(directionOnlyInput)
+  const directionNeed = directionOnlyPlan.expectedCharacters.find((item) => item.characterId === 'char-zelda')
+  checks.push(assert(directionNeed?.uncertain === true && directionNeed.involvement === 'mentioned', 'Story Direction-only character remains an uncertain candidate', directionNeed))
+  checks.push(assert(directionOnlyPlan.contextNeeds.some((need) => need.sourceId === 'char-zelda' && need.uncertain), 'uncertain character need remains visible in structured trace input', directionOnlyPlan.contextNeeds))
+
+  const withoutHero = toggleNeedPlanCharacter(
+    actionPlan,
+    baseInput(actionPlan).characters[0],
+    baseInput(actionPlan).chapterTaskDraft,
+    false
+  )
+  checks.push(assert(!withoutHero.expectedCharacters.some((item) => item.characterId === 'char-hero'), 'manual need-plan removal removes the expected character'))
+  checks.push(assert(!('char-hero' in withoutHero.requiredCharacterCardFields), 'manual need-plan removal clears character field requirements'))
+  checks.push(assert(!('char-hero' in withoutHero.requiredStateFactCategories), 'manual need-plan removal clears state category requirements'))
+
+  const forbiddenPayoff = toggleNeedPlanForeshadowing(actionPlan, 'fs-payoff', 'forbidden', true)
+  checks.push(assert(!forbiddenPayoff.requiredForeshadowingIds.includes('fs-payoff'), 'forbidden foreshadowing is removed from required needs'))
+  checks.push(assert(forbiddenPayoff.forbiddenForeshadowingIds.includes('fs-payoff'), 'forbidden foreshadowing is recorded as forbidden'))
+  checks.push(assert(forbiddenPayoff.exclusionRules.some((rule) => rule.id === 'fs-payoff'), 'forbidden foreshadowing creates an explicit exclusion rule'))
+
+  const requiredAgain = toggleNeedPlanForeshadowing(forbiddenPayoff, 'fs-payoff', 'required', true)
+  checks.push(assert(requiredAgain.requiredForeshadowingIds.includes('fs-payoff'), 'required foreshadowing can be restored explicitly'))
+  checks.push(assert(!requiredAgain.forbiddenForeshadowingIds.includes('fs-payoff'), 'required and forbidden foreshadowing states remain mutually exclusive'))
+
+  const snapshotBase = {
+    id: 'snapshot-1',
+    projectId: 'project-1',
+    targetChapterOrder: 8,
+    mode: 'custom',
+    budgetProfile: { maxTokens: 12345 },
+    selectedCharacterIds: ['char-hero'],
+    selectedForeshadowingIds: ['fs-payoff'],
+    foreshadowingTreatmentOverrides: { 'fs-payoff': 'payoff' },
+    chapterTask: actionPlan,
+    contextNeedPlan: actionPlan,
+    finalPrompt: 'restored prompt',
+    note: 'snapshot note'
+  }
+  const legacySnapshot = restorePromptBuilderFromSnapshot(snapshotBase, 'standard')
+  checks.push(assert(legacySnapshot.promptMode === 'standard', 'legacy custom-budget snapshot falls back to the active prompt mode'))
+  checks.push(assert(legacySnapshot.modules.characters === true && legacySnapshot.modules.timeline === false, 'legacy snapshot restores standard module defaults'))
+  checks.push(assert(legacySnapshot.useContinuityBridge === true, 'legacy snapshot keeps continuity bridge enabled by default'))
+
+  const restoredSnapshot = restorePromptBuilderFromSnapshot({
+    ...snapshotBase,
+    promptMode: 'full',
+    moduleSelection: {
+      bible: false,
+      progress: false,
+      recentChapters: true,
+      characters: true,
+      foreshadowing: true,
+      stageSummaries: false,
+      timeline: true,
+      chapterTask: true,
+      forbidden: true,
+      outputFormat: true
+    },
+    continuityInstructions: '从门后的呼吸声继续。',
+    useContinuityBridge: false
+  }, 'standard')
+  checks.push(assert(restoredSnapshot.promptMode === 'full' && restoredSnapshot.modules.bible === false, 'new snapshot restores prompt mode and module selection'))
+  checks.push(assert(restoredSnapshot.continuityInstructions === '从门后的呼吸声继续。' && restoredSnapshot.useContinuityBridge === false, 'new snapshot restores continuity settings'))
+  checks.push(assert(restoredSnapshot.selectedCharacterIds[0] === 'char-hero' && restoredSnapshot.prompt === 'restored prompt', 'new snapshot restores selections and prompt text'))
 
   const sourceFiles = {
     types: [
@@ -246,6 +487,15 @@ async function main() {
   checks.push(assert(sourceFiles.runner.includes("context_need_planning"), 'pipeline runner includes context_need_planning step'))
   checks.push(assert(sourceFiles.promptBuilder.includes('formatCharacterNeedSlice'), 'PromptBuilderService formats role slices from ContextNeedPlan'))
   checks.push(assert(sourceFiles.promptView.includes('generateContextNeedPlan'), 'PromptBuilderView exposes context need plan generation'))
+  checks.push(assert(sourceFiles.promptView.includes('restorePromptBuilderFromSnapshot'), 'PromptBuilderView restores full context snapshots instead of prompt text only'))
+  checks.push(assert(sourceFiles.promptView.includes('setSelectedCharacterIds((current) => toggleId(current, characterId, checked))'), 'need-plan character edits stay aligned with explicit context selection'))
+  checks.push(assert(sourceFiles.promptView.includes("role === 'forbidden' && checked"), 'forbidden need-plan foreshadowings are removed from explicit context selection'))
+  const plannerRules = await readFile(join(root, 'src/services/contextNeedPlanner/rules.ts'), 'utf-8')
+  checks.push(assert(sourceFiles.runner.includes('context_need_planning'), 'pipeline runner keeps context need planning reachable'))
+  checks.push(assert(plannerRules.includes('inferRequiredCharacterFields') && plannerRules.includes('inferRequiredStateCategories'), 'ContextNeedPlanner pure field/state inference rules are split into a helper module'))
+  checks.push(assert(plannerRules.includes('stateCategoryReason') && plannerRules.includes('hardCanonNeedReason'), 'ContextNeedPlanner helper owns author-facing need reasons'))
+  const characterNeedRules = await readFile(join(root, 'src/services/contextNeedPlanner/characterNeeds.ts'), 'utf-8')
+  checks.push(assert(characterNeedRules.includes('inferExpectedCharacterNeeds') && characterNeedRules.includes('stateCheckRequired'), 'character presence and state-check inference are isolated in a pure helper'))
 
   const failed = checks.filter((check) => !check.ok)
   for (const check of checks) {

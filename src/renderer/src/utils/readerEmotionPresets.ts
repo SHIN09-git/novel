@@ -1,4 +1,5 @@
 const STORAGE_PREFIX = 'novel-director.reader-emotions'
+const MAX_CUSTOM_PRESETS = 24
 
 export const DEFAULT_READER_EMOTION_PRESETS = [
   '期待、紧张、好奇',
@@ -23,25 +24,44 @@ function storageKey(projectId: string): string {
 }
 
 function uniquePresets(values: string[]): string[] {
-  return [...new Set(values.map((value) => value.trim()).filter(Boolean))]
+  return [...new Set(values.map((value) => value.trim()).filter(Boolean))].slice(0, DEFAULT_READER_EMOTION_PRESETS.length + MAX_CUSTOM_PRESETS)
+}
+
+function safeLocalStorage(): Storage | null {
+  if (typeof window === 'undefined') return null
+  try {
+    return window.localStorage ?? null
+  } catch {
+    return null
+  }
+}
+
+function stringArray(value: unknown): string[] {
+  return Array.isArray(value) ? value.filter((item): item is string => typeof item === 'string') : []
 }
 
 function readStoredState(projectId: string): Partial<ReaderEmotionPresetState> {
-  if (typeof window === 'undefined' || !window.localStorage) return {}
+  const storage = safeLocalStorage()
+  if (!storage) return {}
   try {
-    const raw = window.localStorage.getItem(storageKey(projectId))
+    const raw = storage.getItem(storageKey(projectId))
     if (!raw) return {}
-    const parsed = JSON.parse(raw) as Partial<ReaderEmotionPresetState>
-    return parsed && typeof parsed === 'object' ? parsed : {}
+    const parsed = JSON.parse(raw) as Record<string, unknown>
+    if (!parsed || typeof parsed !== 'object') return {}
+    return {
+      presets: stringArray(parsed.presets),
+      lastTarget: typeof parsed.lastTarget === 'string' ? parsed.lastTarget : ''
+    }
   } catch {
     return {}
   }
 }
 
 function writeStoredState(projectId: string, state: ReaderEmotionPresetState): void {
-  if (typeof window === 'undefined' || !window.localStorage) return
+  const storage = safeLocalStorage()
+  if (!storage) return
   try {
-    window.localStorage.setItem(storageKey(projectId), JSON.stringify(state))
+    storage.setItem(storageKey(projectId), JSON.stringify(state))
   } catch {
     // Presets are a convenience layer; generation should keep working even if localStorage is unavailable.
   }

@@ -2,8 +2,9 @@ import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import { join, resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import ts from 'typescript'
+import { repoRoot } from './utils/repo-root.mjs'
 
-const root = resolve('.')
+const root = repoRoot
 const outDir = join(root, 'tmp', 'context-budget-consistency-test')
 
 function assert(condition, message, details = {}) {
@@ -59,6 +60,7 @@ async function main() {
   const budgetManagerSource = [
     await readFile(join(root, 'src', 'services', 'ContextBudgetManager.ts'), 'utf-8'),
     await readFile(join(root, 'src', 'services', 'contextBudget', 'selectionEngine.ts'), 'utf-8'),
+    await readFile(join(root, 'src', 'services', 'contextBudget', 'selectionFinalizer.ts'), 'utf-8'),
     await readFile(join(root, 'src', 'services', 'contextBudget', 'scoringEngine.ts'), 'utf-8'),
     await readFile(join(root, 'src', 'services', 'contextBudget', 'traceBuilder.ts'), 'utf-8')
   ].join('\n')
@@ -96,6 +98,35 @@ async function main() {
     modules,
     selection
   })
+  const chapterTask = {
+    goal: '只写一次普通晚饭，结尾才出现一条未打开的通知。',
+    conflict: '鸡蛋摔裂后，两个人如何把晚饭继续做完。',
+    suspenseToKeep: '通知内容不得展开。',
+    allowedPayoffs: '',
+    forbiddenPayoffs: '不得打开附件，不得进入调查。',
+    endingHook: '通知暂不处理。',
+    readerEmotion: '轻松日常，最后一丝不安。',
+    targetWordCount: '3200-3800',
+    styleRequirement: '自然、松弛、少形容词。'
+  }
+  const configWithChapterTask = createPipelinePromptConfigFromSelection({
+    projectId: 'project-1',
+    targetChapterOrder: 4,
+    emotion: '紧张',
+    wordCount: '3200',
+    projectStyle: '冷峻',
+    modules,
+    selection,
+    chapterTask
+  })
+
+  checks.push(
+    assert(
+      JSON.stringify(configWithChapterTask.task) === JSON.stringify(chapterTask),
+      'pipeline prompt config preserves the exact ChapterTask used for context selection instead of rebuilding a generic task',
+      { expected: chapterTask, actual: configWithChapterTask.task }
+    )
+  )
 
   checks.push(
     assert(
@@ -158,7 +189,7 @@ async function main() {
 
   checks.push(
     assert(
-      budgetManagerSource.includes('!forcedCharacterIds.has(character.id)'),
+      budgetManagerSource.includes('!scoringContext.forcedCharacterIds.has(character.id)'),
       'manual character selections are not trimmed by the non-main character compression pass'
     )
   )
@@ -178,26 +209,27 @@ async function main() {
         promptBuilderSource.includes('0. 上下文冲突优先级规则') &&
         promptBuilderSource.includes('2. 上一章结尾衔接 Bridge') &&
         promptBuilderSource.includes('3. 本章任务契约') &&
-        promptBuilderSource.includes('10. 最小硬设定 HardCanonPack') &&
-        promptBuilderSource.indexOf('2. 上一章结尾衔接 Bridge') < promptBuilderSource.indexOf('10. 最小硬设定 HardCanonPack'),
+        promptBuilderSource.includes('4. 不可违背设定 HardCanonPack') &&
+        promptBuilderSource.indexOf('2. 上一章结尾衔接 Bridge') < promptBuilderSource.indexOf('4. 不可违背设定 HardCanonPack'),
       'PromptBuilderService records promptBlockOrder and keeps bridge/task before hard canon and style blocks'
     )
   )
 
   checks.push(
     assert(
-      promptBuilderSource.includes('11. 风格要求 StyleEnvelope') &&
-        promptBuilderSource.indexOf('3. 本章任务契约') < promptBuilderSource.indexOf('11. 风格要求 StyleEnvelope'),
+      promptBuilderSource.includes('12. 风格要求 StyleEnvelope') &&
+        promptBuilderSource.indexOf('3. 本章任务契约') < promptBuilderSource.indexOf('12. 风格要求 StyleEnvelope'),
       'style envelope is a later expression filter and cannot outrank the chapter task'
     )
   )
 
   checks.push(
     assert(
-      promptBuilderSource.includes('12. 禁止事项与 NoveltyPolicy') &&
-        promptBuilderSource.includes('不得新增未授权命名角色') &&
-        promptBuilderSource.indexOf('11. 风格要求 StyleEnvelope') < promptBuilderSource.indexOf('12. 禁止事项与 NoveltyPolicy') &&
-        promptBuilderSource.indexOf('12. 禁止事项与 NoveltyPolicy') < promptBuilderSource.indexOf('13. 输出格式要求'),
+      promptBuilderSource.includes('13. 写作限制与 NoveltyPolicy') &&
+        promptBuilderSource.includes('NoveltyPolicy：不得新增任务未授权的人物、地点、组织、规则、机制或关键道具。') &&
+        promptBuilderSource.includes('不得为了让角色脱困而临时新增刚好可用的设定') &&
+        promptBuilderSource.indexOf('12. 风格要求 StyleEnvelope') < promptBuilderSource.indexOf('13. 写作限制与 NoveltyPolicy') &&
+        promptBuilderSource.indexOf('13. 写作限制与 NoveltyPolicy') < promptBuilderSource.indexOf('14. 输出格式要求'),
       'NoveltyPolicy remains in the forbidden block after style and before output format'
     )
   )

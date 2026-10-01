@@ -17,6 +17,7 @@ import type {
   ID,
   NextChapterSuggestions,
   PipelineMode,
+  QualityGateReviewScope,
   QualityGateDimensionScores,
   QualityGateIssue,
   RevisionRequestType,
@@ -25,6 +26,7 @@ import type {
 } from '../../shared/types'
 import type { QualityGateEvaluation } from '../QualityGateService'
 import { REVIEW_SYSTEM_PROMPT } from './AIPromptTemplates'
+import { LESS_AI_TONE_REVIEW_GUIDANCE } from './LessAiToneSkill'
 import { ensureQualityGateEvaluation, ensureRevisionCandidate } from './AIResponseNormalizer'
 import { validateQualityGateSchema, validateRevisionCandidateSchema } from './AISchemaValidator'
 import type { AIJsonClient } from './AIJsonClient'
@@ -35,7 +37,8 @@ export class QualityGateAI {
   async generateQualityGateReport(
     chapterDraft: ChapterDraftResult,
     context: string,
-    chapterPlan: ChapterPlan | null
+    chapterPlan: ChapterPlan | null,
+    reviewScope: QualityGateReviewScope = {}
   ): Promise<AIResult<QualityGateEvaluation>> {
     const fallback: QualityGateEvaluation = {
       overallScore: 68,
@@ -67,18 +70,27 @@ export class QualityGateAI {
       optionalSuggestions: ['人工确认草稿没有污染长期设定后再应用章节复盘或记忆更新。']
     }
 
+    const authoritativeOpening =
+      reviewScope.targetChapterOrder === 1 && reviewScope.hasAuthoritativeChapterTask === true
+    const continuityCheck = authoritativeOpening
+      ? 'Opening chapter continuity checks: this is authoritative chapter 1 and there is no previous chapter ending or previous hook. Do not penalize the draft for not continuing either one. Evaluate whether it starts naturally from the authoritative task\'s immediate situation; flag invented prior-chapter events, carried states, pre-existing danger, or hooks not authorized by the task.'
+      : 'Chapter continuity checks: first scene must directly continue the previous ending, preserve carried physical/emotional state, not skip unresolved action, not reset character state, and respond to the last hook.'
+
     const userPrompt = [
       'You are a quality gate reviewer for a long-form novel generation pipeline.',
       'You are a release gate reviewer, not a general editor. Your job is to decide whether this chapter draft is safe to move into human confirmation and memory-update review.',
       'Return strict JSON only. Do not output Markdown or explanatory text.',
       'Schema:',
       '{"overallScore":0,"pass":false,"dimensions":{"plotCoherence":0,"characterConsistency":0,"characterStateConsistency":0,"foreshadowingControl":0,"chapterContinuity":0,"redundancyControl":0,"styleMatch":0,"pacing":0,"emotionalPayoff":0,"originality":0,"promptCompliance":0,"contextRelevanceCompliance":0},"issues":[{"severity":"low","type":"","description":"","evidence":"","suggestedFix":""}],"requiredFixes":[],"optionalSuggestions":[]}',
-      'Each dimension must be 0-100. pass should be false if score < 50 or if any high severity issue exists. If score < 80 or key dimensions are below 70, keep pass based on the 50-point gate but add concrete optionalSuggestions for human review before acceptance.',
-      'Evaluate: plot goal progress, current character state consistency, forbidden foreshadowing reveal, unregistered major canon, style sample match, pacing, reader emotion payoff, AI cliche / over-explanation, and compliance with the chapter plan.',
+      'Field contract: requiredFixes is reserved exclusively for acceptance blockers: concrete changes that must be completed before this draft can be accepted. If requiredFixes contains one or more items, pass must be false. Every high severity blocker should have a corresponding concrete requiredFix.',
+      'Medium or low severity non-blocking improvements must not appear in requiredFixes; put them in optionalSuggestions. Do not promote a stylistic preference to a blocker unless accepting the draft would violate canon, continuity, chapter-plan constraints, or downstream memory integrity.',
+      'Each dimension must be 0-100. pass must be false if score < 50, if any high severity issue exists, or if requiredFixes is non-empty. If score < 80 or key dimensions are below 70 without a blocker, keep pass based on the 50-point gate and add concrete optionalSuggestions for human review before acceptance.',
+      'Evaluate: plot goal progress, current character state consistency, forbidden foreshadowing reveal, unregistered major canon, style sample match, pacing, reader emotion payoff, evidence-backed AI-tone patterns, and compliance with the chapter plan.',
+      LESS_AI_TONE_REVIEW_GUIDANCE,
       'If the context includes a Consistency Review section, reference it as diagnostic input. Do not duplicate identical issues; instead set linkedConsistencyIssueId when you refer to an existing consistency issue. High severity consistency issues should reduce pass likelihood.',
       'Foreshadowing treatment modes are binding. Check whether the draft: paid off a non-payoff clue too early; turned hint into advance; turned advance into payoff; mentioned hidden clues; advanced paused clues; created mislead clues that contradict final truth; or let characters directly explain what should only be hinted.',
       'For those violations, use issue.type = "foreshadowing_treatment_violation". Severity guide: hidden clearly mentioned = medium/high; pause advanced = medium; hint explained or paid off = high; advance directly paid off = high; mislead contradicts final truth = high.',
-      'Chapter continuity checks: first scene must directly continue the previous ending, preserve carried physical/emotional state, not skip unresolved action, not reset character state, and respond to the last hook.',
+      continuityCheck,
       'Redundancy checks: repeated environment descriptions, repeated canon/mechanism explanations, overused abstract intensifiers, redundant paragraphs, and repeated chapter-opening structure. If redundancyControl < 70, recommend reduce_redundancy / compress_description revision.',
       'Context need plan checks: verify that the draft respects the required character card fields, state fact categories, continuity checks, and exclusion rules present in the context. If it ignores key required state or uses excluded information, lower contextRelevanceCompliance and add a concrete issue.',
       'Character state ledger checks: verify resource balance, inventory ownership, injury persistence, character knowledge, ability limits, location continuity, and promises/debts. Use issue.type values such as resource_underflow, missing_inventory, injury_reset, knowledge_leak, ability_overuse, location_jump, promise_ignored, or state_conflict.',

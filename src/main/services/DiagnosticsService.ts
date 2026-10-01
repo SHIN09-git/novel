@@ -4,39 +4,52 @@ import type {
   DiagnosticsEvaluateQualityGateRequest
 } from '../../shared/ipc/ipcTypes'
 import type { RedundancyReport, NoveltyAuditResult, QualityGateReport } from '../../shared/types'
-import { analyzeRedundancy } from '../../services/RedundancyService'
-import { NoveltyDetector } from '../../services/NoveltyDetector'
-import { QualityGateService } from '../../services/QualityGateService'
-import { QualityGateAI } from '../../services/ai/QualityGateAI'
 import type { IAIService } from './AIService'
-import { MainAIJsonClient } from './MainAIJsonClient'
 
 export class DiagnosticsService {
   constructor(private readonly aiTransport: IAIService) {}
 
-  analyzeRedundancy(request: DiagnosticsAnalyzeRedundancyRequest): RedundancyReport {
+  async analyzeRedundancy(request: DiagnosticsAnalyzeRedundancyRequest): Promise<RedundancyReport> {
+    const { analyzeRedundancy } = await import('../../services/RedundancyService')
     return analyzeRedundancy(request)
   }
 
-  auditNovelty(request: DiagnosticsAuditNoveltyRequest): NoveltyAuditResult {
+  async auditNovelty(request: DiagnosticsAuditNoveltyRequest): Promise<NoveltyAuditResult> {
+    const { NoveltyDetector } = await import('../../services/NoveltyDetector')
     return NoveltyDetector.audit(request)
   }
 
   evaluateQualityGate(request: DiagnosticsEvaluateQualityGateRequest): Promise<QualityGateReport> {
-    const aiClient = new MainAIJsonClient(request.settings, this.aiTransport)
+    return this.evaluateQualityGateLazy(request)
+  }
+
+  private async evaluateQualityGateLazy(request: DiagnosticsEvaluateQualityGateRequest): Promise<QualityGateReport> {
+    const [{ QualityGateService }, { QualityGateAI }, { MainAIJsonClient }] = await Promise.all([
+      import('../../services/QualityGateService'),
+      import('../../services/ai/QualityGateAI'),
+      import('./MainAIJsonClient')
+    ])
+    const aiClient = new MainAIJsonClient(request.settings, this.aiTransport, request.runId)
     const qualityGateAI = new QualityGateAI(aiClient)
     return QualityGateService.evaluateChapterDraft({
-      projectId: request.projectId,
-      jobId: request.jobId,
-      chapterId: request.chapterId,
-      draftId: request.draftId,
-      chapterDraft: request.chapterDraft,
-      context: request.context,
-      chapterPlan: request.chapterPlan,
-      consistencyReports: request.consistencyReports ?? [],
-      promptContextSnapshotId: request.promptContextSnapshotId ?? null,
-      contextSource: request.contextSource,
-      aiService: qualityGateAI
-    })
+        projectId: request.projectId,
+        jobId: request.jobId,
+        chapterId: request.chapterId,
+        draftId: request.draftId,
+        chapterDraft: request.chapterDraft,
+        context: request.context,
+        chapterPlan: request.chapterPlan,
+        consistencyReports: request.consistencyReports ?? [],
+        noveltyAuditResult: request.noveltyAuditResult ?? null,
+        redundancyReport: request.redundancyReport ?? null,
+        characterStateFacts: request.characterStateFacts,
+        characters: request.characters ?? [],
+        promptContextSnapshotId: request.promptContextSnapshotId ?? null,
+        contextSource: request.contextSource,
+        targetChapterOrder: request.targetChapterOrder,
+        hasAuthoritativeChapterTask: request.hasAuthoritativeChapterTask,
+        chapterTask: request.chapterTask ?? null,
+        aiService: qualityGateAI
+      })
   }
 }

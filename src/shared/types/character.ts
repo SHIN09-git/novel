@@ -5,6 +5,8 @@ export type CharacterRoleInChapter = 'protagonist' | 'antagonist' | 'ally' | 'wi
 
 export type ExpectedPresence = 'onstage' | 'offscreen' | 'referenced'
 
+export type CharacterNeedInvolvement = 'mentioned' | 'present' | 'must_act'
+
 export type CharacterCardField =
   | 'roleFunction'
   | 'surfaceGoal'
@@ -76,6 +78,13 @@ export interface Character {
   emotionalState: string
   nextActionTendency: string
   forbiddenWriting: string
+  roleFunction: string
+  deepNeed: string
+  decisionLogic: string
+  abilitiesAndResources: string
+  weaknessAndCost: string
+  relationshipTension: string
+  futureHooks: string
   lastChangedChapter: number | null
   isMain: boolean
   createdAt: string
@@ -179,6 +188,9 @@ export interface ExpectedCharacterNeed {
   characterId: ID
   roleInChapter: CharacterRoleInChapter
   expectedPresence: ExpectedPresence
+  involvement: CharacterNeedInvolvement
+  stateCheckRequired: boolean
+  uncertain: boolean
   reason: string
 }
 

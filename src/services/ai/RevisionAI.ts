@@ -3,10 +3,11 @@ import type { AIResult, Character, RevisionGenerationRequest, RevisionResult } f
 import { REVISION_SYSTEM_PROMPT, buildRevisionUserPrompt } from './AIPromptTemplates'
 import { ensureRevisionResult } from './AIResponseNormalizer'
 import { validateRevisionResultSchema } from './AISchemaValidator'
+import type { AIRequestControl } from './AIJsonClient'
 
 function defaultRevisionInstruction(type: RevisionGenerationRequest['type']): string {
   const instructions: Partial<Record<RevisionGenerationRequest['type'], string>> = {
-    reduce_ai_tone: '减少套话、过度解释和陈词滥调，增强具体动作、感官细节和潜台词，不改变剧情事实。',
+    reduce_ai_tone: '只按 lieflat-less-ai-tone 白名单识别并最小改写；未命中规则的文字逐字保留，不新增动作、细节、潜台词或剧情事实。',
     improve_dialogue: '增强对白潜台词，减少直白解释，保留人物关系状态，不让人物突然把话说透。',
     strengthen_conflict: '增强人物目标冲突和阻力，让场面更有张力，但不要随意新增大设定或改变既有事实。',
     compress_pacing: '删除重复解释和无效描写，压缩拖沓节奏，保留关键动作、情绪转折和伏笔。',
@@ -22,7 +23,11 @@ function defaultRevisionInstruction(type: RevisionGenerationRequest['type']): st
 export class RevisionAI {
   constructor(private readonly client: AIClient) {}
 
-  async generateRevision(request: RevisionGenerationRequest, context: string): Promise<AIResult<RevisionResult>> {
+  async generateRevision(
+    request: RevisionGenerationRequest,
+    context: string,
+    requestControl?: AIRequestControl
+  ): Promise<AIResult<RevisionResult>> {
     const normalizedRequest: RevisionGenerationRequest = {
       ...request,
       instruction: request.instruction || defaultRevisionInstruction(request.type)
@@ -38,7 +43,15 @@ export class RevisionAI {
     }
     const userPrompt = buildRevisionUserPrompt(normalizedRequest, context)
 
-    return this.client.requestJson(REVISION_SYSTEM_PROMPT, userPrompt, ensureRevisionResult, fallback, undefined, validateRevisionResultSchema)
+    return this.client.requestJson(
+      REVISION_SYSTEM_PROMPT,
+      userPrompt,
+      ensureRevisionResult,
+      fallback,
+      undefined,
+      validateRevisionResultSchema,
+      requestControl
+    )
   }
 
   async reduceAITone(chapterText: string, context: string): Promise<AIResult<RevisionResult>> {
@@ -48,7 +61,7 @@ export class RevisionAI {
         revisionScope: 'full',
         fullChapterText: chapterText,
         instruction:
-          '减少套话、过度解释和陈词滥调，增强具体动作、感官细节和潜台词，不改变剧情事实。'
+          '只按 lieflat-less-ai-tone 白名单识别并最小改写；未命中规则的文字逐字保留，不新增动作、细节、潜台词或剧情事实。'
       },
       context
     )

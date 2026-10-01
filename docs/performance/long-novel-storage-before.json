@@ -1,0 +1,1514 @@
+{
+  "schemaVersion": 1,
+  "measuredAt": "2026-09-07T09:55:18.261Z",
+  "label": "preview8-before",
+  "fixtureVersion": 1,
+  "iterations": 9,
+  "warmups": 2,
+  "environment": {
+    "platform": "win32",
+    "release": "10.0.26100",
+    "arch": "x64",
+    "cpu": "AMD Ryzen 7 7800X3D 8-Core Processor           ",
+    "logicalCpus": 16,
+    "totalMemoryBytes": 33397133312,
+    "node": "v24.14.0",
+    "nodeAbi": "137",
+    "appVersion": "0.1.6-preview.8",
+    "sqliteVersion": "3.53.0",
+    "gitHead": "47457ca0b29c723d6031d958bda7f9adb07eb0a8",
+    "dirty": true
+  },
+  "definitions": {
+    "fixture": "Per chapter: 3000 Chinese/code-unit prose characters, 2 versions, 14 steps, two 6000-char context outputs, one prompt snapshot, draft, reports and accepted-commit copies. Two projects, 12 characters, 48 hard states, growing hooks/timeline and stage summaries.",
+    "isolation": "Fresh temporary SQLite per size; no author data or AI calls. Node production-code bundle, not Electron UI timing.",
+    "percentile": "Nearest rank over monotonic performance.now() samples after warmup. No OS cache flush; GC not forced.",
+    "memory": "Process endpoint RSS/heap samples, not peak or per-operation exclusive memory; observational only.",
+    "fullSave": "Change one chapter body in complete AppData, sanitize and revision-check through real SQLite service. Queue/IPC/UI excluded.",
+    "bundleSave": "Save one actual GenerationRunBundle through real SQLite transaction; includes validation/read of existing data.",
+    "agentDigest": "Real AgentToolService.getProjectDigest compact call including read-only database load, normalization and formatting.",
+    "writeChanges": "SQLite total_changes() difference on the service connection; includes meta/settings changes, not disk bytes.",
+    "boundaries": "No absolute UI/latency CI gate; same-machine repeated before/after is required before claiming improvements."
+  },
+  "sourceHashes": {
+    "src/storage/SqliteStorageService.ts": "4005c73bc466bf1d9aba793160ea7cbe43f2c34b2dbb70b26b598f6e3ad1d695",
+    "src/storage/sqlite/sqliteSnapshot.ts": "7c0daac811bfb37d5b5b9480c63700ded2858349c08323f71e6f0fa4163182ee",
+    "src/shared/normalizers/appData.ts": "40bb2cb9ba678b90c519ad6ab23b0434e490c9a6964418c6b3b68a21cf896714",
+    "src/agent/tools/AgentToolService.ts": "99e042ece86bd1ff3d532c9cc7ada36232e78e264656f87d730e432c166c5bae",
+    "scripts/fixtures/long-novel-performance.mjs": "dffa0356ebe546c5257f5ed6b08d603e0def24d490108fffab13040088a4d835"
+  },
+  "scenarios": [
+    {
+      "chapters": 10,
+      "jsonBytes": 1595273,
+      "collectionSizes": [
+        {
+          "collection": "projects",
+          "entities": 2,
+          "jsonBytes": 654
+        },
+        {
+          "collection": "storyBibles",
+          "entities": 0,
+          "jsonBytes": 2
+        },
+        {
+          "collection": "chapters",
+          "entities": 10,
+          "jsonBytes": 99024
+        },
+        {
+          "collection": "characters",
+          "entities": 12,
+          "jsonBytes": 7929
+        },
+        {
+          "collection": "characterStateLogs",
+          "entities": 0,
+          "jsonBytes": 2
+        },
+        {
+          "collection": "characterStateFacts",
+          "entities": 48,
+          "jsonBytes": 23881
+        },
+        {
+          "collection": "characterStateTransactions",
+          "entities": 0,
+          "jsonBytes": 2
+        },
+        {
+          "collection": "characterStateChangeCandidates",
+          "entities": 0,
+          "jsonBytes": 2
+        },
+        {
+          "collection": "foreshadowings",
+          "entities": 20,
+          "jsonBytes": 7816
+        },
+        {
+          "collection": "timelineEvents",
+          "entities": 10,
+          "jsonBytes": 3596
+        },
+        {
+          "collection": "stageSummaries",
+          "entities": 2,
+          "jsonBytes": 10498
+        },
+        {
+          "collection": "promptVersions",
+          "entities": 0,
+          "jsonBytes": 2
+        },
+        {
+          "collection": "promptContextSnapshots",
+          "entities": 10,
+          "jsonBytes": 191645
+        },
+        {
+          "collection": "storyDirectionGuides",
+          "entities": 0,
+          "jsonBytes": 2
+        },
+        {
+          "collection": "hardCanonPacks",
+          "entities": 2,
+          "jsonBytes": 653
+        },
+        {
+          "collection": "contextNeedPlans",
+          "entities": 0,
+          "jsonBytes": 2
+        },
+        {
+          "collection": "chapterContinuityBridges",
+          "entities": 0,
+          "jsonBytes": 2
+        },
+        {
+          "collection": "chapterGenerationJobs",
+          "entities": 10,
+          "jsonBytes": 4443
+        },
+        {
+          "collection": "chapterGenerationSteps",
+          "entities": 140,
+          "jsonBytes": 520490
+        },
+        {
+          "collection": "generatedChapterDrafts",
+          "entities": 10,
+          "jsonBytes": 90669
+        },
+        {
+          "collection": "memoryUpdateCandidates",
+          "entities": 0,
+          "jsonBytes": 2
+        },
+        {
+          "collection": "candidateDecisionReceipts",
+          "entities": 0,
+          "jsonBytes": 2
+        },
+        {
+          "collection": "worldManagementReceipts",
+          "entities": 0,
+          "jsonBytes": 2
+        },
+        {
+          "collection": "consistencyReviewReports",
+          "entities": 10,
+          "jsonBytes": 4085
+        },
+        {
+          "collection": "contextBudgetProfiles",
+          "entities": 0,
+          "jsonBytes": 2
+        },
+        {
+          "collection": "qualityGateReports",
+          "entities": 10,
+          "jsonBytes": 6645
+        },
+        {
+          "collection": "generationRunTraces",
+          "entities": 10,
+          "jsonBytes": 38994
+        },
+        {
+          "collection": "runTraceAuthorSummaries",
+          "entities": 0,
+          "jsonBytes": 2
+        },
+        {
+          "collection": "redundancyReports",
+          "entities": 0,
+          "jsonBytes": 2
+        },
+        {
+          "collection": "editorialVerdicts",
+          "entities": 0,
+          "jsonBytes": 2
+        },
+        {
+          "collection": "revisionCandidates",
+          "entities": 0,
+          "jsonBytes": 2
+        },
+        {
+          "collection": "revisionSessions",
+          "entities": 0,
+          "jsonBytes": 2
+        },
+        {
+          "collection": "revisionRequests",
+          "entities": 0,
+          "jsonBytes": 2
+        },
+        {
+          "collection": "revisionVersions",
+          "entities": 0,
+          "jsonBytes": 2
+        },
+        {
+          "collection": "quickRewriteDrafts",
+          "entities": 0,
+          "jsonBytes": 2
+        },
+        {
+          "collection": "chapterVersions",
+          "entities": 20,
+          "jsonBytes": 179112
+        },
+        {
+          "collection": "chapterCommitBundles",
+          "entities": 10,
+          "jsonBytes": 403762
+        },
+        {
+          "collection": "revisionCommitBundles",
+          "entities": 0,
+          "jsonBytes": 2
+        },
+        {
+          "collection": "agentRuns",
+          "entities": 0,
+          "jsonBytes": 2
+        },
+        {
+          "collection": "agentActionPreviews",
+          "entities": 0,
+          "jsonBytes": 2
+        }
+      ],
+      "metrics": {
+        "sqliteRows": {
+          "p50Ms": 5.368,
+          "p95Ms": 6.243,
+          "minMs": 4.671,
+          "maxMs": 6.243,
+          "samplesMs": [
+            6.243,
+            4.671,
+            5.569,
+            5.252,
+            5.165,
+            5.368,
+            5.171,
+            5.581,
+            5.595
+          ],
+          "memoryBefore": {
+            "rss": 68833280,
+            "heapUsed": 12948872,
+            "external": 5346187
+          },
+          "memoryAfter": {
+            "rss": 78450688,
+            "heapUsed": 18309712,
+            "external": 5346187
+          },
+          "rowCount": 336
+        },
+        "jsonParseEntityPayloads": {
+          "p50Ms": 0.997,
+          "p95Ms": 1.827,
+          "minMs": 0.952,
+          "maxMs": 1.827,
+          "samplesMs": [
+            1.034,
+            0.952,
+            0.956,
+            1.593,
+            0.997,
+            0.988,
+            1.13,
+            0.995,
+            1.827
+          ],
+          "memoryBefore": {
+            "rss": 79331328,
+            "heapUsed": 15030552,
+            "external": 5346187
+          },
+          "memoryAfter": {
+            "rss": 81371136,
+            "heapUsed": 14823408,
+            "external": 5346187
+          }
+        },
+        "normalizeAppData": {
+          "p50Ms": 0.205,
+          "p95Ms": 0.311,
+          "minMs": 0.18,
+          "maxMs": 0.311,
+          "samplesMs": [
+            0.233,
+            0.311,
+            0.201,
+            0.199,
+            0.197,
+            0.18,
+            0.277,
+            0.205,
+            0.212
+          ],
+          "memoryBefore": {
+            "rss": 81522688,
+            "heapUsed": 15169808,
+            "external": 5346187
+          },
+          "memoryAfter": {
+            "rss": 82329600,
+            "heapUsed": 16711488,
+            "external": 5346187
+          }
+        },
+        "sanitizeAppData": {
+          "p50Ms": 0.157,
+          "p95Ms": 0.224,
+          "minMs": 0.141,
+          "maxMs": 0.224,
+          "samplesMs": [
+            0.224,
+            0.175,
+            0.157,
+            0.19,
+            0.176,
+            0.151,
+            0.156,
+            0.151,
+            0.141
+          ],
+          "memoryBefore": {
+            "rss": 83009536,
+            "heapUsed": 17366424,
+            "external": 5346187
+          },
+          "memoryAfter": {
+            "rss": 82333696,
+            "heapUsed": 18582824,
+            "external": 5346187
+          }
+        },
+        "serializeAppData": {
+          "p50Ms": 2.119,
+          "p95Ms": 2.384,
+          "minMs": 1.839,
+          "maxMs": 2.384,
+          "samplesMs": [
+            2.224,
+            2.318,
+            2.384,
+            2.236,
+            2.119,
+            2.019,
+            1.848,
+            1.84,
+            1.839
+          ],
+          "memoryBefore": {
+            "rss": 84602880,
+            "heapUsed": 21373936,
+            "external": 5346187
+          },
+          "memoryAfter": {
+            "rss": 97181696,
+            "heapUsed": 33925232,
+            "external": 5346187
+          }
+        },
+        "loadSnapshot": {
+          "p50Ms": 6.925,
+          "p95Ms": 8.375,
+          "minMs": 6.009,
+          "maxMs": 8.375,
+          "samplesMs": [
+            7.268,
+            8.104,
+            6.009,
+            6.666,
+            8.375,
+            7.159,
+            6.925,
+            6.108,
+            6.373
+          ],
+          "memoryBefore": {
+            "rss": 101310464,
+            "heapUsed": 40814112,
+            "external": 5346187
+          },
+          "memoryAfter": {
+            "rss": 100450304,
+            "heapUsed": 23972056,
+            "external": 5346187
+          }
+        },
+        "agentReadOnlySnapshot": {
+          "p50Ms": 10.958,
+          "p95Ms": 13.809,
+          "minMs": 9.73,
+          "maxMs": 13.809,
+          "samplesMs": [
+            10.612,
+            9.916,
+            13.081,
+            10.958,
+            11.161,
+            13.809,
+            12.551,
+            9.73,
+            9.968
+          ],
+          "memoryBefore": {
+            "rss": 100421632,
+            "heapUsed": 29524736,
+            "external": 5346187
+          },
+          "memoryAfter": {
+            "rss": 101584896,
+            "heapUsed": 31011944,
+            "external": 5346187
+          }
+        },
+        "agentProjectDigest": {
+          "p50Ms": 9.927,
+          "p95Ms": 12.444,
+          "minMs": 9.324,
+          "maxMs": 12.444,
+          "samplesMs": [
+            9.324,
+            10.451,
+            9.718,
+            10.234,
+            12.227,
+            9.927,
+            9.44,
+            12.444,
+            9.634
+          ],
+          "memoryBefore": {
+            "rss": 103669760,
+            "heapUsed": 22217248,
+            "external": 5346187
+          },
+          "memoryAfter": {
+            "rss": 107687936,
+            "heapUsed": 25652896,
+            "external": 5346187
+          },
+          "responseBytes": 5355,
+          "ok": true
+        },
+        "saveGenerationRunBundle": {
+          "p50Ms": 7.589,
+          "p95Ms": 8.709,
+          "minMs": 6.668,
+          "maxMs": 8.709,
+          "samplesMs": [
+            7.459,
+            7.82,
+            7.841,
+            8.709,
+            7.504,
+            6.668,
+            7.589,
+            7.367,
+            7.641
+          ],
+          "memoryBefore": {
+            "rss": 113065984,
+            "heapUsed": 34528080,
+            "external": 5346187
+          },
+          "memoryAfter": {
+            "rss": 124702720,
+            "heapUsed": 28961600,
+            "external": 5345127
+          }
+        },
+        "saveEditedChapterFullData": {
+          "p50Ms": 8.709,
+          "p95Ms": 15.702,
+          "minMs": 8.353,
+          "maxMs": 15.702,
+          "samplesMs": [
+            9.159,
+            15.702,
+            8.491,
+            8.695,
+            13.805,
+            8.554,
+            8.353,
+            15.368,
+            8.709
+          ],
+          "memoryBefore": {
+            "rss": 125493248,
+            "heapUsed": 32323464,
+            "external": 5345127
+          },
+          "memoryAfter": {
+            "rss": 138596352,
+            "heapUsed": 15103736,
+            "external": 5345127
+          }
+        }
+      },
+      "diskBytes": {
+        "sqlite": 1843200,
+        "wal": 5702112,
+        "shm": 32768
+      },
+      "rowsTouched": {
+        "bundleSavePerCall": 21,
+        "fullSavePerCall": 677
+      }
+    },
+    {
+      "chapters": 100,
+      "jsonBytes": 15562399,
+      "collectionSizes": [
+        {
+          "collection": "projects",
+          "entities": 2,
+          "jsonBytes": 655
+        },
+        {
+          "collection": "storyBibles",
+          "entities": 0,
+          "jsonBytes": 2
+        },
+        {
+          "collection": "chapters",
+          "entities": 100,
+          "jsonBytes": 988253
+        },
+        {
+          "collection": "characters",
+          "entities": 12,
+          "jsonBytes": 7929
+        },
+        {
+          "collection": "characterStateLogs",
+          "entities": 0,
+          "jsonBytes": 2
+        },
+        {
+          "collection": "characterStateFacts",
+          "entities": 48,
+          "jsonBytes": 23881
+        },
+        {
+          "collection": "characterStateTransactions",
+          "entities": 0,
+          "jsonBytes": 2
+        },
+        {
+          "collection": "characterStateChangeCandidates",
+          "entities": 0,
+          "jsonBytes": 2
+        },
+        {
+          "collection": "foreshadowings",
+          "entities": 50,
+          "jsonBytes": 19526
+        },
+        {
+          "collection": "timelineEvents",
+          "entities": 100,
+          "jsonBytes": 36361
+        },
+        {
+          "collection": "stageSummaries",
+          "entities": 20,
+          "jsonBytes": 104877
+        },
+        {
+          "collection": "promptVersions",
+          "entities": 0,
+          "jsonBytes": 2
+        },
+        {
+          "collection": "promptContextSnapshots",
+          "entities": 100,
+          "jsonBytes": 1912447
+        },
+        {
+          "collection": "storyDirectionGuides",
+          "entities": 0,
+          "jsonBytes": 2
+        },
+        {
+          "collection": "hardCanonPacks",
+          "entities": 2,
+          "jsonBytes": 653
+        },
+        {
+          "collection": "contextNeedPlans",
+          "entities": 0,
+          "jsonBytes": 2
+        },
+        {
+          "collection": "chapterContinuityBridges",
+          "entities": 0,
+          "jsonBytes": 2
+        },
+        {
+          "collection": "chapterGenerationJobs",
+          "entities": 100,
+          "jsonBytes": 44585
+        },
+        {
+          "collection": "chapterGenerationSteps",
+          "entities": 1400,
+          "jsonBytes": 5195553
+        },
+        {
+          "collection": "generatedChapterDrafts",
+          "entities": 100,
+          "jsonBytes": 904947
+        },
+        {
+          "collection": "memoryUpdateCandidates",
+          "entities": 0,
+          "jsonBytes": 2
+        },
+        {
+          "collection": "candidateDecisionReceipts",
+          "entities": 0,
+          "jsonBytes": 2
+        },
+        {
+          "collection": "worldManagementReceipts",
+          "entities": 0,
+          "jsonBytes": 2
+        },
+        {
+          "collection": "consistencyReviewReports",
+          "entities": 100,
+          "jsonBytes": 41169
+        },
+        {
+          "collection": "contextBudgetProfiles",
+          "entities": 0,
+          "jsonBytes": 2
+        },
+        {
+          "collection": "qualityGateReports",
+          "entities": 100,
+          "jsonBytes": 66769
+        },
+        {
+          "collection": "generationRunTraces",
+          "entities": 100,
+          "jsonBytes": 391817
+        },
+        {
+          "collection": "runTraceAuthorSummaries",
+          "entities": 0,
+          "jsonBytes": 2
+        },
+        {
+          "collection": "redundancyReports",
+          "entities": 0,
+          "jsonBytes": 2
+        },
+        {
+          "collection": "editorialVerdicts",
+          "entities": 0,
+          "jsonBytes": 2
+        },
+        {
+          "collection": "revisionCandidates",
+          "entities": 0,
+          "jsonBytes": 2
+        },
+        {
+          "collection": "revisionSessions",
+          "entities": 0,
+          "jsonBytes": 2
+        },
+        {
+          "collection": "revisionRequests",
+          "entities": 0,
+          "jsonBytes": 2
+        },
+        {
+          "collection": "revisionVersions",
+          "entities": 0,
+          "jsonBytes": 2
+        },
+        {
+          "collection": "quickRewriteDrafts",
+          "entities": 0,
+          "jsonBytes": 2
+        },
+        {
+          "collection": "chapterVersions",
+          "entities": 200,
+          "jsonBytes": 1787807
+        },
+        {
+          "collection": "chapterCommitBundles",
+          "entities": 100,
+          "jsonBytes": 4033793
+        },
+        {
+          "collection": "revisionCommitBundles",
+          "entities": 0,
+          "jsonBytes": 2
+        },
+        {
+          "collection": "agentRuns",
+          "entities": 0,
+          "jsonBytes": 2
+        },
+        {
+          "collection": "agentActionPreviews",
+          "entities": 0,
+          "jsonBytes": 2
+        }
+      ],
+      "metrics": {
+        "sqliteRows": {
+          "p50Ms": 59.416,
+          "p95Ms": 66.753,
+          "minMs": 56.001,
+          "maxMs": 66.753,
+          "samplesMs": [
+            58.631,
+            59.416,
+            62.533,
+            57.609,
+            64.473,
+            61.001,
+            66.753,
+            58.049,
+            56.001
+          ],
+          "memoryBefore": {
+            "rss": 181501952,
+            "heapUsed": 60959504,
+            "external": 5345327
+          },
+          "memoryAfter": {
+            "rss": 247349248,
+            "heapUsed": 95073928,
+            "external": 5345327
+          },
+          "rowCount": 2634
+        },
+        "jsonParseEntityPayloads": {
+          "p50Ms": 9.492,
+          "p95Ms": 13.42,
+          "minMs": 8.583,
+          "maxMs": 13.42,
+          "samplesMs": [
+            8.708,
+            8.583,
+            13.42,
+            11.559,
+            9.088,
+            8.851,
+            10.313,
+            9.765,
+            9.492
+          ],
+          "memoryBefore": {
+            "rss": 247529472,
+            "heapUsed": 78428168,
+            "external": 5345327
+          },
+          "memoryAfter": {
+            "rss": 262234112,
+            "heapUsed": 100932864,
+            "external": 5345327
+          }
+        },
+        "normalizeAppData": {
+          "p50Ms": 2.359,
+          "p95Ms": 2.587,
+          "minMs": 1.501,
+          "maxMs": 2.587,
+          "samplesMs": [
+            1.848,
+            2.362,
+            2.587,
+            2.359,
+            2.33,
+            2.528,
+            2.539,
+            1.567,
+            1.501
+          ],
+          "memoryBefore": {
+            "rss": 263811072,
+            "heapUsed": 103125128,
+            "external": 5345327
+          },
+          "memoryAfter": {
+            "rss": 263200768,
+            "heapUsed": 111823960,
+            "external": 5345327
+          }
+        },
+        "sanitizeAppData": {
+          "p50Ms": 1.298,
+          "p95Ms": 2.389,
+          "minMs": 1.268,
+          "maxMs": 2.389,
+          "samplesMs": [
+            1.268,
+            1.276,
+            1.396,
+            1.287,
+            2.389,
+            1.298,
+            1.512,
+            1.364,
+            1.278
+          ],
+          "memoryBefore": {
+            "rss": 262189056,
+            "heapUsed": 113856584,
+            "external": 5345327
+          },
+          "memoryAfter": {
+            "rss": 263843840,
+            "heapUsed": 69846680,
+            "external": 5345327
+          }
+        },
+        "serializeAppData": {
+          "p50Ms": 15.8,
+          "p95Ms": 21.545,
+          "minMs": 14.678,
+          "maxMs": 21.545,
+          "samplesMs": [
+            15.8,
+            15.483,
+            14.943,
+            21.545,
+            15.906,
+            15.31,
+            14.678,
+            17.895,
+            16.88
+          ],
+          "memoryBefore": {
+            "rss": 291090432,
+            "heapUsed": 96416392,
+            "external": 5345327
+          },
+          "memoryAfter": {
+            "rss": 367583232,
+            "heapUsed": 135576776,
+            "external": 5345327
+          }
+        },
+        "loadSnapshot": {
+          "p50Ms": 69.297,
+          "p95Ms": 71.744,
+          "minMs": 66.324,
+          "maxMs": 71.744,
+          "samplesMs": [
+            70.777,
+            67.943,
+            69.457,
+            66.324,
+            69.779,
+            69.297,
+            71.744,
+            68.172,
+            69.273
+          ],
+          "memoryBefore": {
+            "rss": 367603712,
+            "heapUsed": 189344296,
+            "external": 5345327
+          },
+          "memoryAfter": {
+            "rss": 327790592,
+            "heapUsed": 136059392,
+            "external": 5345127
+          }
+        },
+        "agentReadOnlySnapshot": {
+          "p50Ms": 75.411,
+          "p95Ms": 79.839,
+          "minMs": 72.544,
+          "maxMs": 79.839,
+          "samplesMs": [
+            76.484,
+            72.544,
+            79.839,
+            75.411,
+            73.604,
+            74.72,
+            79.048,
+            78.042,
+            75.071
+          ],
+          "memoryBefore": {
+            "rss": 325783552,
+            "heapUsed": 149686064,
+            "external": 5345127
+          },
+          "memoryAfter": {
+            "rss": 330092544,
+            "heapUsed": 159325824,
+            "external": 5345127
+          }
+        },
+        "agentProjectDigest": {
+          "p50Ms": 78.123,
+          "p95Ms": 81.988,
+          "minMs": 71.694,
+          "maxMs": 81.988,
+          "samplesMs": [
+            81.988,
+            78.154,
+            79.202,
+            79.213,
+            74.378,
+            78.123,
+            74.789,
+            74.503,
+            71.694
+          ],
+          "memoryBefore": {
+            "rss": 329842688,
+            "heapUsed": 159501456,
+            "external": 5345127
+          },
+          "memoryAfter": {
+            "rss": 342745088,
+            "heapUsed": 184709904,
+            "external": 5345127
+          },
+          "responseBytes": 5368,
+          "ok": true
+        },
+        "saveGenerationRunBundle": {
+          "p50Ms": 68.895,
+          "p95Ms": 75.715,
+          "minMs": 67.536,
+          "maxMs": 75.715,
+          "samplesMs": [
+            70.059,
+            68.489,
+            75.715,
+            68.758,
+            69.823,
+            70.394,
+            67.536,
+            68.189,
+            68.895
+          ],
+          "memoryBefore": {
+            "rss": 342876160,
+            "heapUsed": 157845360,
+            "external": 5345127
+          },
+          "memoryAfter": {
+            "rss": 342937600,
+            "heapUsed": 184784392,
+            "external": 5345127
+          }
+        },
+        "saveEditedChapterFullData": {
+          "p50Ms": 122.322,
+          "p95Ms": 130.423,
+          "minMs": 119.113,
+          "maxMs": 130.423,
+          "samplesMs": [
+            130.423,
+            121.591,
+            122.322,
+            128.078,
+            121.772,
+            119.113,
+            123.815,
+            123.431,
+            121.712
+          ],
+          "memoryBefore": {
+            "rss": 344379392,
+            "heapUsed": 148216272,
+            "external": 5345127
+          },
+          "memoryAfter": {
+            "rss": 347369472,
+            "heapUsed": 154170704,
+            "external": 5345127
+          }
+        }
+      },
+      "diskBytes": {
+        "sqlite": 17125376,
+        "wal": 19920232,
+        "shm": 65536
+      },
+      "rowsTouched": {
+        "bundleSavePerCall": 21,
+        "fullSavePerCall": 5273
+      }
+    },
+    {
+      "chapters": 500,
+      "jsonBytes": 77553852,
+      "collectionSizes": [
+        {
+          "collection": "projects",
+          "entities": 2,
+          "jsonBytes": 655
+        },
+        {
+          "collection": "storyBibles",
+          "entities": 0,
+          "jsonBytes": 2
+        },
+        {
+          "collection": "chapters",
+          "entities": 500,
+          "jsonBytes": 4930013
+        },
+        {
+          "collection": "characters",
+          "entities": 12,
+          "jsonBytes": 7929
+        },
+        {
+          "collection": "characterStateLogs",
+          "entities": 0,
+          "jsonBytes": 2
+        },
+        {
+          "collection": "characterStateFacts",
+          "entities": 48,
+          "jsonBytes": 23881
+        },
+        {
+          "collection": "characterStateTransactions",
+          "entities": 0,
+          "jsonBytes": 2
+        },
+        {
+          "collection": "characterStateChangeCandidates",
+          "entities": 0,
+          "jsonBytes": 2
+        },
+        {
+          "collection": "foreshadowings",
+          "entities": 250,
+          "jsonBytes": 98179
+        },
+        {
+          "collection": "timelineEvents",
+          "entities": 500,
+          "jsonBytes": 183961
+        },
+        {
+          "collection": "stageSummaries",
+          "entities": 100,
+          "jsonBytes": 523517
+        },
+        {
+          "collection": "promptVersions",
+          "entities": 0,
+          "jsonBytes": 2
+        },
+        {
+          "collection": "promptContextSnapshots",
+          "entities": 500,
+          "jsonBytes": 9540847
+        },
+        {
+          "collection": "storyDirectionGuides",
+          "entities": 0,
+          "jsonBytes": 2
+        },
+        {
+          "collection": "hardCanonPacks",
+          "entities": 2,
+          "jsonBytes": 653
+        },
+        {
+          "collection": "contextNeedPlans",
+          "entities": 0,
+          "jsonBytes": 2
+        },
+        {
+          "collection": "chapterContinuityBridges",
+          "entities": 0,
+          "jsonBytes": 2
+        },
+        {
+          "collection": "chapterGenerationJobs",
+          "entities": 500,
+          "jsonBytes": 223785
+        },
+        {
+          "collection": "chapterGenerationSteps",
+          "entities": 7000,
+          "jsonBytes": 25927393
+        },
+        {
+          "collection": "generatedChapterDrafts",
+          "entities": 500,
+          "jsonBytes": 4514627
+        },
+        {
+          "collection": "memoryUpdateCandidates",
+          "entities": 0,
+          "jsonBytes": 2
+        },
+        {
+          "collection": "candidateDecisionReceipts",
+          "entities": 0,
+          "jsonBytes": 2
+        },
+        {
+          "collection": "worldManagementReceipts",
+          "entities": 0,
+          "jsonBytes": 2
+        },
+        {
+          "collection": "consistencyReviewReports",
+          "entities": 500,
+          "jsonBytes": 207569
+        },
+        {
+          "collection": "contextBudgetProfiles",
+          "entities": 0,
+          "jsonBytes": 2
+        },
+        {
+          "collection": "qualityGateReports",
+          "entities": 500,
+          "jsonBytes": 335569
+        },
+        {
+          "collection": "generationRunTraces",
+          "entities": 500,
+          "jsonBytes": 1969017
+        },
+        {
+          "collection": "runTraceAuthorSummaries",
+          "entities": 0,
+          "jsonBytes": 2
+        },
+        {
+          "collection": "redundancyReports",
+          "entities": 0,
+          "jsonBytes": 2
+        },
+        {
+          "collection": "editorialVerdicts",
+          "entities": 0,
+          "jsonBytes": 2
+        },
+        {
+          "collection": "revisionCandidates",
+          "entities": 0,
+          "jsonBytes": 2
+        },
+        {
+          "collection": "revisionSessions",
+          "entities": 0,
+          "jsonBytes": 2
+        },
+        {
+          "collection": "revisionRequests",
+          "entities": 0,
+          "jsonBytes": 2
+        },
+        {
+          "collection": "revisionVersions",
+          "entities": 0,
+          "jsonBytes": 2
+        },
+        {
+          "collection": "quickRewriteDrafts",
+          "entities": 0,
+          "jsonBytes": 2
+        },
+        {
+          "collection": "chapterVersions",
+          "entities": 1000,
+          "jsonBytes": 8919727
+        },
+        {
+          "collection": "chapterCommitBundles",
+          "entities": 500,
+          "jsonBytes": 20145153
+        },
+        {
+          "collection": "revisionCommitBundles",
+          "entities": 0,
+          "jsonBytes": 2
+        },
+        {
+          "collection": "agentRuns",
+          "entities": 0,
+          "jsonBytes": 2
+        },
+        {
+          "collection": "agentActionPreviews",
+          "entities": 0,
+          "jsonBytes": 2
+        }
+      ],
+      "metrics": {
+        "sqliteRows": {
+          "p50Ms": 333.024,
+          "p95Ms": 358.879,
+          "minMs": 317.205,
+          "maxMs": 358.879,
+          "samplesMs": [
+            327.968,
+            327.231,
+            337.593,
+            358.879,
+            333.024,
+            324.221,
+            317.205,
+            345.263,
+            343.825
+          ],
+          "memoryBefore": {
+            "rss": 497770496,
+            "heapUsed": 263034912,
+            "external": 5345127
+          },
+          "memoryAfter": {
+            "rss": 839729152,
+            "heapUsed": 602095696,
+            "external": 5345127
+          },
+          "rowCount": 12914
+        },
+        "jsonParseEntityPayloads": {
+          "p50Ms": 63.524,
+          "p95Ms": 70.262,
+          "minMs": 44.983,
+          "maxMs": 70.262,
+          "samplesMs": [
+            64.012,
+            70.262,
+            64.473,
+            63.524,
+            62.471,
+            61.671,
+            44.983,
+            68.834,
+            60.006
+          ],
+          "memoryBefore": {
+            "rss": 902254592,
+            "heapUsed": 718368792,
+            "external": 5345127
+          },
+          "memoryAfter": {
+            "rss": 1376108544,
+            "heapUsed": 368422976,
+            "external": 5345127
+          }
+        },
+        "normalizeAppData": {
+          "p50Ms": 31.147,
+          "p95Ms": 41.483,
+          "minMs": 26.205,
+          "maxMs": 41.483,
+          "samplesMs": [
+            31.147,
+            27.06,
+            41.483,
+            31.52,
+            30.035,
+            26.205,
+            30.486,
+            34.491,
+            31.97
+          ],
+          "memoryBefore": {
+            "rss": 1376182272,
+            "heapUsed": 377796600,
+            "external": 5345127
+          },
+          "memoryAfter": {
+            "rss": 1376632832,
+            "heapUsed": 383048664,
+            "external": 5345127
+          }
+        },
+        "sanitizeAppData": {
+          "p50Ms": 27.116,
+          "p95Ms": 29.291,
+          "minMs": 26.279,
+          "maxMs": 29.291,
+          "samplesMs": [
+            28.394,
+            28.36,
+            29.291,
+            27.116,
+            26.748,
+            26.509,
+            28.811,
+            26.279,
+            26.686
+          ],
+          "memoryBefore": {
+            "rss": 1376632832,
+            "heapUsed": 391811912,
+            "external": 5345127
+          },
+          "memoryAfter": {
+            "rss": 1376698368,
+            "heapUsed": 431241672,
+            "external": 5345127
+          }
+        },
+        "serializeAppData": {
+          "p50Ms": 66.047,
+          "p95Ms": 69.382,
+          "minMs": 64.152,
+          "maxMs": 69.382,
+          "samplesMs": [
+            67.796,
+            66.047,
+            65.528,
+            64.543,
+            65.844,
+            68.067,
+            69.382,
+            64.152,
+            66.292
+          ],
+          "memoryBefore": {
+            "rss": 1509687296,
+            "heapUsed": 503261728,
+            "external": 5345127
+          },
+          "memoryAfter": {
+            "rss": 2105819136,
+            "heapUsed": 1099284176,
+            "external": 5345127
+          }
+        },
+        "loadSnapshot": {
+          "p50Ms": 399.95,
+          "p95Ms": 414.927,
+          "minMs": 393.194,
+          "maxMs": 414.927,
+          "samplesMs": [
+            393.194,
+            393.419,
+            398.67,
+            414.927,
+            405.572,
+            407.962,
+            397.401,
+            412.229,
+            399.95
+          ],
+          "memoryBefore": {
+            "rss": 1377505280,
+            "heapUsed": 452119312,
+            "external": 5340215
+          },
+          "memoryAfter": {
+            "rss": 1421778944,
+            "heapUsed": 765380648,
+            "external": 5340215
+          }
+        },
+        "agentReadOnlySnapshot": {
+          "p50Ms": 402.878,
+          "p95Ms": 421.055,
+          "minMs": 400.458,
+          "maxMs": 421.055,
+          "samplesMs": [
+            400.548,
+            400.458,
+            406.335,
+            421.055,
+            413.686,
+            402.878,
+            401.323,
+            401.766,
+            403.027
+          ],
+          "memoryBefore": {
+            "rss": 1421520896,
+            "heapUsed": 1021060424,
+            "external": 5340215
+          },
+          "memoryAfter": {
+            "rss": 1710419968,
+            "heapUsed": 1020487488,
+            "external": 5340215
+          }
+        },
+        "agentProjectDigest": {
+          "p50Ms": 402.162,
+          "p95Ms": 421.717,
+          "minMs": 394.233,
+          "maxMs": 421.717,
+          "samplesMs": [
+            407.701,
+            398.639,
+            402.162,
+            394.233,
+            401.093,
+            399.531,
+            405.635,
+            421.717,
+            402.803
+          ],
+          "memoryBefore": {
+            "rss": 1711456256,
+            "heapUsed": 1275833064,
+            "external": 5340215
+          },
+          "memoryAfter": {
+            "rss": 1715998720,
+            "heapUsed": 451456712,
+            "external": 5340215
+          },
+          "responseBytes": 5373,
+          "ok": true
+        },
+        "saveGenerationRunBundle": {
+          "p50Ms": 392.962,
+          "p95Ms": 410.621,
+          "minMs": 384.677,
+          "maxMs": 410.621,
+          "samplesMs": [
+            389.605,
+            396.772,
+            392.208,
+            410.621,
+            384.677,
+            392.962,
+            396.778,
+            391.388,
+            393.424
+          ],
+          "memoryBefore": {
+            "rss": 1717760000,
+            "heapUsed": 833247456,
+            "external": 5340215
+          },
+          "memoryAfter": {
+            "rss": 1719975936,
+            "heapUsed": 431462392,
+            "external": 5340215
+          }
+        },
+        "saveEditedChapterFullData": {
+          "p50Ms": 826.074,
+          "p95Ms": 852.457,
+          "minMs": 810.446,
+          "maxMs": 852.457,
+          "samplesMs": [
+            825.159,
+            810.446,
+            820.657,
+            837.017,
+            820.042,
+            852.457,
+            831.541,
+            826.074,
+            830.971
+          ],
+          "memoryBefore": {
+            "rss": 1720045568,
+            "heapUsed": 438069584,
+            "external": 5340215
+          },
+          "memoryAfter": {
+            "rss": 1720049664,
+            "heapUsed": 212306200,
+            "external": 5340215
+          }
+        }
+      },
+      "diskBytes": {
+        "sqlite": 84971520,
+        "wal": 88163912,
+        "shm": 196608
+      },
+      "rowsTouched": {
+        "bundleSavePerCall": 21,
+        "fullSavePerCall": 25833
+      }
+    }
+  ],
+  "status": "passed",
+  "finishedAt": "2026-09-07T09:55:59.405Z"
+}

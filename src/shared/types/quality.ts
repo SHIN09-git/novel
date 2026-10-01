@@ -1,4 +1,4 @@
-import type { ID } from './base'
+import type { AiCallTelemetry, ID } from './base'
 
 export type NoveltyAuditSeverity = 'pass' | 'warning' | 'fail'
 
@@ -65,6 +65,8 @@ export interface ConsistencyReviewReport {
   projectId: ID
   jobId: ID
   chapterId: ID | null
+  draftId?: ID | null
+  draftContentHash?: string | null
   promptContextSnapshotId?: ID | null
   issues: ConsistencyReviewIssue[]
   legacyIssuesText?: string
@@ -94,6 +96,7 @@ export interface RedundancyReport {
   jobId?: ID | null
   chapterId: ID | null
   draftId: ID | null
+  draftContentHash?: string | null
   repeatedPhrases: string[]
   repeatedSceneDescriptions: string[]
   repeatedExplanations: string[]
@@ -120,6 +123,7 @@ export interface QualityGateReport {
   jobId: ID
   chapterId: ID | null
   draftId: ID | null
+  draftContentHash?: string | null
   promptContextSnapshotId?: ID | null
   overallScore: number
   pass: boolean
@@ -127,6 +131,7 @@ export interface QualityGateReport {
   issues: QualityGateIssue[]
   requiredFixes: string[]
   optionalSuggestions: string[]
+  aiTelemetry?: AiCallTelemetry
   createdAt: string
 }
 
@@ -163,6 +168,17 @@ export interface NoveltyFinding {
   hasPriorForeshadowing: boolean
   sourceHint?: string | null
   suggestedAction: string
+  confidence?: 'high' | 'medium' | 'low'
+  semanticEvidence?: NoveltySemanticEvidence
+}
+
+export interface NoveltySemanticEvidence {
+  ruleTarget?: string | null
+  beneficiary?: string | null
+  crisisCue?: string | null
+  resolutionCue?: string | null
+  costOrLimitCue?: string | null
+  sourceMediumCue?: string | null
 }
 
 export interface NoveltyAuditResult {
@@ -175,4 +191,83 @@ export interface NoveltyAuditResult {
   untracedNames: NoveltyFinding[]
   severity: NoveltyAuditSeverity
   summary: string
+  sourceDraftId?: ID | null
+  sourceContentHash?: string | null
+  auditedAt?: string | null
+}
+
+export type EditorialVerdictStatus = 'approved' | 'advisory' | 'blocked' | 'incomplete'
+export type EditorialCoverageStatus = 'current' | 'not_requested' | 'unavailable' | 'stale'
+
+export interface EditorialVerdictCoverage {
+  quality: EditorialCoverageStatus
+  consistency: EditorialCoverageStatus
+}
+
+export type EditorialVerdictIssueLevel = 'blocker' | 'advisory'
+
+export type EditorialVerdictIssueSource =
+  | 'quality_gate'
+  | 'consistency_review'
+  | 'novelty_audit'
+  | 'redundancy_report'
+  | 'character_state'
+  | 'diagnostic_binding'
+
+export interface EditorialVerdictIssue {
+  id: ID
+  level: EditorialVerdictIssueLevel
+  source: EditorialVerdictIssueSource
+  code: string
+  title: string
+  evidence: string[]
+  recommendation: string
+  sourceId?: ID | null
+}
+
+export type EditorialVerdictActionType =
+  | 'accept_draft'
+  | 'revise_draft'
+  | 'rerun_diagnostics'
+  | 'review_novelty'
+  | 'update_character_state'
+
+export interface EditorialVerdictAction {
+  actionType: EditorialVerdictActionType
+  label: string
+  reason: string
+  priority: 1 | 2 | 3
+}
+
+export interface EditorialVerdictSourceRefs {
+  qualityGateReportId?: ID | null
+  consistencyReviewReportId?: ID | null
+  redundancyReportId?: ID | null
+  noveltyAuditTraceId?: ID | null
+  generationRunTraceId?: ID | null
+  characterStateIssueIds: ID[]
+  ignoredStaleReportIds: ID[]
+}
+
+/** Compact, deterministic editorial decision bound to one exact draft revision. */
+export interface EditorialVerdict {
+  id: ID
+  projectId: ID
+  chapterId: ID | null
+  jobId: ID
+  draftId: ID
+  draftContentHash: string
+  draftRevision: string
+  status: EditorialVerdictStatus
+  /** Explicit diagnostic coverage; optional only for persisted pre-0.1.6 compatibility. */
+  coverage?: EditorialVerdictCoverage
+  canAccept: boolean
+  summary: string
+  blockers: EditorialVerdictIssue[]
+  advisories: EditorialVerdictIssue[]
+  actions: EditorialVerdictAction[]
+  sourceRefs: EditorialVerdictSourceRefs
+  schemaVersion: number
+  createdAt: string
+  updatedAt: string
 }

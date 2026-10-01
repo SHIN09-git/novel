@@ -72,7 +72,8 @@ import type {
   StoryDirectionGuide,
   StoryDirectionGuideSource,
   StoryDirectionGuideStatus,
-  StoryDirectionHorizon
+  StoryDirectionHorizon,
+  AgentRun
 } from '../types'
 
 export const DEFAULT_SETTINGS: AppSettings = {
@@ -81,10 +82,14 @@ export const DEFAULT_SETTINGS: AppSettings = {
   hasApiKey: false,
   baseUrl: 'https://api.openai.com/v1',
   modelName: 'gpt-4.1',
+  codexCliPath: 'codex',
+  codexCliModel: '',
   temperature: 0.8,
   maxTokens: 8000,
   retryEnabled: true,
   maxRetries: 3,
+  requestTimeoutMs: 300_000,
+  pipelineModelRoles: {},
   enableAutoSummary: false,
   enableChapterDiagnostics: false,
   defaultTokenBudget: 16000,
@@ -115,19 +120,25 @@ export const EMPTY_APP_DATA: AppData = {
   chapterGenerationSteps: [],
   generatedChapterDrafts: [],
   memoryUpdateCandidates: [],
+  candidateDecisionReceipts: [],
+  worldManagementReceipts: [],
   consistencyReviewReports: [],
   contextBudgetProfiles: [],
   qualityGateReports: [],
   generationRunTraces: [],
   runTraceAuthorSummaries: [],
   redundancyReports: [],
+  editorialVerdicts: [],
   revisionCandidates: [],
   revisionSessions: [],
   revisionRequests: [],
   revisionVersions: [],
+  quickRewriteDrafts: [],
   chapterVersions: [],
   chapterCommitBundles: [],
   revisionCommitBundles: [],
+  agentRuns: [],
+  agentActionPreviews: [],
   settings: DEFAULT_SETTINGS
 }
 
@@ -221,4 +232,3 @@ export function createEmptyChapterTask(): ChapterTask {
     styleRequirement: ''
   }
 }
-

@@ -1,12 +1,13 @@
 import { copyFile, mkdir, readFile, rename, stat, writeFile } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { randomUUID } from 'node:crypto'
 
 // All story, project, character, and plot text in this regression fixture is
 // synthetic demo data. Do not replace it with customer manuscripts or private
 // writing samples.
 
-const root = process.cwd()
+const root = dirname(dirname(fileURLToPath(import.meta.url)))
 const outDir = join(root, 'tmp', 'rc-regression')
 const exportDir = join(outDir, 'exports')
 const dataPath = join(outDir, 'novel-director-data.json')

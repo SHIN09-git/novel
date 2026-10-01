@@ -1,11 +1,11 @@
 import { copyFile, mkdir, readdir, readFile, rm, stat, writeFile } from 'node:fs/promises'
 import { existsSync } from 'node:fs'
-import { join, resolve } from 'node:path'
-import { pathToFileURL } from 'node:url'
+import { dirname, join } from 'node:path'
+import { fileURLToPath, pathToFileURL } from 'node:url'
 import { build } from 'esbuild'
 import Database from 'better-sqlite3'
 
-const root = resolve('.')
+const root = dirname(dirname(fileURLToPath(import.meta.url)))
 const outDir = join(root, 'tmp', 'sqlite-storage-test')
 
 function assert(condition, message, details = {}) {
@@ -251,9 +251,19 @@ async function main() {
   const rendererSource = await readFile(join(root, 'src', 'renderer', 'src', 'hooks', 'useAppData.ts'), 'utf-8')
   const preloadSource = await readFile(join(root, 'src', 'preload', 'index.ts'), 'utf-8')
   const mainSource = await readFile(join(root, 'src', 'main', 'ipc', 'registerIpcHandlers.ts'), 'utf-8')
+  const dataIpcSource = await readFile(join(root, 'src', 'main', 'ipc', 'dataIpcHandlers.ts'), 'utf-8')
+  const storageManagementSource = await readFile(join(root, 'src', 'main', 'ipc', 'storageManagementIpcHandlers.ts'), 'utf-8')
+  const backupIpcSource = await readFile(join(root, 'src', 'main', 'ipc', 'backupIpcHandlers.ts'), 'utf-8')
+  const storageOpsSource = await readFile(join(root, 'src', 'main', 'ipc', 'storageDataOperations.ts'), 'utf-8')
+  const dataMergeSource = [
+    await readFile(join(root, 'src', 'main', 'DataMergeService.ts'), 'utf-8'),
+    await readFile(join(root, 'src', 'main', 'dataMerge', 'dataFileStorage.ts'), 'utf-8')
+  ].join('\n')
+  const mainIndexSource = await readFile(join(root, 'src', 'main', 'index.ts'), 'utf-8')
   const appConfigSource = await readFile(join(root, 'src', 'main', 'AppConfigService.ts'), 'utf-8')
   const storageServiceSource = await readFile(join(root, 'src', 'storage', 'StorageService.ts'), 'utf-8')
   const sqliteSource = await readFile(join(root, 'src', 'storage', 'SqliteStorageService.ts'), 'utf-8')
+  const agentRuntimeSource = await readFile(join(root, 'src', 'agent', 'AgentRuntime.ts'), 'utf-8')
   const packageJson = JSON.parse(await readFile(join(root, 'package.json'), 'utf-8'))
 
   checks.push(
@@ -266,31 +276,69 @@ async function main() {
 
   checks.push(
     assert(
-      preloadSource.includes('load: () => invokeOrThrow<StorageGetResult>(IPC_CHANNELS.STORAGE_GET)') &&
-        preloadSource.includes('save: (data: AppData) => invokeOrThrow<StorageSaveResult>(IPC_CHANNELS.STORAGE_SAVE, data)') &&
+      agentRuntimeSource.includes('revision: string') &&
+        agentRuntimeSource.includes('loadSqliteSnapshotReadonly(sqlitePath)') &&
+        agentRuntimeSource.includes('.saveIfCurrent(') &&
+        agentRuntimeSource.includes('isLoadedAgentRuntime(runtime) ? runtime.revision : undefined') &&
+        agentRuntimeSource.includes('adoptRuntimeWriteResult(runtime, result') &&
+        agentRuntimeSource.includes('storage.close?.()'),
+      'Agent Runtime uses read-only snapshots, carries revisions into writes, and closes short-lived write connections'
+    )
+  )
+
+  checks.push(
+    assert(
+      preloadSource.includes('load: loadStorageData') &&
+        preloadSource.includes('save: saveStorageData') &&
+        preloadSource.includes('expectedRevision: storageRevision') &&
         preloadSource.includes('saveGenerationRunBundle') &&
         !preloadSource.includes('better-sqlite3'),
-      'preload keeps compatible window.novelDirector.data.load/save API shape'
+      'preload keeps compatible window.novelDirector.data.load/save API shape and carries revisions internally'
     )
   )
 
   checks.push(
     assert(
-      rendererSource.includes('SaveQueue<() => Promise<StorageSaveResult | StorageWriteResult>') &&
+        rendererSource.includes('OperationQueue') &&
+        rendererSource.includes('createOperationQueue()') &&
         rendererSource.includes('saveGenerationRunBundle(nextInput: SaveDataInput, bundle: GenerationRunBundle)') &&
-        rendererSource.includes('window.novelDirector.data.saveGenerationRunBundle(bundle)') &&
-        rendererSource.includes('return window.novelDirector.data.save(next)'),
-      'full AppData saves and bundle saves share one renderer queue, with full-save fallback'
+        rendererSource.includes('getNovelDirectorDataApi') &&
+        rendererSource.includes('dataApi.saveGenerationRunBundle(bundle)') &&
+        rendererSource.includes('persisted = await dataApi.save(next)') &&
+        rendererSource.includes('commitPersistedData(next)') &&
+        !rendererSource.includes('save failed; falling back to full AppData save'),
+      'full AppData and bundle saves share one queue; fallback is used only when an older preload lacks the bundle IPC'
     )
   )
 
   checks.push(
     assert(
-      storageServiceSource.includes('saveGenerationRunBundle(bundle: GenerationRunBundle)') &&
-        mainSource.includes('IPC_CHANNELS.DATA_SAVE_GENERATION_RUN_BUNDLE') &&
+      storageServiceSource.includes('saveGenerationRunBundle(bundle: GenerationRunBundle, expectedRevision?: string)') &&
+        storageServiceSource.includes('saveIfCurrent(data: AppData, expectedRevision?: string)') &&
+        dataIpcSource.includes('IPC_CHANNELS.DATA_SAVE_GENERATION_RUN_BUNDLE') &&
         sqliteSource.includes('db.transaction') &&
+        sqliteSource.includes('this.assertExpectedRevision(db, expectedRevision)') &&
         sqliteSource.includes('validateGenerationRunBundle(bundle, existing)'),
       'StorageService and IPC expose transactional GenerationRunBundle persistence'
+    )
+  )
+
+  const bundleTransactionStart = sqliteSource.indexOf('private async saveEntityBundle<TContext>(')
+  const bundleTransactionEnd = sqliteSource.indexOf('private writeEntityEntries(', bundleTransactionStart)
+  const bundleTransactionSource = sqliteSource.slice(bundleTransactionStart, bundleTransactionEnd)
+  checks.push(
+    assert(
+      bundleTransactionStart >= 0 &&
+        bundleTransactionSource.includes('const existing = readExisting(db)') &&
+        sqliteSource.includes('(db) => readGenerationBundleValidationContext(db, bundle.jobId)') &&
+        bundleTransactionSource.indexOf('this.assertExpectedRevision(db, expectedRevision)') >= 0 &&
+        bundleTransactionSource.indexOf('this.assertExpectedRevision(db, expectedRevision)') <
+          bundleTransactionSource.indexOf('const existing =') &&
+        bundleTransactionSource.indexOf('const existing =') <
+          bundleTransactionSource.indexOf('entries = buildEntries(existing)') &&
+        bundleTransactionSource.indexOf('entries = buildEntries(existing)') <
+          bundleTransactionSource.indexOf('this.writeEntityEntries('),
+      'bundle revision check, current-state validation, entry planning, and upsert share one short SQLite transaction'
     )
   )
 
@@ -300,6 +348,31 @@ async function main() {
         appConfigSource.includes('SQLITE_DATA_FILE_NAME') &&
         SQLITE_DATA_FILE_NAME === 'novel-director-data.sqlite',
       'better-sqlite3 is declared and default app storage file is SQLite'
+    )
+  )
+
+  checks.push(
+    assert(
+      storageServiceSource.includes('close?(): void') &&
+        storageServiceSource.includes('backupTo(targetPath: string): Promise<void>') &&
+        sqliteSource.includes('await db.backup(targetPath)') &&
+        sqliteSource.includes('close(): void') &&
+        mainIndexSource.includes('storage.close?.()'),
+      'storage switching closes stale SQLite connections and exposes WAL-safe backup support'
+    )
+  )
+
+  checks.push(
+    assert(
+      preloadSource.includes("ImportDataRequest = { expectedRevision: storageRevision, strategy }") &&
+        preloadSource.includes('expectedRevision: storageRevision') &&
+        dataIpcSource.includes('request?.expectedRevision ?? currentSnapshot.revision') &&
+        backupIpcSource.includes('request.expectedRevision') &&
+        storageManagementSource.includes('request.expectedRevision') &&
+        dataMergeSource.includes('targetSnapshot.revision') &&
+        dataMergeSource.includes('return await storage.loadSnapshot()') &&
+        dataMergeSource.includes('storage.close?.()'),
+      'import, backup restore, and migration merge preserve revision guards, return coherent snapshots, and close temporary storage handles'
     )
   )
 
@@ -363,6 +436,38 @@ async function main() {
       roundTripLoaded.settings.apiKey === '' && !sqlitePayloadText.includes('TEST_PLAINTEXT_KEY_SHOULD_NOT_PERSIST'),
       'settings.apiKey is stripped before writing SQLite payload JSON',
       { apiKey: roundTripLoaded.settings.apiKey }
+    )
+  )
+
+  const concurrentSqlitePath = join(outDir, 'concurrent-sqlite', 'novel-director-data.sqlite')
+  const sqliteWriterA = new SqliteStorageService(concurrentSqlitePath)
+  const sqliteWriterB = new SqliteStorageService(concurrentSqlitePath)
+  await sqliteWriterA.save(makeData(base, { projects: [project('shared-initial')] }))
+  const sqliteSnapshotA = await sqliteWriterA.loadSnapshot()
+  const sqliteSnapshotB = await sqliteWriterB.loadSnapshot()
+  await sqliteWriterB.saveIfCurrent(
+    makeData(base, { projects: [project('writer-b-current')] }),
+    sqliteSnapshotB.revision
+  )
+  let staleSqliteBlocked = false
+  try {
+    await sqliteWriterA.saveIfCurrent(
+      makeData(base, { projects: [project('writer-a-stale')] }),
+      sqliteSnapshotA.revision
+    )
+  } catch (error) {
+    staleSqliteBlocked = error?.code === 'STORAGE_REVISION_CONFLICT'
+  }
+  const concurrentSqliteLoaded = await sqliteWriterB.load()
+  sqliteWriterA.close()
+  sqliteWriterB.close()
+  checks.push(
+    assert(
+      staleSqliteBlocked &&
+        concurrentSqliteLoaded.projects.some((item) => item.id === 'writer-b-current') &&
+        !concurrentSqliteLoaded.projects.some((item) => item.id === 'writer-a-stale'),
+      'SQLite optimistic revision blocks a stale full AppData save from overwriting another writer',
+      { staleSqliteBlocked, projects: concurrentSqliteLoaded.projects }
     )
   )
 
@@ -491,6 +596,36 @@ async function main() {
   const jsonLoaded = await jsonStorage.load()
   checks.push(assert(jsonLoaded.projects[0]?.id === 'json-project', 'JsonStorageService remains usable as legacy fallback'))
 
+  const concurrentJsonPath = join(outDir, 'concurrent-json', 'novel-director-data.json')
+  const jsonWriterA = new JsonStorageService(concurrentJsonPath)
+  const jsonWriterB = new JsonStorageService(concurrentJsonPath)
+  await jsonWriterA.save(makeData(base, { projects: [project('json-shared-initial')] }))
+  const jsonSnapshotA = await jsonWriterA.loadSnapshot()
+  const jsonSnapshotB = await jsonWriterB.loadSnapshot()
+  await jsonWriterB.saveIfCurrent(
+    makeData(base, { projects: [project('json-writer-b-current')] }),
+    jsonSnapshotB.revision
+  )
+  let staleJsonBlocked = false
+  try {
+    await jsonWriterA.saveIfCurrent(
+      makeData(base, { projects: [project('json-writer-a-stale')] }),
+      jsonSnapshotA.revision
+    )
+  } catch (error) {
+    staleJsonBlocked = error?.code === 'STORAGE_REVISION_CONFLICT'
+  }
+  const concurrentJsonLoaded = await jsonWriterB.load()
+  checks.push(
+    assert(
+      staleJsonBlocked &&
+        concurrentJsonLoaded.projects.some((item) => item.id === 'json-writer-b-current') &&
+        !concurrentJsonLoaded.projects.some((item) => item.id === 'json-writer-a-stale'),
+      'JSON fallback rejects a stale snapshot before replacing the data file',
+      { staleJsonBlocked, projects: concurrentJsonLoaded.projects }
+    )
+  )
+
   function generationRunData(jobId, projectId = 'bundle-project') {
     const timestamp = now()
     const job = {
@@ -504,6 +639,44 @@ async function main() {
       createdAt: timestamp,
       updatedAt: timestamp,
       errorMessage: ''
+    }
+    const contextNeedPlan = {
+      id: `${jobId}-context-plan`,
+      projectId,
+      targetChapterOrder: 2,
+      source: 'generation_pipeline',
+      chapterIntent: '推进第二章',
+      expectedSceneType: 'custom',
+      expectedCharacters: [],
+      requiredCharacterCardFields: {},
+      requiredStateFactCategories: {},
+      requiredForeshadowingIds: [],
+      forbiddenForeshadowingIds: [],
+      requiredTimelineEventIds: [],
+      requiredWorldbuildingKeys: [],
+      mustCheckContinuity: [],
+      retrievalPriorities: [],
+      exclusionRules: [],
+      contextNeeds: [],
+      warnings: [],
+      createdAt: timestamp,
+      updatedAt: timestamp
+    }
+    const contextBudgetProfile = {
+      id: `${jobId}-budget-profile`,
+      projectId,
+      name: '第二章流水线预算',
+      maxTokens: 12000,
+      mode: 'standard',
+      includeRecentChaptersCount: 3,
+      includeStageSummariesCount: 2,
+      includeMainCharacters: true,
+      includeRelatedCharacters: true,
+      includeForeshadowingWeights: ['high', 'medium'],
+      includeTimelineEventsCount: 5,
+      styleSampleMaxChars: 1200,
+      createdAt: timestamp,
+      updatedAt: timestamp
     }
     const draft = {
       id: `${jobId}-draft`,
@@ -523,6 +696,28 @@ async function main() {
       chapterGenerationJobs: [job],
       chapterGenerationSteps: [
         {
+          id: `${jobId}-context-plan-step`,
+          jobId,
+          type: 'context_need_planning',
+          status: 'completed',
+          inputSnapshot: '{}',
+          output: JSON.stringify(contextNeedPlan),
+          errorMessage: '',
+          createdAt: timestamp,
+          updatedAt: timestamp
+        },
+        {
+          id: `${jobId}-budget-step`,
+          jobId,
+          type: 'context_budget_selection',
+          status: 'completed',
+          inputSnapshot: '{}',
+          output: JSON.stringify({ profile: contextBudgetProfile }),
+          errorMessage: '',
+          createdAt: timestamp,
+          updatedAt: timestamp
+        },
+        {
           id: `${jobId}-step`,
           jobId,
           type: 'generate_chapter_draft',
@@ -534,6 +729,8 @@ async function main() {
           updatedAt: timestamp
         }
       ],
+      contextNeedPlans: [contextNeedPlan],
+      contextBudgetProfiles: [contextBudgetProfile],
       generatedChapterDrafts: [draft],
       memoryUpdateCandidates: [
         {
@@ -626,7 +823,8 @@ async function main() {
           generatedDraftId: draft.id,
           consistencyReviewReportId: `${jobId}-consistency`,
           qualityGateReportId: `${jobId}-quality`,
-          redundancyReportId: `${jobId}-redundancy`
+          redundancyReportId: `${jobId}-redundancy`,
+          contextNeedPlanId: contextNeedPlan.id
         }
       ]
     })
@@ -645,8 +843,12 @@ async function main() {
   checks.push(
     assert(
       bundleWrite.savedCollections.includes('chapterGenerationJobs') &&
+        bundleWrite.savedCollections.includes('contextNeedPlans') &&
+        bundleWrite.savedCollections.includes('contextBudgetProfiles') &&
         bundleLoaded.projects.some((item) => item.id === 'unrelated-project') &&
         bundleLoaded.chapterGenerationJobs.some((item) => item.id === 'bundle-job') &&
+        bundleLoaded.contextNeedPlans.some((item) => item.id === 'bundle-job-context-plan') &&
+        bundleLoaded.contextBudgetProfiles.some((item) => item.id === 'bundle-job-budget-profile') &&
         bundleLoaded.generatedChapterDrafts.some((item) => item.id === 'bundle-job-draft') &&
         bundleLoaded.characterStateChangeCandidates.some((item) => item.id === 'bundle-job-state-candidate') &&
         bundleLoaded.redundancyReports.some((item) => item.id === 'bundle-job-redundancy') &&
@@ -655,6 +857,35 @@ async function main() {
         bundleLoadedTwice.generatedChapterDrafts.filter((item) => item.id === 'bundle-job-draft').length === 1,
       'SQLiteStorageService.saveGenerationRunBundle transactionally upserts bundle records without deleting unrelated data or duplicating repeated saves',
       { savedCollections: bundleWrite.savedCollections }
+    )
+  )
+
+  const staleBundlePath = join(outDir, 'stale-bundle-save', 'novel-director-data.sqlite')
+  const staleBundleWriterA = new SqliteStorageService(staleBundlePath)
+  const staleBundleWriterB = new SqliteStorageService(staleBundlePath)
+  await staleBundleWriterA.save(makeData(base, { projects: [project('stale-bundle-initial')] }))
+  const staleBundleSnapshotA = await staleBundleWriterA.loadSnapshot()
+  const staleBundleSnapshotB = await staleBundleWriterB.loadSnapshot()
+  await staleBundleWriterB.saveIfCurrent(
+    makeData(base, { projects: [project('stale-bundle-external-update')] }),
+    staleBundleSnapshotB.revision
+  )
+  let staleBundleBlocked = false
+  try {
+    await staleBundleWriterA.saveGenerationRunBundle(bundleRecord, staleBundleSnapshotA.revision)
+  } catch (error) {
+    staleBundleBlocked = error?.code === 'STORAGE_REVISION_CONFLICT'
+  }
+  const staleBundleLoaded = await staleBundleWriterB.load()
+  staleBundleWriterA.close()
+  staleBundleWriterB.close()
+  checks.push(
+    assert(
+      staleBundleBlocked &&
+        staleBundleLoaded.projects.some((item) => item.id === 'stale-bundle-external-update') &&
+        !staleBundleLoaded.chapterGenerationJobs.some((item) => item.id === bundleRecord.jobId),
+      'stale GenerationRunBundle save is rejected before it can diverge renderer memory from external storage',
+      { staleBundleBlocked, projects: staleBundleLoaded.projects }
     )
   )
 
@@ -693,6 +924,8 @@ async function main() {
   checks.push(
     assert(
       jsonBundleLoaded.chapterGenerationJobs.some((item) => item.id === 'json-bundle-job') &&
+        jsonBundleLoaded.contextNeedPlans.some((item) => item.id === 'json-bundle-job-context-plan') &&
+        jsonBundleLoaded.contextBudgetProfiles.some((item) => item.id === 'json-bundle-job-budget-profile') &&
         jsonBundleLoaded.generationRunTraces.some((item) => item.jobId === 'json-bundle-job'),
       'JsonStorageService.saveGenerationRunBundle works as fallback'
     )
@@ -752,18 +985,31 @@ async function main() {
 
   const mergeSourcePath = join(outDir, 'merge-source.sqlite')
   const mergeTargetPath = join(outDir, 'merge-target.sqlite')
-  await new SqliteStorageService(mergeSourcePath).save(makeData(base, { projects: [project('merge-source')] }))
-  await new SqliteStorageService(mergeTargetPath).save(makeData(base, { projects: [project('merge-target')] }))
+  const mergeSourceStorage = new SqliteStorageService(mergeSourcePath)
+  await mergeSourceStorage.save(makeData(base, { projects: [project('merge-source')] }))
+  const mergeSourceSnapshot = await mergeSourceStorage.loadSnapshot()
+  mergeSourceStorage.close()
+  const mergeTargetStorage = new SqliteStorageService(mergeTargetPath)
+  await mergeTargetStorage.save(makeData(base, { projects: [project('merge-target')] }))
+  mergeTargetStorage.close()
   const preview = await mergeModule.createMigrationMergePreview(mergeSourcePath, mergeTargetPath)
-  const confirmed = await mergeModule.confirmMigrationMerge(mergeSourcePath, mergeTargetPath)
+  const confirmed = await mergeModule.confirmMigrationMerge(mergeSourcePath, mergeTargetPath, mergeSourceSnapshot.revision)
+  const sourceBackupStorage = new SqliteStorageService(confirmed.sourceBackupPath)
+  const sourceBackupData = await sourceBackupStorage.load()
+  sourceBackupStorage.close()
+  const targetBackupStorage = new SqliteStorageService(confirmed.targetBackupPath)
+  const targetBackupData = await targetBackupStorage.load()
+  targetBackupStorage.close()
   checks.push(
     assert(
       preview.canAutoMerge &&
         confirmed.data.projects.some((item) => item.id === 'merge-source') &&
         confirmed.data.projects.some((item) => item.id === 'merge-target') &&
+        sourceBackupData.projects.some((item) => item.id === 'merge-source') &&
+        targetBackupData.projects.some((item) => item.id === 'merge-target') &&
         (await exists(confirmed.sourceBackupPath)) &&
         (await exists(confirmed.targetBackupPath)),
-      'migration merge preview/confirm can read and write SQLite-backed AppData',
+      'migration merge uses revision guards and creates readable WAL-safe SQLite backups',
       {
         canAutoMerge: preview.canAutoMerge,
         sourceBackupPath: confirmed.sourceBackupPath,
@@ -772,23 +1018,70 @@ async function main() {
     )
   )
 
-  const ipcSource = await readFile(join(root, 'src', 'main', 'ipc', 'registerIpcHandlers.ts'), 'utf-8')
+  const staleMergeSourcePath = join(outDir, 'stale-merge-source.sqlite')
+  const staleMergeTargetPath = join(outDir, 'stale-merge-target.sqlite')
+  const staleMergeSource = new SqliteStorageService(staleMergeSourcePath)
+  await staleMergeSource.save(makeData(base, { projects: [project('stale-source-before')] }))
+  const staleMergeSnapshot = await staleMergeSource.loadSnapshot()
+  await staleMergeSource.saveIfCurrent(
+    makeData(base, { projects: [project('stale-source-after')] }),
+    staleMergeSnapshot.revision
+  )
+  staleMergeSource.close()
+  const staleMergeTarget = new SqliteStorageService(staleMergeTargetPath)
+  await staleMergeTarget.save(makeData(base, { projects: [project('stale-target')] }))
+  staleMergeTarget.close()
+  let staleMergeBlocked = false
+  try {
+    await mergeModule.confirmMigrationMerge(
+      staleMergeSourcePath,
+      staleMergeTargetPath,
+      staleMergeSnapshot.revision
+    )
+  } catch (error) {
+    staleMergeBlocked = error?.code === 'STORAGE_REVISION_CONFLICT'
+  }
+  const staleTargetAfter = new SqliteStorageService(staleMergeTargetPath)
+  const staleTargetData = await staleTargetAfter.load()
+  staleTargetAfter.close()
   checks.push(
     assert(
-      ipcSource.includes('IPC_CHANNELS.STORAGE_EXPORT') &&
-        ipcSource.includes('IPC_CHANNELS.STORAGE_IMPORT') &&
-        ipcSource.includes('JSON.stringify(sanitizeAppDataForPersistence(data), null, 2)') &&
-        ipcSource.includes('await storage.save(secured.data)'),
+      staleMergeBlocked &&
+        staleTargetData.projects.some((item) => item.id === 'stale-target') &&
+        !staleTargetData.projects.some((item) => item.id === 'stale-source-before'),
+      'stale migration merge is rejected without modifying its target'
+    )
+  )
+
+  checks.push(
+    assert(
+      dataIpcSource.includes('IPC_CHANNELS.STORAGE_EXPORT') &&
+        dataIpcSource.includes('IPC_CHANNELS.STORAGE_IMPORT') &&
+        dataIpcSource.includes('JSON.stringify(sanitizeAppDataForPersistence(data), null, 2)') &&
+        dataIpcSource.includes('storage.saveIfCurrent(') &&
+        dataIpcSource.includes('nextData,') &&
+        dataIpcSource.includes('createBackup(currentSnapshot.data, false)') &&
+        dataIpcSource.includes("request?.strategy === 'merge'"),
       'export/import JSON IPC shape remains compatible while import saves through active storage backend'
     )
   )
 
   checks.push(
     assert(
-      mainSource.includes('const activeStoragePath = nextStorage.getStoragePath()') &&
-        mainSource.includes('storagePath: activeStoragePath') &&
-        mainSource.includes('filters: [{ name: \'本地数据文件\', extensions: [\'sqlite\', \'db\', \'json\'] }]'),
+      mainSource.includes('registerStorageManagementIpcHandlers(context)') &&
+        storageManagementSource.includes('const activeStoragePath = nextStorage.getStoragePath()') &&
+        storageManagementSource.includes('storagePath: activeStoragePath') &&
+        storageManagementSource.includes('filters: [{ name: \'本地数据文件\', extensions: [\'sqlite\', \'db\', \'json\'] }]'),
       'migration IPC returns the actual active SQLite path and keeps local-data file picker compatibility'
+    )
+  )
+
+  checks.push(
+    assert(
+      storageOpsSource.includes('.before-migrate.${Date.now()}.bak') &&
+        storageOpsSource.includes('storage.backupTo(backupPath)') &&
+        !storageOpsSource.includes('.before-migrate.${Date.now()}.json'),
+      'storage migration backups keep a truthful .bak suffix and use backend-aware snapshots'
     )
   )
 

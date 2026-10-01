@@ -2,16 +2,20 @@ import type { Chapter, ID } from '../../../../shared/types'
 
 interface ChapterListPanelProps {
   chapters: Chapter[]
+  archivedChapters: Chapter[]
   selectedChapterId: ID | null
   activeBodyCharacterCount: number
   onSelectChapter: (chapter: Chapter) => void
+  onRestoreChapter: (chapter: Chapter) => void
 }
 
 export function ChapterListPanel({
   chapters,
+  archivedChapters,
   selectedChapterId,
   activeBodyCharacterCount,
-  onSelectChapter
+  onSelectChapter,
+  onRestoreChapter
 }: ChapterListPanelProps) {
   return (
     <aside className="list-pane">
@@ -33,6 +37,24 @@ export function ChapterListPanel({
           </small>
         </button>
       ))}
+      {archivedChapters.length ? (
+        <details className="chapter-archive-list">
+          <summary>已归档章节 ({archivedChapters.length})</summary>
+          <div className="chapter-archive-items">
+            {archivedChapters.map((chapter) => (
+              <div className="chapter-archive-item" key={chapter.id}>
+                <div>
+                  <strong>第 {chapter.order} 章</strong>
+                  <span>{chapter.title || '未命名'}</span>
+                </div>
+                <button className="ghost-button" onClick={() => onRestoreChapter(chapter)}>
+                  恢复
+                </button>
+              </div>
+            ))}
+          </div>
+        </details>
+      ) : null}
     </aside>
   )
 }

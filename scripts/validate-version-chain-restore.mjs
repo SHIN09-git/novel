@@ -3,8 +3,9 @@ import { join, resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { build } from 'esbuild'
 import Database from 'better-sqlite3'
+import { repoRoot } from './utils/repo-root.mjs'
 
-const root = resolve('.')
+const root = repoRoot
 const outDir = join(root, 'tmp', 'version-chain-restore-test')
 
 function assert(condition, message, details = {}) {
@@ -87,9 +88,13 @@ function makeData(overrides = {}) {
     chapterGenerationSteps: [],
     generatedChapterDrafts: [],
     memoryUpdateCandidates: [],
-    consistencyReviewReports: [{ id: 'consistency-1', projectId: 'project-1' }],
+    consistencyReviewReports: [{
+      id: 'consistency-1', projectId: 'project-1', chapterId: 'chapter-1', jobId: 'job-1', draftId: 'draft-1'
+    }],
     contextBudgetProfiles: [],
-    qualityGateReports: [{ id: 'quality-1', projectId: 'project-1' }],
+    qualityGateReports: [{
+      id: 'quality-1', projectId: 'project-1', chapterId: 'chapter-1', jobId: 'job-1', draftId: 'draft-1'
+    }],
     generationRunTraces: [
       {
         id: 'trace-1',
@@ -262,6 +267,7 @@ async function main() {
   const {
     getChapterVersionChain,
     getChapterVersionDetail,
+    getChapterVersionProtectionReason,
     buildRestoreRevisionCommitBundle
   } = chainModule
   const { applyRevisionCommitBundleToAppData } = revisionModule
@@ -269,21 +275,37 @@ async function main() {
   const { JsonStorageService } = jsonModule
 
   const chaptersSource = await read('src/renderer/src/views/ChaptersView.tsx')
+  const chapterVersionActionsSource = await read('src/renderer/src/views/chapters/useChapterVersionActions.ts')
+  const chapterVersionActionHandlersSource = await read('src/renderer/src/views/chapters/chapterVersionActionHandlers.ts')
+  const chapterVersionActionImplementation = `${chapterVersionActionsSource}\n${chapterVersionActionHandlersSource}`
   const panelSource = await read('src/renderer/src/views/chapters/ChapterVersionHistoryPanel.tsx')
   const sqliteSource = await read('src/storage/SqliteStorageService.ts')
   const jsonSource = await read('src/storage/JsonStorageService.ts')
   const ipcSource = await read('src/main/ipc/registerIpcHandlers.ts')
+  const dataIpcSource = await read('src/main/ipc/dataIpcHandlers.ts')
   const runTestsSource = await read('scripts/run-tests.mjs')
 
   checks.push(
     assert(
-      chaptersSource.includes('saveRevisionCommitBundle') &&
-        chaptersSource.includes('buildRestoreRevisionCommitBundle') &&
+        chaptersSource.includes('saveRevisionCommitBundle') &&
+        chaptersSource.includes('useChapterVersionActions') &&
+        chapterVersionActionsSource.includes("import('./chapterVersionActionHandlers')") &&
+        chapterVersionActionImplementation.includes('buildRestoreRevisionCommitBundle') &&
+        chapterVersionActionImplementation.includes('applyRevisionCommitBundleToAppData') &&
         chaptersSource.includes('restoreChapterVersionEntry') &&
         panelSource.includes('RevisionDiffView') &&
         panelSource.includes('恢复此版本') &&
         panelSource.includes('关联记录'),
       '章节页使用 RevisionCommitBundle 恢复路径，并提供预览、Diff、关联记录 UI'
+    )
+  )
+  checks.push(
+    assert(
+      !chaptersSource.includes('async function copyChapterVersion(version: ChapterVersion)') &&
+        !chaptersSource.includes('buildRestoreRevisionCommitBundle') &&
+        chapterVersionActionImplementation.includes('copyChapterVersionEntry') &&
+        chaptersSource.includes('copyChapterVersionEntry'),
+      '章节页版本复制只保留 entry-based handler，主组件不再重复维护版本恢复事务路径'
     )
   )
 
@@ -298,6 +320,59 @@ async function main() {
         generatedEntry?.sourceKind === 'generated_draft' &&
         revisionEntry?.sourceKind === 'ai_revision',
       '版本链能识别当前版本、AI 草稿采纳版本和 AI 辅助修订版本'
+    )
+  )
+
+  const committedCurrentData = {
+    ...data,
+    chapters: data.chapters.map((chapter) =>
+      chapter.id === 'chapter-1'
+        ? { ...chapter, body: 'AI revised body', updatedAt: '2026-01-02T10:00:00.000Z' }
+        : chapter
+    )
+  }
+  const committedCurrentChain = getChapterVersionChain(committedCurrentData, 'chapter-1')
+  checks.push(
+    assert(
+      committedCurrentChain.find((entry) => entry.id === 'version-revision-1')?.isCurrent === true &&
+        !committedCurrentChain.some((entry) => String(entry.id).startsWith('current:')),
+      'a committed chapter version is marked current without adding a duplicate current-body node'
+    )
+  )
+
+  const legacyCommitData = {
+    ...data,
+    chapterVersions: data.chapterVersions.filter((version) => version.id !== 'version-generated-1'),
+    chapterCommitBundles: data.chapterCommitBundles.map((commit) => ({
+      ...commit,
+      chapterVersion: {
+        ...commit.chapterVersion,
+        id: 'legacy-before-accept',
+        source: 'before_accept_draft',
+        body: 'body before accepted draft',
+        linkedChapterCommitId: null
+      }
+    }))
+  }
+  const legacyCommitEntry = getChapterVersionChain(legacyCommitData, 'chapter-1').find(
+    (entry) => entry.id === 'chapter-commit:chapter-commit-1'
+  )
+  const legacyRestore = buildRestoreRevisionCommitBundle({
+    appData: legacyCommitData,
+    projectId: 'project-1',
+    chapterId: 'chapter-1',
+    sourceVersionId: 'chapter-commit:chapter-commit-1',
+    revisionCommitId: 'legacy-restore-commit',
+    newChapterVersionId: 'legacy-restore-version',
+    restoredAt: now()
+  })
+  checks.push(
+    assert(
+      legacyCommitEntry?.body === 'accepted draft body' &&
+        legacyCommitEntry.sourceKind === 'generated_draft' &&
+        legacyRestore.afterText === 'accepted draft body' &&
+        Boolean(getChapterVersionProtectionReason(data, 'version-generated-1')),
+      'legacy draft commits remain visible and restorable while formal commit versions are protected from deletion'
     )
   )
 
@@ -422,8 +497,9 @@ async function main() {
     assert(
       sqliteSource.includes('saveRevisionCommitBundle') &&
         jsonSource.includes('saveRevisionCommitBundle') &&
-        ipcSource.includes('STORAGE_EXPORT') &&
-        ipcSource.includes('STORAGE_IMPORT'),
+        ipcSource.includes('registerDataIpcHandlers(context)') &&
+        dataIpcSource.includes('STORAGE_EXPORT') &&
+        dataIpcSource.includes('STORAGE_IMPORT'),
       'SQLite/JSON 存储和 JSON 导入导出入口保持存在'
     )
   )

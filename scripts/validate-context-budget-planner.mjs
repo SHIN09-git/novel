@@ -1,7 +1,8 @@
 import fs from 'node:fs'
 import path from 'node:path'
+import { repoRoot } from './utils/repo-root.mjs'
 
-const root = process.cwd()
+const root = repoRoot
 const read = (file) => fs.readFileSync(path.join(root, file), 'utf8')
 
 function assert(condition, message) {
@@ -12,21 +13,33 @@ function assert(condition, message) {
 
 const types = [
   read('src/shared/types.ts'),
+  read('src/shared/types/character.ts'),
   read('src/shared/types/context.ts'),
   read('src/shared/types/trace.ts')
 ].join('\n')
 const defaults = [
   read('src/shared/defaults.ts'),
   read('src/shared/normalizers/context.ts'),
+  read('src/shared/normalizers/contextBudget.ts'),
+  read('src/shared/normalizers/contextNeedPlan.ts'),
+  read('src/shared/normalizers/contextPrimitives.ts'),
+  read('src/shared/normalizers/contextSelection.ts'),
   read('src/shared/normalizers/appData.ts'),
   read('src/shared/normalizers/runTrace.ts')
 ].join('\n')
-const planner = read('src/services/ContextNeedPlannerService.ts')
+const planner = [
+  read('src/services/ContextNeedPlannerService.ts'),
+  read('src/services/contextNeedPlanner/types.ts'),
+  read('src/services/contextNeedPlanner/rules.ts'),
+  read('src/services/contextNeedPlanner/characterInference.ts'),
+  read('src/services/contextNeedPlanner/characterNeeds.ts')
+].join('\n')
 const gapAnalyzer = read('src/services/PlanContextGapAnalyzerService.ts')
 const budget = [
   read('src/services/ContextBudgetManager.ts'),
   read('src/services/contextBudget/scoringEngine.ts'),
   read('src/services/contextBudget/selectionEngine.ts'),
+  read('src/services/contextBudget/selectionFinalizer.ts'),
   read('src/services/contextBudget/traceBuilder.ts')
 ].join('\n')
 const runner = [
@@ -35,23 +48,33 @@ const runner = [
   read('src/renderer/src/views/generation/pipelineRunnerEngine.ts'),
   read('src/renderer/src/views/generation/pipelineSteps/contextPlanning.ts'),
   read('src/renderer/src/views/generation/pipelineSteps/chapterGeneration.ts'),
-  read('src/renderer/src/views/generation/pipelineUtils.ts')
+  read('src/renderer/src/views/generation/pipelineUtils.ts'),
+  read('src/renderer/src/views/generation/contextSelectionTraceRuntime.ts')
 ].join('\n')
-const authorSummary = read('src/services/RunTraceAuthorSummaryService.ts')
+const authorSummary = [
+  read('src/services/RunTraceAuthorSummaryService.ts'),
+  read('src/services/runTraceAuthorSummary/contextDiagnosis.ts')
+].join('\n')
 const runTests = read('scripts/run-tests.mjs')
 
 assert(types.includes('export interface ContextNeedItem'), 'ContextNeedItem type is missing')
 assert(types.includes('contextNeeds: ContextNeedItem[]'), 'ContextNeedPlan must expose contextNeeds')
+assert(types.includes("export type CharacterNeedInvolvement = 'mentioned' | 'present' | 'must_act'"), 'expected character needs must distinguish mention, presence, and required action')
+assert(types.includes('stateCheckRequired: boolean'), 'expected character needs must state whether ledger facts are required')
 assert(types.includes('export interface ContextSelectionTrace'), 'ContextSelectionTrace type is missing')
 assert(types.includes('selectedBlocks: ContextSelectionTraceBlock[]'), 'ContextSelectionTrace.selectedBlocks is missing')
 assert(types.includes('droppedBlocks: ContextSelectionTraceDroppedBlock[]'), 'ContextSelectionTrace.droppedBlocks is missing')
 assert(types.includes('unmetNeeds: ContextSelectionTraceUnmetNeed[]'), 'ContextSelectionTrace.unmetNeeds is missing')
+assert(types.includes('uncertain: boolean'), 'Context need and selection trace must preserve uncertainty')
+assert(types.includes('export type ContextDecisionReasonCode'), 'context decisions must use structured reason codes')
+assert(types.includes('reasonCode: ContextDecisionReasonCode'), 'omissions and trace entries must persist structured reason codes')
 assert(types.includes('contextSelectionTrace: ContextSelectionTrace | null'), 'ContextSelectionResult / RunTrace must persist contextSelectionTrace')
 
 assert(defaults.includes('normalizeContextNeedItem'), 'normalizeAppData must normalize ContextNeedItem')
 assert(defaults.includes('normalizeContextSelectionTrace'), 'normalizeAppData must normalize ContextSelectionTrace')
 assert(defaults.includes('contextNeeds: arrayOrEmpty'), 'normalizeContextNeedPlan must fill contextNeeds for old data')
 assert(defaults.includes('contextSelectionTrace: normalizeContextSelectionTrace'), 'normalize must preserve contextSelectionTrace')
+assert(defaults.includes('normalizeContextDecisionReasonCode'), 'old context decisions must normalize to compatible reason codes')
 
 assert(planner.includes("'character_state',"), 'ContextNeedPlanner must emit character state needs')
 assert(planner.includes("'foreshadowing',"), 'ContextNeedPlanner must emit foreshadowing needs')
@@ -68,6 +91,7 @@ assert(planner.includes('foreshadowingNeedPriority'), 'ContextNeedPlanner must p
 assert(planner.includes('timelineNeedReason'), 'ContextNeedPlanner must explain timeline anchor needs')
 assert(planner.includes('priorityLevel('), 'ContextNeedPlanner needs deterministic need priorities')
 assert(planner.includes('prioritizedContextNeeds'), 'ContextNeedPlanner build result must include prioritized contextNeeds')
+assert(planner.includes('inferExpectedCharacterNeeds'), 'ContextNeedPlanner must delegate character participation inference')
 
 assert(gapAnalyzer.includes('ContextNeedItem'), 'Plan gap analyzer must update structured context needs')
 assert(gapAnalyzer.includes('need-plan-character-state'), 'Plan gap analyzer must add post-plan character state needs')
@@ -91,6 +115,13 @@ assert(budget.includes('unmetNeeds'), 'ContextBudgetManager must record unmet ne
 assert(budget.includes('token 预算不足，优先省略低相关远期阶段摘要'), 'Budget trimming should drop low-value distant summaries before critical context')
 assert(budget.includes('!planRequiredForeshadowingIds.has(item.id)'), 'Budget trimming must protect plan-required foreshadowings')
 assert(budget.includes('requiredTimelineEventIds'), 'Budget trimming must protect plan-required timeline anchors')
+assert(budget.includes('planRequiredCharacterIds'), 'budget selection must distinguish confirmed required characters from advisory plan characters')
+assert(!budget.includes('for (const id of planCharacterIds) forcedCharacterIds.add(id)'), 'uncertain plan characters must not be forced into the prompt')
+assert(budget.includes("expected?.involvement === 'mentioned'"), 'character scoring must cap reference-only character priority')
+assert(budget.includes('need.uncertain ?'), 'uncertain needs must use an advisory trace threshold')
+assert(budget.includes("'manual_exclusion'"), 'budget omissions must distinguish explicit user exclusions')
+assert(budget.includes("'prompt_limit'"), 'budget omissions must distinguish prompt item caps')
+assert(budget.includes("'compressed_replacement'"), 'budget trace must distinguish compressed replacements')
 
 const stageTrimIndex = budget.indexOf('token 预算不足，优先省略低相关远期阶段摘要')
 const foreshadowingTrimIndex = budget.indexOf('const low = byId(data.foreshadowings')
@@ -102,9 +133,13 @@ assert(runner.includes("blockType: 'character_state_fact'"), 'Pipeline runner mu
 assert(runner.includes("blockType: 'hard_canon'"), 'Pipeline runner must trace HardCanonPack entries')
 assert(runner.includes('需求理由'), 'Pipeline trace enrichment must preserve author-facing need reasons')
 assert(runner.includes('contextSelectionTrace'), 'Pipeline runner must write contextSelectionTrace into Run Trace')
+assert(runner.includes("from './contextSelectionTraceRuntime'"), 'pipeline utilities must delegate final-prompt trace correction to a focused runtime module')
+assert(!runner.includes('characterIds: uniqueIds(activeNeedPlan.expectedCharacters'), 'post-plan delta selection must not force every advisory character')
+assert(!runner.includes('foreshadowingIds: activeNeedPlan.requiredForeshadowingIds'), 'post-plan required foreshadowings must remain plan requirements instead of being mislabeled as manual selections')
 
 assert(authorSummary.includes('trace.contextSelectionTrace?.unmetNeeds'), 'Author summary must read unmet context needs')
 assert(authorSummary.includes('trace.contextSelectionTrace?.droppedBlocks'), 'Author summary must read dropped context blocks')
+assert(authorSummary.includes('!need.uncertain') && authorSummary.includes('!block.uncertain'), 'Author summary must not present advisory uncertainty as a confirmed context failure')
 assert(authorSummary.includes('stageSummaryTokenShare'), 'Author summary must explain noisy stage summary budget pressure')
 assert(authorSummary.includes('budgetPressure: tracePressure ?? pressure'), 'Author summary must prefer structured ContextSelectionTrace budget pressure')
 

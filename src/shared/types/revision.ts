@@ -53,7 +53,8 @@ export interface RevisionCommitBundle {
   revisionSessionId?: ID | null
   revisionVersionId?: ID | null
   revisedAt: string
-  revisedBy: 'user' | 'ai' | 'user_with_ai'
+  revisedBy: 'user' | 'ai' | 'user_with_ai' | 'agent'
+  actor?: { kind: 'agent'; agentRunId: ID; actionPreviewId: ID; authorizationGrantId?: ID }
   beforeText?: string
   afterText: string
   chapter: Chapter
@@ -77,6 +78,7 @@ export interface RevisionCandidate {
   jobId: ID
   draftId: ID
   sourceReportId: ID
+  sourceDraftContentHash?: string
   targetIssue: string
   revisionInstruction: string
   revisedText: string
@@ -103,6 +105,10 @@ export interface RevisionRequest {
   type: RevisionRequestType
   targetRange: string
   instruction: string
+  relocatedFromRequestId?: ID
+  sourceEditorialVerdictId?: ID
+  sourceEditorialIssueId?: ID
+  sourceDraftContentHash?: string
   createdAt: string
 }
 
@@ -122,6 +128,9 @@ export interface RevisionVersion {
   changedSummary: string
   risks: string
   preservedFacts: string
+  sourceContentHash?: string
+  sourceChapterContentHash?: string
+  responseScope?: 'as_requested' | 'broader_than_requested'
   status: RevisionVersionStatus
   createdAt: string
   updatedAt: string

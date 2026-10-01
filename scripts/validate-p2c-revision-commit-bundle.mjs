@@ -3,8 +3,9 @@ import { join, resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { build } from 'esbuild'
 import Database from 'better-sqlite3'
+import { repoRoot } from './utils/repo-root.mjs'
 
-const root = resolve('.')
+const root = repoRoot
 const outDir = join(root, 'tmp', 'revision-commit-bundle-test')
 
 function assert(condition, message, details = {}) {
@@ -265,20 +266,26 @@ async function main() {
   const storageSource = await read('src/storage/StorageService.ts')
   const preloadSource = await read('src/preload/index.ts')
   const ipcSource = await read('src/main/ipc/registerIpcHandlers.ts')
+  const dataIpcSource = await read('src/main/ipc/dataIpcHandlers.ts')
   const hookSource = await read('src/renderer/src/hooks/useAppData.ts')
-  const studioSource = await read('src/renderer/src/views/RevisionStudioView.tsx')
+  const studioSource = [
+    await read('src/renderer/src/views/RevisionStudioView.tsx'),
+    await read('src/renderer/src/views/revision/revisionVersionActions.ts')
+  ].join('\n')
   const runTestsSource = await read('scripts/run-tests.mjs')
 
   checks.push(
     assert(
       typesSource.includes('export interface RevisionCommitBundle') &&
         typesSource.includes('revisionCommitBundles: RevisionCommitBundle[]') &&
-        storageSource.includes('saveRevisionCommitBundle(bundle: RevisionCommitBundle)') &&
+        storageSource.includes('saveRevisionCommitBundle(bundle: RevisionCommitBundle, expectedRevision?: string)') &&
         preloadSource.includes('saveRevisionCommitBundle: (bundle: RevisionCommitBundle)') &&
-        ipcSource.includes('storage.saveRevisionCommitBundle(request.bundle)') &&
+        ipcSource.includes('registerDataIpcHandlers(context)') &&
+        dataIpcSource.includes('storage.saveRevisionCommitBundle(request.bundle, request.expectedRevision)') &&
         hookSource.includes('saveRevisionCommitBundle(buildCommit: RevisionCommitSaveInput)') &&
         studioSource.includes('buildRevisionCommitBundle') &&
-        studioSource.includes('saveRevisionCommitBundle'),
+        studioSource.includes('saveRevisionCommitBundle') &&
+        !hookSource.includes('RevisionCommitBundle save failed; falling back to full AppData save.'),
       'RevisionCommitBundle is typed and wired through storage, IPC, preload, renderer queue and RevisionStudioView'
     )
   )
@@ -298,6 +305,66 @@ async function main() {
     revisionReason: 'AI revision',
     revisionNote: 'accept revision'
   })
+  const projectScopedBundle = buildRevisionCommitBundle({
+    appData: {
+      ...data,
+      chapterVersions: [
+        {
+          ...data.chapterVersions[0],
+          id: 'foreign-newer-version',
+          projectId: 'project-2',
+          createdAt: '2027-01-01T00:00:00.000Z'
+        },
+        ...data.chapterVersions
+      ],
+      generatedChapterDrafts: [
+        {
+          ...data.generatedChapterDrafts[0],
+          projectId: 'project-2',
+          chapterId: 'foreign-chapter'
+        },
+        ...data.generatedChapterDrafts
+      ],
+      generationRunTraces: [
+        { ...data.generationRunTraces[0], id: 'foreign-trace', projectId: 'project-2' },
+        ...data.generationRunTraces
+      ],
+      chapterCommitBundles: [
+        {
+          id: 'foreign-commit',
+          commitId: 'foreign-commit',
+          projectId: 'project-2',
+          chapterId: 'chapter-1',
+          acceptedAt: '2027-01-01T00:00:00.000Z'
+        },
+        {
+          id: 'local-commit',
+          commitId: 'local-commit',
+          projectId: 'project-1',
+          chapterId: 'chapter-1',
+          acceptedAt: '2026-01-01T00:00:00.000Z'
+        }
+      ]
+    },
+    projectId: 'project-1',
+    chapterId: 'chapter-1',
+    revisionCommitId: 'revision-commit-scoped',
+    newChapterVersionId: 'chapter-version-scoped',
+    revisionSessionId: 'session-1',
+    revisionVersionId: 'revision-version-1',
+    revisedAt: now(),
+    revisedBy: 'user_with_ai',
+    afterText: 'new revised body'
+  })
+  checks.push(
+    assert(
+      projectScopedBundle.baseChapterVersionId === 'base-version-1' &&
+        projectScopedBundle.generatedDraft?.projectId === 'project-1' &&
+        projectScopedBundle.linkedGenerationRunTraceId === 'trace-1' &&
+        projectScopedBundle.linkedChapterCommitId === 'local-commit',
+      'RevisionCommitBundle builder scopes versions, drafts, traces and chapter commits to the target project'
+    )
+  )
   validateRevisionCommitBundle(bundleCommit, data)
   const applied = applyRevisionCommitBundleToAppData(data, bundleCommit)
   const appliedTwice = applyRevisionCommitBundleToAppData(applied, bundleCommit)
@@ -305,6 +372,7 @@ async function main() {
     assert(
       applied.chapters.find((item) => item.id === 'chapter-1')?.body === 'new revised body' &&
         applied.chapterVersions.some((item) => item.id === 'chapter-version-2' && item.body === 'new revised body') &&
+        applied.chapterVersions.find((item) => item.id === 'chapter-version-2')?.source === 'user_with_ai_revision' &&
         applied.chapterVersions.find((item) => item.id === 'chapter-version-2')?.baseChapterVersionId === 'base-version-1' &&
         applied.revisionVersions.find((item) => item.id === 'revision-version-1')?.status === 'accepted' &&
         applied.revisionSessions.find((item) => item.id === 'session-1')?.status === 'completed' &&
@@ -316,6 +384,167 @@ async function main() {
     )
   )
 
+  const dataAfterLaterRevision = {
+    ...applied,
+    chapters: applied.chapters.map((item) =>
+      item.id === 'chapter-1'
+        ? { ...item, body: 'newest revision body', updatedAt: '2026-01-02T00:00:00.000Z' }
+        : item
+    ),
+    chapterVersions: [
+      {
+        ...bundleCommit.chapterVersion,
+        id: 'chapter-version-3',
+        body: 'newest revision body',
+        linkedRevisionCommitId: 'revision-commit-2',
+        baseChapterVersionId: bundleCommit.chapterVersion.id,
+        createdAt: '2026-01-02T00:00:00.000Z'
+      },
+      ...applied.chapterVersions
+    ]
+  }
+  const replayedOldRevisionCommit = applyRevisionCommitBundleToAppData(dataAfterLaterRevision, bundleCommit)
+  checks.push(
+    assert(
+      replayedOldRevisionCommit === dataAfterLaterRevision &&
+        replayedOldRevisionCommit.chapters.find((item) => item.id === 'chapter-1')?.body === 'newest revision body',
+      'replaying revision A after revision B is a no-op and cannot roll the manuscript back to A'
+    )
+  )
+
+  let immutableRevisionCommitBlocked = false
+  try {
+    validateRevisionCommitBundle(
+      {
+        ...bundleCommit,
+        afterText: 'tampered revision body',
+        chapter: { ...bundleCommit.chapter, body: 'tampered revision body' },
+        chapterVersion: { ...bundleCommit.chapterVersion, body: 'tampered revision body' }
+      },
+      applied
+    )
+  } catch {
+    immutableRevisionCommitBlocked = true
+  }
+  let staleRevisionCommitBlocked = false
+  try {
+    validateRevisionCommitBundle(
+      bundleCommit,
+      {
+        ...data,
+        chapters: data.chapters.map((item) =>
+          item.id === 'chapter-1' ? { ...item, body: 'newer concurrent chapter body' } : item
+        )
+      }
+    )
+  } catch {
+    staleRevisionCommitBlocked = true
+  }
+  checks.push(
+    assert(
+      immutableRevisionCommitBlocked && staleRevisionCommitBlocked,
+      'revision commits are immutable and stale beforeText cannot overwrite a newer chapter body'
+    )
+  )
+
+  let changedRevisionMetadataBlocked = false
+  try {
+    validateRevisionCommitBundle({ ...bundleCommit, revisionNote: 'changed after persistence' }, applied)
+  } catch {
+    changedRevisionMetadataBlocked = true
+  }
+  let foreignBaseVersionBlocked = false
+  try {
+    validateRevisionCommitBundle(
+      {
+        ...bundleCommit,
+        baseChapterVersionId: 'foreign-base-version',
+        chapterVersion: { ...bundleCommit.chapterVersion, baseChapterVersionId: 'foreign-base-version' }
+      },
+      {
+        ...data,
+        chapterVersions: [
+          ...data.chapterVersions,
+          { ...data.chapterVersions[0], id: 'foreign-base-version', projectId: 'project-2' }
+        ]
+      }
+    )
+  } catch {
+    foreignBaseVersionBlocked = true
+  }
+  let foreignLinkedCommitBlocked = false
+  try {
+    validateRevisionCommitBundle(
+      {
+        ...bundleCommit,
+        linkedChapterCommitId: 'foreign-chapter-commit',
+        chapterVersion: { ...bundleCommit.chapterVersion, linkedChapterCommitId: 'foreign-chapter-commit' }
+      },
+      {
+        ...data,
+        chapterCommitBundles: [
+          {
+            id: 'foreign-chapter-commit',
+            commitId: 'foreign-chapter-commit',
+            projectId: 'project-2',
+            chapterId: 'chapter-1',
+            acceptedAt: now()
+          }
+        ]
+      }
+    )
+  } catch {
+    foreignLinkedCommitBlocked = true
+  }
+  let foreignLinkedTraceBlocked = false
+  try {
+    validateRevisionCommitBundle(
+      {
+        ...bundleCommit,
+        linkedGenerationRunTraceId: 'foreign-linked-trace',
+        generationRunTrace: undefined,
+        chapterVersion: {
+          ...bundleCommit.chapterVersion,
+          linkedGenerationRunTraceId: 'foreign-linked-trace'
+        }
+      },
+      {
+        ...data,
+        generationRunTraces: [
+          ...data.generationRunTraces,
+          { ...data.generationRunTraces[0], id: 'foreign-linked-trace', projectId: 'project-2' }
+        ]
+      }
+    )
+  } catch {
+    foreignLinkedTraceBlocked = true
+  }
+  let crossProjectVersionCollisionBlocked = false
+  try {
+    validateRevisionCommitBundle(
+      bundleCommit,
+      {
+        ...data,
+        chapterVersions: [
+          ...data.chapterVersions,
+          { ...bundleCommit.chapterVersion, projectId: 'project-2' }
+        ]
+      }
+    )
+  } catch {
+    crossProjectVersionCollisionBlocked = true
+  }
+  checks.push(
+    assert(
+      changedRevisionMetadataBlocked &&
+        foreignBaseVersionBlocked &&
+        foreignLinkedCommitBlocked &&
+        foreignLinkedTraceBlocked &&
+        crossProjectVersionCollisionBlocked,
+      'revision validation protects immutable metadata, version ancestry and cross-project associations'
+    )
+  )
+
   let validationFailed = false
   try {
     validateRevisionCommitBundle({ ...bundleCommit, projectId: '' }, data)
@@ -323,6 +552,29 @@ async function main() {
     validationFailed = true
   }
   checks.push(assert(validationFailed, 'RevisionCommitBundle validation rejects missing projectId'))
+
+  let terminalVersionRejected = false
+  try {
+    buildRevisionCommitBundle({
+      appData: {
+        ...data,
+        revisionVersions: data.revisionVersions.map((version) =>
+          version.id === 'revision-version-1' ? { ...version, status: 'rejected' } : version
+        )
+      },
+      projectId: 'project-1',
+      chapterId: 'chapter-1',
+      revisionCommitId: 'revision-commit-terminal',
+      newChapterVersionId: 'chapter-version-terminal',
+      revisionSessionId: 'session-1',
+      revisionVersionId: 'revision-version-1',
+      revisedAt: now(),
+      afterText: 'must not be committed'
+    })
+  } catch {
+    terminalVersionRejected = true
+  }
+  checks.push(assert(terminalVersionRejected, 'RevisionCommitBundle refuses to accept a terminal revision version'))
 
   const sqlitePath = join(outDir, 'revision.sqlite')
   const sqliteStorage = new SqliteStorageService(sqlitePath, { legacyJsonPath: join(outDir, 'legacy.json') })
@@ -342,6 +594,32 @@ async function main() {
     )
   )
   sqliteStorage.close()
+
+  const replayPath = join(outDir, 'revision-replay.sqlite')
+  const replayStorage = new SqliteStorageService(replayPath, { legacyJsonPath: join(outDir, 'legacy-replay.json') })
+  await replayStorage.save(data)
+  await replayStorage.saveRevisionCommitBundle(bundleCommit)
+  const committedForReplay = await replayStorage.load()
+  await replayStorage.save({
+    ...committedForReplay,
+    chapters: committedForReplay.chapters.map((chapter) =>
+      chapter.id === 'chapter-1'
+        ? { ...chapter, body: 'newest revision body', updatedAt: '2026-09-06T12:00:00.000Z' }
+        : chapter
+    )
+  })
+  const beforeReplay = await replayStorage.loadSnapshot()
+  const replayWrite = await replayStorage.saveRevisionCommitBundle(bundleCommit)
+  const afterReplay = await replayStorage.loadSnapshot()
+  replayStorage.close()
+  checks.push(
+    assert(
+      afterReplay.data.chapters.find((item) => item.id === 'chapter-1')?.body === 'newest revision body' &&
+        afterReplay.revision === beforeReplay.revision &&
+        replayWrite.savedCollections.length === 0,
+      'replaying an old revision commit after a newer chapter state is a storage-level no-op'
+    )
+  )
 
   const failingPath = join(outDir, 'revision-fail.sqlite')
   const failingStorage = new SqliteStorageService(failingPath, { legacyJsonPath: join(outDir, 'legacy-fail.json') })
@@ -388,6 +666,26 @@ async function main() {
       jsonLoaded.chapters.find((item) => item.id === 'chapter-1')?.body === 'new revised body' &&
         jsonLoaded.revisionCommitBundles.some((item) => item.revisionCommitId === 'revision-commit-1'),
       'JsonStorageService.saveRevisionCommitBundle remains available as fallback'
+    )
+  )
+
+  await jsonStorage.save({
+    ...jsonLoaded,
+    chapters: jsonLoaded.chapters.map((chapter) =>
+      chapter.id === 'chapter-1'
+        ? { ...chapter, body: 'newest JSON revision body', updatedAt: '2026-09-06T12:00:00.000Z' }
+        : chapter
+    )
+  })
+  const jsonBeforeReplay = await jsonStorage.loadSnapshot()
+  const jsonReplayWrite = await jsonStorage.saveRevisionCommitBundle(bundleCommit)
+  const jsonAfterReplay = await jsonStorage.loadSnapshot()
+  checks.push(
+    assert(
+      jsonAfterReplay.data.chapters.find((item) => item.id === 'chapter-1')?.body === 'newest JSON revision body' &&
+        jsonAfterReplay.revision === jsonBeforeReplay.revision &&
+        jsonReplayWrite.savedCollections.length === 0,
+      'JSON fallback also treats an old revision commit replay as a no-op'
     )
   )
 

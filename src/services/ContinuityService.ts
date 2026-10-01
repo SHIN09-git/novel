@@ -65,7 +65,11 @@ export function resolveContinuityBridge(options: {
 }): { bridge: ChapterContinuityBridge | null; source: ContinuitySource | null; warnings: string[] } {
   const previousChapter = previousChapterForTarget(options.chapters, options.targetChapterOrder)
   if (!previousChapter) {
-    return { bridge: null, source: null, warnings: ['未找到上一章，无法建立章节衔接。'] }
+    return {
+      bridge: null,
+      source: null,
+      warnings: options.targetChapterOrder <= 1 ? [] : ['未找到上一章，无法建立章节衔接。']
+    }
   }
   const saved = findContinuityBridge(options.bridges, previousChapter.id, options.targetChapterOrder)
   if (saved) return { bridge: saved, source: 'saved_bridge', warnings: [] }
@@ -81,26 +85,32 @@ export function formatContinuityBridgeForPrompt(
   bridge: ChapterContinuityBridge | null,
   manualInstructions = ''
 ): string {
+  const field = (label: string, value: string | null | undefined) => {
+    const text = value?.trim()
+    return text ? `${label}：${text}` : ''
+  }
   const lines = bridge
     ? [
-        `上一章结尾位置：${bridge.lastSceneLocation || '待补充'}`,
-        `身体状态：${bridge.lastPhysicalState || '待补充'}`,
-        `情绪状态：${bridge.lastEmotionalState || '待补充'}`,
-        `未完成动作：${bridge.lastUnresolvedAction || '待补充'}`,
-        `未说出口的问题：${bridge.lastDialogueOrThought || '待补充'}`,
-        `下一章开头必须接住：${bridge.immediateNextBeat || bridge.mustContinueFrom || '待补充'}`,
-        `禁止重置：${bridge.mustNotReset || '不要重新介绍已有环境、机关和设定。'}`,
-        `开放的小张力：${bridge.openMicroTensions || '待补充'}`
-      ]
-    : ['暂无上一章衔接桥。']
+        field('上一章结尾位置', bridge.lastSceneLocation),
+        field('身体状态', bridge.lastPhysicalState),
+        field('情绪状态', bridge.lastEmotionalState),
+        field('未完成动作', bridge.lastUnresolvedAction),
+        field('未说出口的问题', bridge.lastDialogueOrThought),
+        field('下一章开头必须接住', bridge.immediateNextBeat || bridge.mustContinueFrom),
+        field('禁止重置', bridge.mustNotReset) || '禁止重置：不要重新介绍已有环境、机关和设定。',
+        field('开放的小张力', bridge.openMicroTensions)
+      ].filter(Boolean)
+    : ['本章没有可用的上一章衔接桥；如果这是第一章，请直接建立开场。']
 
   if (manualInstructions.trim()) {
     lines.push(`作者补充衔接指令：${manualInstructions.trim()}`)
   }
 
-  lines.push(
-    '硬规则：下一章开头必须直接承接上一章最后一幕，不得跳过、不得重新开场、不得重新介绍已有环境。',
-    '除非章节任务明确要求时间跳跃，否则第一场戏必须从上一章结尾后的数秒到数分钟内开始。'
-  )
+  if (bridge) {
+    lines.push(
+      '硬规则：下一章开头必须直接承接上一章最后一幕，不得跳过、不得重新开场、不得重新介绍已有环境。',
+      '除非章节任务明确要求时间跳跃，否则第一场戏必须从上一章结尾后的数秒到数分钟内开始。'
+    )
+  }
   return lines.join('\n')
 }

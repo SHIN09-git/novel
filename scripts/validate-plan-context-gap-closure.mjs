@@ -2,8 +2,9 @@ import { mkdir, readFile, rm, writeFile } from 'node:fs/promises'
 import { dirname, join, resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import ts from 'typescript'
+import { repoRoot } from './utils/repo-root.mjs'
 
-const root = resolve('.')
+const root = repoRoot
 const outDir = join(root, 'tmp', 'plan-context-gap-test')
 const timestamp = '2026-01-01T00:00:00.000Z'
 
@@ -36,7 +37,7 @@ async function compileTsTree(files) {
 }
 
 async function loadAnalyzer() {
-  await compileTsTree(['src/services/PlanContextGapAnalyzerService.ts'])
+  await compileTsTree(['src/shared/foreshadowingTreatment.ts', 'src/services/PlanContextGapAnalyzerService.ts'])
   return import(`${pathToFileURL(join(outDir, 'src/services/PlanContextGapAnalyzerService.mjs')).href}?t=${Date.now()}`)
 }
 
@@ -177,6 +178,85 @@ checks.push(assert(result.derivedContextNeedPlan.forbiddenForeshadowingIds.inclu
 checks.push(assert(result.newlyRequiredTimelineEventIds.includes('tl-warning'), 'Plan gap analyzer recognizes timeline event mention', result))
 const stateCategories = result.derivedContextNeedPlan.requiredStateFactCategories['char-han'] ?? []
 checks.push(assert(['physical', 'status', 'mental', 'relationship', 'location', 'goal', 'promise', 'knowledge', 'secret', 'inventory'].some((item) => stateCategories.includes(item)), 'Plan-derived need plan adds state fact categories for matched/onstage characters', { stateCategories }))
+
+const negativeOnlyResult = PlanContextGapAnalyzerService.buildFromChapterPlan({
+  project,
+  targetChapterOrder: 18,
+  baseContextNeedPlan: baseContextNeedPlan(),
+  plan: {
+    ...chapterPlan(),
+    chapterGoal: '周烬独自穿过站台。',
+    characterBeats: '',
+    foreshadowingToUse: '',
+    foreshadowingNotToReveal: '负向广播不得揭示。',
+    carriedEmotionalState: '',
+    unresolvedMicroTensions: '',
+    forbiddenResets: '不得让韩笑颜突然出现。',
+    forbiddenNovelty: '禁止新增韩笑颜或负向广播。'
+  },
+  characters: [character('char-zhou', '周烬'), character('char-han', '韩笑颜')],
+  foreshadowings: [foreshadowing('fs-negative', '负向广播')],
+  timelineEvents: [],
+  characterStateFacts: []
+})
+checks.push(assert(
+  !negativeOnlyResult.newlyRequiredCharacterIds.includes('char-han') &&
+    !negativeOnlyResult.derivedContextNeedPlan.expectedCharacters.some((item) => item.characterId === 'char-han') &&
+    !negativeOnlyResult.newlyRequiredForeshadowingIds.includes('fs-negative') &&
+    negativeOnlyResult.derivedContextNeedPlan.forbiddenForeshadowingIds.includes('fs-negative') &&
+    negativeOnlyResult.derivedContextNeedPlan.exclusionRules.some((rule) => rule.type === 'character' && rule.id === 'char-han') &&
+    !negativeOnlyResult.derivedContextNeedPlan.retrievalPriorities.some((item) => item.id === 'char-han' || item.id === 'fs-negative') &&
+    !negativeOnlyResult.derivedContextNeedPlan.contextNeeds.some((item) => item.sourceId === 'char-han' || item.sourceId === 'fs-negative'),
+  'negative plan fields create only forbidden/exclusion entries and never positive character or foreshadowing needs',
+  negativeOnlyResult
+))
+
+const futureBasePlan = baseContextNeedPlan()
+futureBasePlan.requiredForeshadowingIds = ['fs-future']
+futureBasePlan.retrievalPriorities = [{ type: 'foreshadowing', id: 'fs-future', priority: 100, reason: '陈旧计划要求未来伏笔。' }]
+futureBasePlan.contextNeeds = [{ id: 'need-future', needType: 'foreshadowing', sourceHint: 'foreshadowing', sourceId: 'fs-future', priority: 'must', reason: '陈旧计划要求未来伏笔。', uncertain: false }]
+const futureResult = PlanContextGapAnalyzerService.buildFromChapterPlan({
+  project,
+  targetChapterOrder: 18,
+  baseContextNeedPlan: futureBasePlan,
+  plan: { ...chapterPlan(), foreshadowingToUse: '本章要求使用未来广播。' },
+  characters: [character('char-zhou', '周烬')],
+  foreshadowings: [foreshadowing('fs-future', '未来广播', { firstChapterOrder: 20, treatmentMode: 'payoff', weight: 'payoff' })],
+  timelineEvents: [],
+  characterStateFacts: []
+})
+checks.push(assert(
+  !futureResult.newlyRequiredForeshadowingIds.includes('fs-future') &&
+    !futureResult.derivedContextNeedPlan.requiredForeshadowingIds.includes('fs-future') &&
+    !futureResult.derivedContextNeedPlan.retrievalPriorities.some((item) => item.id === 'fs-future') &&
+    !futureResult.derivedContextNeedPlan.contextNeeds.some((item) => item.sourceId === 'fs-future') &&
+    futureResult.warnings.some((warning) => warning.includes('章节门禁')),
+  'plan closure cannot re-add a future foreshadowing through plan text or stale base needs',
+  futureResult
+))
+
+const isolatedOpeningResult = PlanContextGapAnalyzerService.buildFromChapterPlan({
+  project,
+  targetChapterOrder: 1,
+  baseContextNeedPlan: baseContextNeedPlan(),
+  plan: chapterPlan(),
+  characters: [character('char-zhou', '周烬'), character('char-han', '韩笑颜')],
+  foreshadowings: [foreshadowing('fs-gaze', '对向站台的注视代价')],
+  timelineEvents: [timelineEvent('tl-warning', '第17章镜面告警')],
+  characterStateFacts: [],
+  suppressLegacyContextExpansion: true
+})
+checks.push(assert(
+  isolatedOpeningResult.newlyRequiredCharacterIds.length === 0 &&
+    isolatedOpeningResult.newlyRequiredForeshadowingIds.length === 0 &&
+    isolatedOpeningResult.newlyRequiredTimelineEventIds.length === 0 &&
+    Object.keys(isolatedOpeningResult.newlyRequiredStateFactCategories).length === 0 &&
+    !isolatedOpeningResult.derivedContextNeedPlan.expectedCharacters.some((item) => item.characterId === 'char-han') &&
+    !isolatedOpeningResult.derivedContextNeedPlan.requiredForeshadowingIds.includes('fs-gaze') &&
+    !isolatedOpeningResult.derivedContextNeedPlan.requiredTimelineEventIds.includes('tl-warning'),
+  'authoritative opening plan closure cannot use model-plan text to reselect legacy characters, foreshadowing, timeline, or state',
+  isolatedOpeningResult
+))
 
 const runnerSource = [
   await readFile(join(root, 'src/renderer/src/views/generation/usePipelineRunner.ts'), 'utf-8'),

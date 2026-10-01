@@ -2,8 +2,9 @@ import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import { join, resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import ts from 'typescript'
+import { repoRoot } from './utils/repo-root.mjs'
 
-const root = resolve('.')
+const root = repoRoot
 const outDir = join(root, 'tmp', 'revision-diff-view-test')
 
 function assert(condition, message, details = {}) {
@@ -34,7 +35,17 @@ async function main() {
   const checks = []
   const { createTextDiff } = await loadTsModule('src/renderer/src/utils/textDiff.ts')
   const diffViewSource = await readFile(join(root, 'src', 'renderer', 'src', 'views', 'revision', 'RevisionDiffView.tsx'), 'utf-8')
-  const studioSource = await readFile(join(root, 'src', 'renderer', 'src', 'views', 'RevisionStudioView.tsx'), 'utf-8')
+  const studioSource = (
+    await Promise.all(
+      [
+        join(root, 'src', 'renderer', 'src', 'views', 'RevisionStudioView.tsx'),
+        join(root, 'src', 'renderer', 'src', 'views', 'revision', 'RevisionComparisonPanel.tsx'),
+        join(root, 'src', 'renderer', 'src', 'views', 'revision', 'revisionGenerationActions.ts'),
+        join(root, 'src', 'renderer', 'src', 'views', 'revision', 'revisionVersionActions.ts'),
+        join(root, 'src', 'renderer', 'src', 'views', 'revision', 'revisionAcceptanceSnapshot.ts')
+      ].map((sourcePath) => readFile(sourcePath, 'utf-8'))
+    )
+  ).join('\n')
   const writebackSource = await readFile(join(root, 'src', 'renderer', 'src', 'utils', 'revisionWriteback.ts'), 'utf-8')
   const runTests = await readFile(join(root, 'scripts', 'run-tests.mjs'), 'utf-8')
 
@@ -93,13 +104,14 @@ async function main() {
 
   checks.push(
     assert(
-      studioSource.includes("useState<'original' | 'revised' | 'diff'>") &&
+      studioSource.includes("useState<'revised' | 'diff'>") &&
         studioSource.includes('revisionViewMode') &&
-        studioSource.includes("setRevisionViewMode('original')") &&
-        studioSource.includes("setRevisionViewMode('revised')") &&
-        studioSource.includes("setRevisionViewMode('diff')") &&
-        studioSource.includes('<RevisionDiffView originalText={sourceBody} revisedText={editableVersionBody} />'),
-      'RevisionStudioView exposes original/revised/diff switching without removing the editable revised text path'
+        studioSource.includes("onViewModeChange('revised')") &&
+        studioSource.includes("onViewModeChange('diff')") &&
+        !studioSource.includes("onViewModeChange('original')") &&
+        studioSource.includes('<RevisionDiffView originalText={sourceBody} revisedText={selectedVersionForView.body} />') &&
+        studioSource.includes('[selectedVersion?.id, selectedVersion?.body, selectedVersion?.status]'),
+      'RevisionStudioView keeps original visible once and switches only revised/diff without removing the editable path'
     )
   )
 
@@ -114,9 +126,34 @@ async function main() {
 
   checks.push(
     assert(
-      studioSource.includes('applyAcceptedRevisionWriteback(current, project.id, currentWritebackSource, version, timestamp)') &&
+      studioSource.includes('applyAcceptedRevisionWriteback(') &&
+        studioSource.includes('context.project.id') &&
+        studioSource.includes('currentWritebackSource') &&
         !studioSource.includes('createTextDiff('),
       'Diff view does not change the accept revision writeback path'
+    )
+  )
+
+  checks.push(
+    assert(
+      studioSource.includes('canEditRevisionVersionStatus(selectedVersion.status)') &&
+        studioSource.includes('该版本已进入历史状态，正文只读') &&
+        studioSource.includes('item.id !== versionId || !canEditRevisionVersionStatus(item.status)') &&
+        studioSource.includes('item.id !== version.id || !canRejectRevisionVersionStatus(item.status)') &&
+        studioSource.includes('!currentVersion || !canAcceptRevisionVersionStatus(currentVersion.status)') &&
+        studioSource.includes('applyAcceptedRevisionWriteback(') &&
+        studioSource.includes('context.project.id') &&
+        !studioSource.includes('?? selectedDraft') &&
+        !studioSource.includes('?? selectedChapter'),
+      'revision history cannot be silently edited or rejected after its status becomes terminal'
+    )
+  )
+
+  checks.push(
+    assert(
+      studioSource.includes('await persistEditedVersionBody(context)') &&
+        studioSource.includes('async function flushEditedVersionBefore'),
+      'revision text is flushed before accepting or navigating away from the active editable version'
     )
   )
 

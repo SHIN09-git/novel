@@ -3,8 +3,9 @@ import { readFileSync } from 'node:fs'
 import { dirname, join, resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import ts from 'typescript'
+import { repoRoot } from './utils/repo-root.mjs'
 
-const root = resolve('.')
+const root = repoRoot
 const outDir = join(root, 'tmp', 'runtime-prompt-lint-guard-test')
 
 function assert(condition, message, details = {}) {
@@ -90,7 +91,16 @@ async function main() {
   checks.push(assert(chapterGeneration.includes('PromptLintService') && chapterGeneration.includes('promptLintIssueCount'), 'rebuild_context_with_plan guards snapshot prompts and traces lint issue count'))
 
   const promptBuilderView = read('src/renderer/src/views/PromptBuilderView.tsx')
-  checks.push(assert(promptBuilderView.includes('PromptLintService.guardWritingPrompt'), 'PromptBuilderView guards manually edited snapshots and saved prompt versions'))
+  const promptBuilderHistory = read('src/renderer/src/views/promptBuilder/usePromptBuilderHistoryActions.ts')
+  checks.push(assert(
+    promptBuilderHistory.includes('PromptLintService.guardWritingPrompt')
+      && promptBuilderView.includes('usePromptBuilderHistoryActions'),
+    'PromptBuilder history actions guard manually edited snapshots and saved prompt versions'
+  ))
+  checks.push(assert(
+    !promptBuilderView.includes('PromptLintService.guardWritingPrompt'),
+    'PromptBuilderView delegates prompt history guard logic instead of duplicating it'
+  ))
 
   const runTests = read('scripts/run-tests.mjs')
   checks.push(assert(runTests.includes('validate-runtime-prompt-lint-guard.mjs'), 'npm test runs runtime prompt lint guard validation'))

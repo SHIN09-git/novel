@@ -1,38 +1,110 @@
-﻿:root {
+/*
+ * Novel Director design system — "Ink Desk".
+ * A dark ink rail (from the app icon) frames a cool workspace; a Morandi blue-grey is the single accent and
+ * warm xuan paper is reserved for manuscript surfaces.
+ * Theme blocks below redefine only color tokens; everything else is theme-independent.
+ */
+:root {
   color-scheme: light;
-  --color-bg: #f3f0e8;
-  --color-surface: #fffdf8;
+  /* Pigments: 雾蓝 Morandi blue accent · 朱 cinnabar danger · 琥 amber warning · 翠 clear green success · 藕荷 grey-violet info. */
+  --color-bg: #f0f1f3;
+  --color-surface: #ffffff;
   --color-surface-elevated: #ffffff;
-  --color-surface-soft: #eef4ef;
-  --color-border: #dad4c8;
-  --color-text-primary: #1a1f1d;
-  --color-text-secondary: #52605b;
-  --color-text-muted: #7c847f;
-  --color-accent: #2d8278;
-  --color-accent-strong: #1c615a;
-  --color-accent-soft: #dcefeb;
-  --color-warning: #a86d25;
-  --color-warning-soft: #fff2da;
-  --color-success: #2f7654;
-  --color-success-soft: #e1f0e5;
-  --color-danger: #ad4d4a;
-  --color-danger-soft: #f8e3df;
-  --color-info: #3f6e8c;
-  --color-info-soft: #e1ebf2;
-  --sidebar: #111917;
-  --sidebar-soft: #1c2a26;
+  --color-surface-soft: #f6f7f9;
+  --color-border: #e0e3e8;
+  --color-border-strong: #bcc3ce;
+  --color-text-primary: #161b26;
+  --color-text-secondary: #454e60;
+  --color-text-muted: #5c6578;
+  --color-accent: #56738c;
+  --color-accent-strong: #4a6680;
+  --color-accent-soft: #e8edf2;
+  --color-on-accent: #ffffff;
+  --color-warning: #8f5c0c;
+  --color-warning-soft: #f8edd6;
+  --color-success: #2f7a55;
+  --color-success-soft: #e6f4ec;
+  --color-success-mark: #5cbf86;
+  --color-danger: #b03a30;
+  --color-danger-soft: #f9e4e0;
+  --color-info: #6f6591;
+  --color-info-soft: #eeecf4;
+  --sidebar: #131925;
+  --sidebar-soft: #1c2433;
+  --rail-text: #c9cfda;
+  --rail-muted: #8d96a8;
+  --rail-strong: #f4f6fa;
+  --rail-border: rgba(255, 255, 255, 0.07);
+  --rail-hover: rgba(255, 255, 255, 0.06);
+  --rail-active: rgba(169, 191, 211, 0.14);
+  --rail-accent: #a9bfd3;
+  --slate: #131925;
+  /* 宣纸: manuscript surfaces are the only warm tone, so writing reads apart from tooling. */
+  --paper: #fbf8f1;
+  --paper-line: #ece5d5;
+  --paper-ink: #211e18;
+  --paper-tint: var(--paper);
+  --hover: rgba(22, 27, 38, 0.045);
+  --pressed: rgba(22, 27, 38, 0.08);
+  --focus-ring: rgba(86, 115, 140, 0.28);
+  --shadow-card: 0 1px 2px rgba(22, 27, 38, 0.05);
+  --shadow-soft: none;
+  --shadow-raised: 0 1px 2px rgba(22, 27, 38, 0.05), 0 8px 20px -12px rgba(22, 27, 38, 0.18);
+  --shadow-popover: 0 14px 34px -8px rgba(22, 27, 38, 0.22), 0 2px 6px rgba(22, 27, 38, 0.06);
+  --shadow-overlay: 0 28px 80px -12px rgba(22, 27, 38, 0.34);
+  --scrim: rgba(13, 17, 25, 0.42);
+
+  --font-ui: "Segoe UI Variable Text", "Segoe UI", -apple-system, BlinkMacSystemFont, "PingFang SC", "Microsoft YaHei UI", "Microsoft YaHei", system-ui, sans-serif;
+  --font-display: "Segoe UI Variable Display", "Segoe UI", -apple-system, BlinkMacSystemFont, "PingFang SC", "Microsoft YaHei UI", "Microsoft YaHei", system-ui, sans-serif;
+  --font-prose: "Noto Serif SC", "Noto Serif CJK SC", "Songti SC", "STSong", "Source Han Serif SC", "SimSun", serif;
+  --font-mono: "Cascadia Mono", "JetBrains Mono", Consolas, ui-monospace, monospace;
+
+  --text-xs: 12px;
+  --text-sm: 13px;
+  --text-md: 14px;
+  --text-lg: 16px;
+  --text-xl: 18px;
+  --text-2xl: 22px;
+  --text-3xl: 28px;
+  --text-4xl: 36px;
+
   --space-1: 4px;
   --space-2: 8px;
   --space-3: 12px;
   --space-4: 16px;
+  --space-5: 20px;
   --space-6: 24px;
   --space-8: 32px;
   --space-10: 40px;
-  --radius-sm: 8px;
-  --radius-md: 10px;
-  --radius-lg: 14px;
-  --shadow-card: 0 18px 44px rgba(28, 35, 31, 0.09);
-  --shadow-soft: 0 10px 24px rgba(28, 35, 31, 0.06);
+  --space-12: 48px;
+
+  --radius-xs: 4px;
+  --radius-sm: 6px;
+  --radius-md: 8px;
+  --radius-lg: 12px;
+  --radius-xl: 16px;
+  --radius-pill: 999px;
+
+  /* Motion: decelerate for entrances, standard for moves, a light spring only for things that travel. */
+  --ease-out: cubic-bezier(0.22, 0.8, 0.24, 1);
+  --ease-in: cubic-bezier(0.5, 0, 0.75, 0);
+  --ease-in-out: cubic-bezier(0.45, 0, 0.25, 1);
+  --ease-standard: cubic-bezier(0.2, 0, 0, 1);
+  --ease-emphasized: cubic-bezier(0.3, 1.25, 0.5, 1);
+  --ease-spring: cubic-bezier(0.34, 1.18, 0.64, 1);
+  --duration-fast: 120ms;
+  --duration-base: 180ms;
+  --duration-slow: 280ms;
+  --duration-slower: 380ms;
+  --stagger-step: 45ms;
+
+  --rail-width: 248px;
+  --topbar-height: 56px;
+  --workspace-sticky-offset: 72px;
+  --content-max: 1640px;
+  --prose-measure: 40em;
+
+  /* Legacy aliases still used by view stylesheets. */
   --bg: var(--color-bg);
   --surface: var(--color-surface);
   --surface-strong: var(--color-surface-soft);
@@ -45,63 +117,94 @@
   --danger: var(--color-danger);
   --shadow: var(--shadow-card);
   --radius: var(--radius-md);
-  font-family:
-    "Microsoft YaHei UI", "Microsoft YaHei", "Segoe UI", system-ui, -apple-system, BlinkMacSystemFont, sans-serif;
+  font-family: var(--font-ui);
 }
 
 :root[data-theme="dark"] {
   color-scheme: dark;
-  --color-bg: #141817;
-  --color-surface: #1d2320;
-  --color-surface-elevated: #242b28;
-  --color-surface-soft: #27302d;
-  --color-border: #39433f;
-  --color-text-primary: #f3f2ec;
-  --color-text-secondary: #b6bcb4;
-  --color-text-muted: #899089;
-  --color-accent: #72c4b7;
-  --color-accent-strong: #93d7cc;
-  --color-accent-soft: #203a37;
-  --color-warning: #e0a24f;
-  --color-warning-soft: #372b1f;
-  --color-success: #80c790;
-  --color-success-soft: #20362a;
-  --color-danger: #e18882;
-  --color-danger-soft: #3b2526;
-  --color-info: #8cb5d4;
-  --color-info-soft: #21313f;
-  --sidebar: #141713;
-  --sidebar-soft: #20251f;
-  --shadow-card: 0 16px 44px rgba(0, 0, 0, 0.24);
-  --shadow-soft: 0 8px 22px rgba(0, 0, 0, 0.18);
+  --color-bg: #0d1016;
+  --color-surface: #151a23;
+  --color-surface-elevated: #1b212c;
+  --color-surface-soft: #212835;
+  --color-border: #2a3242;
+  --color-border-strong: #4a5468;
+  --color-text-primary: #e8ebf1;
+  --color-text-secondary: #b1b8c6;
+  --color-text-muted: #929aab;
+  --color-accent: #a8bccf;
+  --color-accent-strong: #c3d2df;
+  --color-accent-soft: #1f2935;
+  --color-on-accent: #111a26;
+  --color-warning: #e6aa55;
+  --color-warning-soft: #322615;
+  --color-success: #86d4a6;
+  --color-success-soft: #1a2c24;
+  --color-success-mark: #86d4a6;
+  --color-danger: #f0877c;
+  --color-danger-soft: #391d1a;
+  --color-info: #b7aed6;
+  --color-info-soft: #25222f;
+  /* In dark mode the rail sits a step above the page instead of below it. */
+  --sidebar: #121722;
+  --sidebar-soft: #1a2030;
+  --rail-muted: #8891a3;
+  --rail-border: rgba(255, 255, 255, 0.08);
+  --slate: #161e2a;
+  --paper: #1d1c1a;
+  --paper-line: #2d2b27;
+  --paper-ink: #ebe5d8;
+  --hover: rgba(255, 255, 255, 0.045);
+  --pressed: rgba(255, 255, 255, 0.08);
+  --focus-ring: rgba(168, 188, 207, 0.3);
+  --shadow-card: none;
+  --shadow-raised: 0 1px 0 rgba(255, 255, 255, 0.03), 0 10px 24px -12px rgba(0, 0, 0, 0.7);
+  --shadow-popover: 0 16px 36px -8px rgba(0, 0, 0, 0.62), 0 2px 6px rgba(0, 0, 0, 0.3);
+  --shadow-overlay: 0 28px 80px -12px rgba(0, 0, 0, 0.72);
+  --scrim: rgba(0, 0, 0, 0.58);
 }
 
 @media (prefers-color-scheme: dark) {
   :root[data-theme="system"] {
     color-scheme: dark;
-    --color-bg: #141817;
-    --color-surface: #1d2320;
-    --color-surface-elevated: #242b28;
-    --color-surface-soft: #27302d;
-    --color-border: #39433f;
-    --color-text-primary: #f3f2ec;
-    --color-text-secondary: #b6bcb4;
-    --color-text-muted: #899089;
-    --color-accent: #72c4b7;
-    --color-accent-strong: #93d7cc;
-    --color-accent-soft: #203a37;
-    --color-warning: #e0a24f;
-    --color-warning-soft: #372b1f;
-    --color-success: #80c790;
-    --color-success-soft: #20362a;
-    --color-danger: #e18882;
-    --color-danger-soft: #3b2526;
-    --color-info: #8cb5d4;
-    --color-info-soft: #21313f;
-    --sidebar: #141713;
-    --sidebar-soft: #20251f;
-    --shadow-card: 0 16px 44px rgba(0, 0, 0, 0.24);
-    --shadow-soft: 0 8px 22px rgba(0, 0, 0, 0.18);
+    --color-bg: #0d1016;
+    --color-surface: #151a23;
+    --color-surface-elevated: #1b212c;
+    --color-surface-soft: #212835;
+    --color-border: #2a3242;
+    --color-border-strong: #4a5468;
+    --color-text-primary: #e8ebf1;
+    --color-text-secondary: #b1b8c6;
+    --color-text-muted: #929aab;
+    --color-accent: #a8bccf;
+    --color-accent-strong: #c3d2df;
+    --color-accent-soft: #1f2935;
+    --color-on-accent: #111a26;
+    --color-warning: #e6aa55;
+    --color-warning-soft: #322615;
+    --color-success: #86d4a6;
+    --color-success-soft: #1a2c24;
+    --color-success-mark: #86d4a6;
+    --color-danger: #f0877c;
+    --color-danger-soft: #391d1a;
+    --color-info: #b7aed6;
+    --color-info-soft: #25222f;
+    /* In dark mode the rail sits a step above the page instead of below it. */
+    --sidebar: #121722;
+    --sidebar-soft: #1a2030;
+    --rail-muted: #8891a3;
+    --rail-border: rgba(255, 255, 255, 0.08);
+    --slate: #161e2a;
+    --paper: #1d1c1a;
+    --paper-line: #2d2b27;
+    --paper-ink: #ebe5d8;
+    --hover: rgba(255, 255, 255, 0.045);
+    --pressed: rgba(255, 255, 255, 0.08);
+    --focus-ring: rgba(168, 188, 207, 0.3);
+    --shadow-card: none;
+    --shadow-raised: 0 1px 0 rgba(255, 255, 255, 0.03), 0 10px 24px -12px rgba(0, 0, 0, 0.7);
+    --shadow-popover: 0 16px 36px -8px rgba(0, 0, 0, 0.62), 0 2px 6px rgba(0, 0, 0, 0.3);
+    --shadow-overlay: 0 28px 80px -12px rgba(0, 0, 0, 0.72);
+    --scrim: rgba(0, 0, 0, 0.58);
   }
 }
 
@@ -109,11 +212,35 @@
   box-sizing: border-box;
 }
 
+html,
+body,
+#root {
+  min-height: 100%;
+}
+
 body {
   margin: 0;
-  background: linear-gradient(180deg, #faf8f1 0%, var(--bg) 48%, #ede9df 100%);
+  background: var(--bg);
   color: var(--ink);
-  min-width: 1024px;
+  min-width: min(1024px, 100%);
+  font-size: var(--text-md);
+  line-height: 1.5;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  font-feature-settings: "kern";
+}
+
+h1,
+h2,
+h3,
+h4 {
+  font-family: var(--font-display);
+  letter-spacing: -0.005em;
+  text-wrap: balance;
+}
+
+p {
+  text-wrap: pretty;
 }
 
 button,
@@ -128,56 +255,251 @@ button {
   cursor: pointer;
 }
 
+button,
+[role="button"],
+summary {
+  -webkit-tap-highlight-color: transparent;
+}
+
 input,
 textarea,
 select {
   width: 100%;
   border: 1px solid var(--line);
-  border-radius: var(--radius);
+  border-radius: var(--radius-md);
   background: var(--color-surface-elevated);
   color: var(--ink);
-  padding: 10px 12px;
+  min-height: 38px;
+  padding: 8px 11px;
   outline: none;
+  box-shadow: inset 0 1px 1px rgba(23, 27, 36, 0.03);
   transition:
-    border-color 140ms ease,
-    box-shadow 140ms ease,
-    background 140ms ease;
+    border-color var(--duration-fast) ease,
+    box-shadow var(--duration-base) var(--ease-out),
+    background var(--duration-fast) ease;
+}
+
+input:hover:not(:focus):not(:disabled),
+textarea:hover:not(:focus):not(:disabled),
+select:hover:not(:focus):not(:disabled) {
+  border-color: var(--color-border-strong);
+}
+
+input:disabled,
+textarea:disabled,
+select:disabled {
+  background: var(--color-surface-soft);
+  color: var(--color-text-muted);
+  cursor: not-allowed;
+}
+
+input::placeholder,
+textarea::placeholder {
+  color: var(--color-text-muted);
+  opacity: 1;
 }
 
 textarea {
   resize: vertical;
-  line-height: 1.65;
+  line-height: 1.7;
+}
+
+select {
+  appearance: none;
+  padding-right: 32px;
+  background-image:
+    linear-gradient(45deg, transparent 50%, var(--color-text-muted) 50%),
+    linear-gradient(135deg, var(--color-text-muted) 50%, transparent 50%);
+  background-position:
+    calc(100% - 16px) 52%,
+    calc(100% - 11px) 52%;
+  background-size: 5px 5px;
+  background-repeat: no-repeat;
+  cursor: pointer;
+}
+
+input[type="checkbox"],
+input[type="radio"] {
+  width: 16px;
+  height: 16px;
+  min-height: 0;
+  padding: 0;
+  box-shadow: none;
+  accent-color: var(--color-accent);
+  cursor: pointer;
+}
+
+input[type="range"] {
+  min-height: 0;
+  padding: 0;
+  border: 0;
+  box-shadow: none;
+  background: transparent;
+  accent-color: var(--color-accent);
 }
 
 input:focus,
 textarea:focus,
 select:focus {
   border-color: var(--teal);
-  box-shadow: 0 0 0 3px rgba(40, 118, 111, 0.13);
+  box-shadow: 0 0 0 3px var(--focus-ring);
+}
+
+/* Focus rings snap in from a wider offset so keyboard focus is easy to follow. */
+button:focus-visible,
+[role="button"]:focus-visible,
+summary:focus-visible,
+a:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 2px;
+  animation: nd-focus-snap var(--duration-base) var(--ease-out);
+}
+
+@keyframes nd-focus-snap {
+  from { outline-offset: 6px; outline-color: transparent; }
+}
+
+a {
+  color: var(--color-accent-strong);
+  text-underline-offset: 3px;
+}
+
+::selection {
+  background: color-mix(in srgb, var(--color-accent) 24%, transparent);
+  color: var(--ink);
+}
+
+* {
+  scrollbar-color: var(--color-border-strong) transparent;
+  scrollbar-width: thin;
+}
+
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+
+::-webkit-scrollbar-thumb {
+  border: 3px solid transparent;
+  border-radius: 999px;
+  background: var(--color-border-strong);
+  background-clip: padding-box;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+code,
+kbd,
+samp {
+  font-family: var(--font-mono);
+  font-size: 0.92em;
+}
+
+kbd {
+  padding: 1px 6px;
+  border: 1px solid var(--line);
+  border-bottom-width: 2px;
+  border-radius: var(--radius-xs);
+  background: var(--color-surface-soft);
+}
+
+hr {
+  height: 1px;
+  margin: var(--space-6) 0;
+  border: 0;
+  background: var(--line);
 }
 
 table {
   width: 100%;
-  border-collapse: collapse;
+  border-collapse: separate;
+  border-spacing: 0;
 }
 
 th,
 td {
   border-bottom: 1px solid var(--line);
-  padding: 12px 10px;
+  padding: 11px 12px;
   text-align: left;
   vertical-align: top;
 }
 
 th {
-  color: var(--muted);
-  font-size: 12px;
-  font-weight: 700;
-  background: rgba(246, 242, 232, 0.84);
+  color: var(--color-text-muted);
+  font-size: var(--text-xs);
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  background: var(--color-surface-soft);
 }
 
 tr {
   cursor: pointer;
 }
 
-tr:hover,
+tbody tr {
+  transition: background var(--duration-fast) ease;
+}
+
+tbody tr:hover,
+.active-row {
+  background: color-mix(in srgb, var(--color-accent) 6%, transparent);
+}
+
+/* Shared motion vocabulary: entrances settle quickly, nothing loops except live-work indicators. */
+@keyframes nd-fade-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@keyframes nd-rise-in {
+  from { opacity: 0; transform: translateY(6px); }
+  to { opacity: 1; transform: none; }
+}
+
+@keyframes nd-pop-in {
+  from { opacity: 0; transform: translateY(4px) scale(0.97); }
+  to { opacity: 1; transform: none; }
+}
+
+@keyframes nd-slide-up {
+  from { opacity: 0; transform: translateY(16px); }
+  to { opacity: 1; transform: none; }
+}
+
+@keyframes nd-pulse-ring {
+  0% { box-shadow: 0 0 0 0 color-mix(in srgb, currentColor 45%, transparent); }
+  70%, 100% { box-shadow: 0 0 0 6px color-mix(in srgb, currentColor 0%, transparent); }
+}
+
+@keyframes nd-spin {
+  to { transform: rotate(360deg); }
+}
+
+@keyframes nd-indeterminate {
+  from { transform: translateX(-100%); }
+  to { transform: translateX(250%); }
+}
+
+.spin {
+  animation: nd-spin 900ms linear infinite;
+}
+
+/* Theme switches cross-fade through the View Transitions API (see useAppData). */
+::view-transition-old(root),
+::view-transition-new(root) {
+  animation-duration: 360ms;
+  animation-timing-function: var(--ease-in-out);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    scroll-behavior: auto !important;
+    transition-duration: 0.01ms !important;
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+  }
+}

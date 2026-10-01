@@ -1,5 +1,6 @@
-﻿.active-row {
-  background: var(--surface-strong);
+/* App frame: ink rail + paper workspace. */
+.active-row {
+  background: color-mix(in srgb, var(--color-accent) 6%, transparent);
 }
 
 code {
@@ -10,263 +11,574 @@ code {
   min-height: 100vh;
   display: grid;
   place-content: center;
-  gap: 12px;
+  justify-items: center;
+  gap: 10px;
   text-align: center;
   color: var(--muted);
 }
 
+.loading-screen::before {
+  content: "";
+  width: 28px;
+  height: 28px;
+  margin-bottom: 8px;
+  border: 2px solid var(--color-accent-soft);
+  border-top-color: var(--color-accent);
+  border-radius: 999px;
+  animation: nd-spin 800ms linear infinite;
+}
+
 .loading-screen strong {
   color: var(--ink);
-  font-size: 28px;
+  font-family: var(--font-display);
+  font-size: var(--text-3xl);
+  font-weight: 650;
+  animation: nd-rise-in var(--duration-slow) var(--ease-out) backwards;
 }
 
 .home {
   min-height: 100dvh;
-  padding: 42px;
-  max-width: 1420px;
+  padding: 40px 48px 64px;
+  max-width: 1240px;
   margin: 0 auto;
+}
+
+.home .page-header {
+  margin-bottom: 28px;
+}
+
+.home .page-header h1 {
+  font-size: var(--text-4xl);
+}
+
+.home-create-actions {
+  margin-top: 4px;
 }
 
 .app-shell {
   min-height: 100dvh;
   display: grid;
-  grid-template-columns: 286px minmax(0, 1fr);
+  grid-template-columns: var(--rail-width) minmax(0, 1fr);
+  overflow-x: clip;
+  transition: grid-template-columns var(--duration-slower) var(--ease-standard);
 }
 
+/* Collapsing shrinks the rail column to zero while the rail slides out in step with it. */
+.app-shell[data-sidebar-collapsed="true"] {
+  grid-template-columns: 0px minmax(0, 1fr);
+}
+
+.app-shell > .main-panel {
+  grid-column: 2;
+}
+
+.sidebar[hidden] { display: none; }
+
 .sidebar {
-  background: linear-gradient(180deg, #12201d 0%, var(--sidebar) 100%);
-  color: #f4f5f0;
-  padding: 16px 16px;
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
+  transition:
+    translate var(--duration-slower) var(--ease-standard),
+    opacity var(--duration-slower) var(--ease-standard),
+    display var(--duration-slower) allow-discrete;
+}
+
+.sidebar[hidden] {
+  translate: calc(-1 * var(--rail-width)) 0;
+  opacity: 0.4;
+}
+
+@starting-style {
+  .sidebar:not([hidden]) {
+    translate: calc(-1 * var(--rail-width)) 0;
+    opacity: 0.4;
+  }
+}
+
+.skip-to-content {
+  position: fixed;
+  top: 8px;
+  left: 8px;
+  z-index: 1000;
+  padding: 10px 14px;
+  background: var(--surface);
+  color: var(--ink);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-popover);
+  transform: translateY(-200%);
+  transition: transform var(--duration-base) var(--ease-out);
+}
+
+.skip-to-content:focus { transform: translateY(0); }
+
+/* ---------- Ink rail ---------- */
+.sidebar {
   position: sticky;
   top: 0;
+  width: var(--rail-width);
   height: 100dvh;
-  overflow: auto;
-  box-shadow: inset -1px 0 rgba(255, 255, 255, 0.06);
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 14px 12px 12px;
+  overflow: clip;
+  background:
+    radial-gradient(120% 60% at 0% 0%, rgba(169, 191, 211, 0.09), transparent 60%),
+    var(--sidebar);
+  color: var(--rail-text);
+  border-right: 1px solid var(--rail-border);
 }
 
 .brand-mark {
   display: grid;
-  grid-template-columns: 42px 1fr;
+  grid-template-columns: 34px 1fr;
   gap: 11px;
   align-items: center;
-  padding: 2px 6px 5px;
+  padding: 2px 6px 8px;
 }
 
 .brand-symbol {
-  width: 42px;
-  height: 42px;
-  border-radius: 13px;
-  display: grid;
-  place-items: center;
-  border: 1px solid rgba(151, 236, 222, 0.32);
-  background:
-    linear-gradient(135deg, rgba(151, 236, 222, 0.20), rgba(255, 255, 255, 0.05)),
-    rgba(255, 255, 255, 0.06);
-  color: #dffcf7;
-  font-weight: 900;
-  letter-spacing: 0.04em;
-  box-shadow: inset 0 1px rgba(255, 255, 255, 0.12), 0 14px 30px rgba(0, 0, 0, 0.24);
+  width: 34px;
+  height: 34px;
+  border-radius: 9px;
+  overflow: hidden;
+  border: 1px solid rgba(169, 191, 211, 0.24);
+  background: #091329;
+  box-shadow: 0 0 0 4px rgba(169, 191, 211, 0.06), 0 6px 16px -6px rgba(0, 0, 0, 0.6);
+}
+
+.brand-symbol img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
 }
 
 .brand-mark strong {
   display: block;
-  font-size: 17px;
+  color: var(--rail-strong);
+  font-family: var(--font-display);
+  font-size: 15px;
+  font-weight: 650;
   letter-spacing: 0.01em;
 }
 
 .brand-mark span {
   display: block;
-  margin-top: 3px;
-  color: rgba(244, 245, 240, 0.62);
-  font-size: 12px;
+  margin-top: 2px;
+  color: var(--rail-muted);
+  font-size: var(--text-xs);
+  letter-spacing: 0.08em;
+}
+
+.back-button {
+  width: 100%;
+  min-height: 30px;
+  padding: 4px 8px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--rail-muted);
+  font-size: var(--text-xs);
+  text-align: left;
+  transition:
+    background var(--duration-fast) ease,
+    color var(--duration-fast) ease;
+}
+
+.back-button:hover {
+  background: var(--rail-hover);
+  color: var(--rail-strong);
+}
+
+.back-button svg {
+  transition: transform var(--duration-base) var(--ease-out);
+}
+
+.back-button:hover svg {
+  transform: translateX(-2px);
+}
+
+.back-button:focus-visible,
+.nav-list button:focus-visible {
+  outline-color: var(--rail-accent);
+  outline-offset: -2px;
 }
 
 .project-badge {
-  background: rgba(255, 255, 255, 0.06);
-  border: 1px solid rgba(255, 255, 255, 0.10);
-  border-radius: 16px;
-  padding: 12px 14px;
   display: grid;
-  gap: 5px;
-  box-shadow: inset 0 1px rgba(255, 255, 255, 0.06);
+  gap: 3px;
+  margin: 2px 0 8px;
+  padding: 11px 12px 12px;
+  border: 1px solid var(--rail-border);
+  border-radius: var(--radius-md);
+  background: rgba(255, 255, 255, 0.035);
 }
 
-.project-badge span,
-.project-badge small {
-  color: rgba(244, 245, 240, 0.68);
+.project-badge-label {
+  color: var(--rail-muted);
+  font-size: 11px;
+  letter-spacing: 0.12em;
 }
 
 .project-badge strong {
-  font-size: 17px;
+  overflow: hidden;
+  color: var(--rail-strong);
+  font-family: var(--font-display);
+  font-size: 15px;
+  font-weight: 650;
   line-height: 1.35;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.project-badge small {
+  overflow: hidden;
+  color: var(--rail-muted);
+  font-size: var(--text-xs);
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .nav-list {
+  position: relative;
   display: grid;
-  gap: 10px;
+  align-content: start;
+  gap: 12px;
+  flex: 1 1 auto;
+  min-height: 0;
+  margin: 0 -6px;
+  padding: 4px 6px 8px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-color: rgba(255, 255, 255, 0.14) transparent;
 }
 
 .nav-group {
   display: grid;
-  gap: 5px;
+  gap: 1px;
+}
+
+/* The sliding highlight. Until it has been measured, the active item paints its own background. */
+.nav-indicator {
+  position: absolute;
+  top: 0;
+  left: 6px;
+  right: 6px;
+  height: 32px;
+  border-radius: var(--radius-sm);
+  background: var(--rail-active);
+  opacity: 0;
+  pointer-events: none;
+}
+
+.nav-indicator::before {
+  content: "";
+  position: absolute;
+  left: -6px;
+  top: 8px;
+  bottom: 8px;
+  width: 3px;
+  border-radius: 0 3px 3px 0;
+  background: var(--rail-accent);
+  box-shadow: 0 0 12px rgba(169, 191, 211, 0.65);
+}
+
+.nav-list[data-indicator-ready] .nav-indicator {
+  opacity: 1;
+  transition:
+    transform var(--duration-slower) var(--ease-spring),
+    height var(--duration-slower) var(--ease-spring);
 }
 
 .nav-group-label {
-  padding: 0 10px;
-  color: rgba(244, 245, 240, 0.42);
+  padding: 0 10px 5px;
+  color: var(--rail-muted);
   font-size: 11px;
-  font-weight: 900;
-  letter-spacing: 0.12em;
-  text-transform: uppercase;
+  font-weight: 600;
+  letter-spacing: 0.14em;
+  transition: color var(--duration-base) ease;
 }
 
-.nav-list button,
-.back-button {
-  color: rgba(244, 245, 240, 0.78);
-  background: transparent;
-  text-align: left;
-  padding: 7px 10px;
-  border: 1px solid transparent;
-  border-radius: 13px;
+.nav-group.current .nav-group-label {
+  color: var(--rail-text);
+}
+
+.nav-list button {
+  position: relative;
+  z-index: 1;
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: 11px;
+  min-height: 32px;
+  padding: 5px 10px;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--rail-text);
+  font-size: var(--text-sm);
+  text-align: left;
   transition:
-    background 140ms ease,
-    color 140ms ease,
-    transform 140ms ease;
+    background var(--duration-fast) ease,
+    color var(--duration-fast) ease,
+    transform var(--duration-fast) var(--ease-out);
 }
 
-.nav-list button:hover,
-.back-button:hover,
-.nav-list button.active {
-  border-color: rgba(151, 236, 222, 0.15);
-  background: rgba(151, 236, 222, 0.10);
-  color: #ffffff;
+.nav-list button:hover {
+  background: var(--rail-hover);
+  color: var(--rail-strong);
+}
+
+.nav-list button:active {
+  transform: scale(0.985);
 }
 
 .nav-list button.active {
-  background:
-    linear-gradient(90deg, rgba(151, 236, 222, 0.20), rgba(151, 236, 222, 0.08)),
-    rgba(255, 255, 255, 0.05);
-  box-shadow: inset 3px 0 #95e6dc, 0 10px 24px rgba(0, 0, 0, 0.18);
+  color: var(--rail-strong);
+  font-weight: 600;
+}
+
+.nav-list:not([data-indicator-ready]) button.active {
+  background: var(--rail-active);
+}
+
+/* The indicator already highlights the active item; hover must not stack a second tint on it. */
+.nav-list[data-indicator-ready] button.active:hover {
+  background: transparent;
 }
 
 .nav-icon {
-  width: 24px;
-  height: 24px;
+  width: 18px;
+  height: 18px;
   display: grid;
   place-items: center;
-  color: rgba(244, 245, 240, 0.88);
   flex: 0 0 auto;
+  color: var(--rail-muted);
+  transition:
+    color var(--duration-fast) ease,
+    transform var(--duration-base) var(--ease-emphasized);
 }
 
 .nav-icon svg {
-  width: 24px;
-  height: 24px;
+  width: 18px;
+  height: 18px;
   fill: none;
   stroke: currentColor;
-  stroke-width: 1.8;
+  stroke-width: 1.7;
   stroke-linecap: round;
   stroke-linejoin: round;
 }
 
+.nav-list button:hover .nav-icon {
+  color: var(--rail-text);
+}
+
+.nav-list button:hover:not(.active) .nav-icon {
+  transform: translateX(1px) scale(1.06);
+}
+
 .nav-list button.active .nav-icon {
-  color: #9ff5ef;
+  color: var(--rail-accent);
 }
 
-.sidebar-footer {
-  margin-top: auto;
-  color: rgba(244, 245, 240, 0.62);
-  font-size: 12px;
-  line-height: 1.5;
-  display: grid;
-  gap: 7px;
-}
-
-.back-button {
-  border-color: rgba(255, 255, 255, 0.08);
-  background: rgba(255, 255, 255, 0.04);
-}
-
+/* ---------- Workspace ---------- */
+/* Clip sideways overflow without becoming a scroll container, so sticky bars pin to the window. */
 .main-panel {
   min-width: 0;
-  padding: 22px 28px 42px;
-  overflow: auto;
+  padding: 0 32px 48px;
+  overflow-x: clip;
+}
+
+.main-panel:focus {
+  outline: none;
 }
 
 .workspace-topbar {
   position: sticky;
   top: 0;
   z-index: 20;
-  display: grid;
-  grid-template-columns: minmax(220px, 1fr) minmax(160px, 0.7fr) minmax(220px, 1fr);
-  gap: 1px;
-  max-width: 1720px;
-  margin: 0 auto 22px;
-  overflow: hidden;
-  border: 1px solid rgba(218, 212, 200, 0.78);
-  border-radius: 16px;
-  background: rgba(255, 253, 248, 0.88);
-  box-shadow: var(--shadow-soft);
-  backdrop-filter: blur(14px);
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-height: var(--topbar-height);
+  max-width: var(--content-max);
+  margin: 0 auto 16px;
+  padding: 0 2px;
+  border-bottom: 1px solid var(--line);
+  background: color-mix(in srgb, var(--bg) 86%, transparent);
+  backdrop-filter: blur(14px) saturate(1.3);
 }
 
-.workspace-topbar > div {
-  display: grid;
-  gap: 3px;
+@supports (animation-timeline: scroll()) {
+  .workspace-topbar {
+    animation: workspace-topbar-lift linear both;
+    animation-timeline: scroll(root block);
+    animation-range: 0 48px;
+  }
+}
+
+@keyframes workspace-topbar-lift {
+  from { box-shadow: 0 1px 0 transparent; }
+  to { box-shadow: 0 10px 22px -18px rgba(0, 0, 0, 0.45); }
+}
+
+.workspace-location {
+  display: flex;
+  flex: 1;
+  align-items: center;
+  gap: 8px;
   min-width: 0;
-  padding: 12px 15px;
-  background: rgba(255, 253, 248, 0.72);
 }
 
-.workspace-topbar span {
+.workspace-location span {
   color: var(--color-text-muted);
-  font-size: 11px;
-  font-weight: 900;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
+  font-size: var(--text-sm);
 }
 
-.workspace-topbar strong {
+.workspace-location strong {
   overflow: hidden;
   color: var(--ink);
-  font-size: 14px;
+  font-size: var(--text-md);
+  font-weight: 600;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
+.workspace-location .workspace-location-separator {
+  color: var(--color-border-strong);
+}
+
+.workspace-project-name {
+  max-width: min(32vw, 360px);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* The rail already names the project; the bar repeats it only while the rail is hidden. */
+.app-shell:not([data-sidebar-collapsed="true"]) .workspace-project-name,
+.app-shell:not([data-sidebar-collapsed="true"]) .workspace-project-separator {
+  display: none;
+}
+
+.workspace-save-state {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 28px;
+  padding: 3px 11px 3px 10px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-pill);
+  background: var(--color-surface);
+}
+
+.workspace-save-state::before {
+  content: "";
+  width: 7px;
+  height: 7px;
+  flex: 0 0 auto;
+  border-radius: 999px;
+  color: var(--color-success-mark);
+  background: currentColor;
+  transition: background var(--duration-base) ease;
+}
+
 .workspace-save-state strong {
-  color: var(--color-accent-strong);
+  color: var(--muted);
+  font-size: var(--text-xs);
+  font-weight: 500;
+  white-space: nowrap;
+  animation: save-state-swap var(--duration-slow) var(--ease-out) both;
+}
+
+@keyframes save-state-swap {
+  from { opacity: 0; transform: translateY(3px); filter: blur(2px); }
+  to { opacity: 1; transform: none; filter: none; }
+}
+
+.workspace-save-state.busy::before {
+  color: var(--color-warning);
+  animation: nd-pulse-ring 1.2s var(--ease-out) infinite;
+}
+
+.workspace-save-state.danger {
+  border-color: color-mix(in srgb, var(--color-danger) 36%, var(--line));
+  background: var(--color-danger-soft);
+}
+
+.workspace-save-state.danger::before {
+  color: var(--color-danger);
+}
+
+.workspace-save-state.danger strong { color: var(--danger); }
+
+.icon-button {
+  display: inline-grid;
+  place-items: center;
+  flex: 0 0 auto;
+  width: 34px;
+  height: 34px;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: var(--radius-md);
+  background: transparent;
+  color: var(--muted);
+  transition:
+    background var(--duration-fast) ease,
+    color var(--duration-fast) ease,
+    border-color var(--duration-fast) ease,
+    transform var(--duration-fast) var(--ease-out);
+}
+
+.icon-button:hover:not(:disabled) {
+  color: var(--ink);
+  background: var(--color-surface);
+  border-color: var(--line);
+}
+
+.icon-button:active:not(:disabled) {
+  transform: scale(0.92);
 }
 
 .workspace-content {
-  max-width: 1720px;
+  max-width: var(--content-max);
   margin: 0 auto;
 }
 
+/* ---------- Page header ---------- */
 .page-header {
   display: flex;
-  align-items: flex-start;
+  align-items: flex-end;
   justify-content: space-between;
   gap: 24px;
   margin-bottom: 22px;
+  padding: 10px 0 18px;
+  border-bottom: 1px solid var(--line);
+}
+
+.page-header > div:first-child {
+  min-width: 0;
 }
 
 .page-header h1 {
   margin: 0;
-  font-size: 34px;
-  line-height: 1.2;
-  letter-spacing: 0;
+  font-size: var(--text-3xl);
+  font-weight: 650;
+  line-height: 1.25;
+  letter-spacing: -0.01em;
+  text-wrap: balance;
 }
 
 .page-header p {
   margin: 8px 0 0;
   color: var(--muted);
-  max-width: 760px;
-  line-height: 1.6;
+  max-width: 72ch;
+  line-height: 1.65;
 }
 
+.page-header .header-actions {
+  flex: 0 0 auto;
+  justify-content: flex-end;
+}

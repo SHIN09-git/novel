@@ -23,20 +23,17 @@ export class TokenBucketRateLimiter {
     if (!Number.isFinite(tokens) || tokens <= 0) throw new Error('Rate limiter token request must be positive.')
     this.refill()
 
-    if (this.tokens >= tokens) {
-      this.tokens -= tokens
-      return
-    }
+    // Reserve before waiting so concurrent callers cannot share a refill.
+    this.tokens -= tokens
+    if (this.tokens >= 0) return
 
-    const deficit = tokens - this.tokens
-    const waitMs = Math.ceil((deficit / this.refillRate) * 1000)
+    const waitMs = Math.ceil((-this.tokens / this.refillRate) * 1000)
     await new Promise((resolve) => setTimeout(resolve, waitMs))
     this.refill()
-    this.tokens = Math.max(0, this.tokens - tokens)
   }
 
   getAvailableTokens(): number {
     this.refill()
-    return Math.floor(this.tokens)
+    return Math.max(0, Math.floor(this.tokens))
   }
 }

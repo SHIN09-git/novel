@@ -9,6 +9,7 @@ import type {
   ID
 } from '../shared/types'
 import { TokenEstimator } from './TokenEstimator'
+import { promptExclusionTerms } from './promptFormatters/promptUtils'
 
 const PRIORITY_RANK: Record<HardCanonPriority, number> = { must: 0, high: 1, medium: 2 }
 const DEFAULT_MAX_PROMPT_TOKENS = 900
@@ -19,8 +20,7 @@ function now(): string {
 }
 
 function newId(prefix: string): ID {
-  const random = Math.random().toString(36).slice(2, 9)
-  return `${prefix}-${Date.now()}-${random}`
+  return `${prefix}-${crypto.randomUUID()}`
 }
 
 function compactText(value: string, limit = MAX_ITEM_CONTENT_CHARS): { text: string; truncated: boolean } {
@@ -177,19 +177,35 @@ export class HardCanonPackService {
     )
   }
 
-  static compressHardCanonPackForPrompt(pack: HardCanonPack | null | undefined, options: { maxPromptTokens?: number } = {}): HardCanonPromptBlockResult {
+  static compressHardCanonPackForPrompt(
+    pack: HardCanonPack | null | undefined,
+    options: { maxPromptTokens?: number; exclusionText?: string; allowedItemIds?: ID[]; isOpeningChapter?: boolean } = {}
+  ): HardCanonPromptBlockResult {
     if (!pack) {
       return { body: '', includedItemIds: [], truncatedItemIds: [], tokenEstimate: 0, itemCount: 0, warnings: [] }
     }
 
     const budget = options.maxPromptTokens ?? pack.maxPromptTokens ?? DEFAULT_MAX_PROMPT_TOKENS
+    const exclusionTerms = promptExclusionTerms(options.exclusionText)
+    const allowedItemIds = options.allowedItemIds ? new Set(options.allowedItemIds) : null
     const activeItems = sortItems(pack.items.filter((item) => item.status === 'active' && item.title.trim() && item.content.trim()))
     const included: string[] = []
     const includedItemIds: ID[] = []
     const truncatedItemIds: ID[] = []
     const warnings: string[] = []
+    const omittedByNeedPlan: string[] = []
 
     for (const item of activeItems) {
+      if (allowedItemIds && !allowedItemIds.has(item.id)) {
+        omittedByNeedPlan.push(item.title)
+        continue
+      }
+      const searchable = `${item.title}\n${item.content}`
+      const blockedBy = exclusionTerms.find((term) => searchable.includes(term))
+      if (blockedBy) {
+        warnings.push(`硬设定「${item.title}」命中本章禁止词「${blockedBy}」，已从正文 prompt 隔离。`)
+        continue
+      }
       const compacted = compactText(item.content)
       const line = `- [${formatPriority(item.priority)}｜${formatCategory(item.category)}] ${item.title}：${compacted.text}`
       const nextBody = [
@@ -207,13 +223,18 @@ export class HardCanonPackService {
       if (compacted.truncated) truncatedItemIds.push(item.id)
     }
 
+    if (omittedByNeedPlan.length > 0) {
+      warnings.push(`上下文需求计划未授权 ${omittedByNeedPlan.length} 条 HardCanon 进入本章 prompt：${omittedByNeedPlan.join('、')}。`)
+    }
+
     const body = included.length
       ? [
-          `标题：${pack.title}`,
-          pack.description ? `说明：${compactText(pack.description, 120).text}` : '',
+          `标题：${options.isOpeningChapter ? '第一章最小硬设定' : pack.title}`,
           '硬规则：',
           ...included,
-          '约束：HardCanonPack 不得静默覆盖上一章结尾衔接或本章任务契约；如发生冲突，应按更高优先级上下文执行并在审稿中提示。'
+          options.isOpeningChapter
+            ? '约束：HardCanonPack 不得覆盖第一章自然开场或本章任务契约；如发生冲突，应按更高优先级上下文执行并在审稿中提示。'
+            : '约束：HardCanonPack 不得静默覆盖上一章结尾衔接或本章任务契约；如发生冲突，应按更高优先级上下文执行并在审稿中提示。'
         ]
           .filter(Boolean)
           .join('\n')

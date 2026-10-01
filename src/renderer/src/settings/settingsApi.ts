@@ -1,4 +1,5 @@
 import type { AppData } from '../../../shared/types'
+import type { ImportDataStrategy } from '../../../shared/ipc/ipcTypes'
 import {
   getNovelDirectorAppApi,
   getNovelDirectorBackupApi,
@@ -14,8 +15,8 @@ export function exportAppData(data: AppData) {
   return getNovelDirectorDataApi().export(data)
 }
 
-export function importAppData() {
-  return getNovelDirectorDataApi().import()
+export function importAppData(strategy: ImportDataStrategy = 'replace') {
+  return getNovelDirectorDataApi().import(strategy)
 }
 
 export function selectStoragePath() {

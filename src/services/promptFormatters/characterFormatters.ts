@@ -94,10 +94,16 @@ export function formatCharacterNeedSlice(character: Character, logs: CharacterSt
     `选择原因：${expected?.reason || '本章需求计划要求核对该角色。'}`
   ]
 
-  if (fields.length > 0) {
+  const fieldLines = fields
+    .map((field) => {
+      const value = valueOrEmpty(characterFieldValue(character, field))
+      return value ? `- ${characterFieldLabel(field)}：${value}` : ''
+    })
+    .filter(Boolean)
+  if (fieldLines.length > 0) {
     lines.push(
       '本章需要关注的角色卡字段：',
-      ...fields.map((field) => `- ${characterFieldLabel(field)}：${valueOrEmpty(characterFieldValue(character, field))}`)
+      ...fieldLines
     )
   }
 
@@ -112,12 +118,12 @@ export function formatCharacterNeedSlice(character: Character, logs: CharacterSt
     )
   }
 
-  lines.push(
-    '写作约束：',
-    `- 不得违背该角色当前状态：${valueOrEmpty(character.emotionalState)}`,
-    `- 不得忽略关系状态：${valueOrEmpty(character.protagonistRelationship)}`,
-    `- 不得触发禁止写法：${valueOrEmpty(character.forbiddenWriting)}`
-  )
+  const writingConstraints = [
+    valueOrEmpty(character.emotionalState) ? `- 不得违背该角色当前状态：${valueOrEmpty(character.emotionalState)}` : '',
+    valueOrEmpty(character.protagonistRelationship) ? `- 不得忽略关系状态：${valueOrEmpty(character.protagonistRelationship)}` : '',
+    valueOrEmpty(character.forbiddenWriting) ? `- 不得触发禁止写法：${valueOrEmpty(character.forbiddenWriting)}` : ''
+  ].filter(Boolean)
+  if (writingConstraints.length > 0) lines.push('写作约束：', ...writingConstraints)
 
   return lines.join('\n')
 }

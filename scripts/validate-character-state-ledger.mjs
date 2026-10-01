@@ -2,8 +2,9 @@ import { mkdir, readFile, rm, writeFile } from 'node:fs/promises'
 import { dirname, join, resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import ts from 'typescript'
+import { repoRoot } from './utils/repo-root.mjs'
 
-const root = resolve('.')
+const root = repoRoot
 const outDir = join(root, 'tmp', 'character-state-ledger-test')
 const timestamp = '2026-01-01T00:00:00.000Z'
 
@@ -39,15 +40,31 @@ async function compileTsTree(files) {
 async function loadModules() {
   await compileTsTree([
     'src/services/CharacterStateService.ts',
+    'src/services/characterState/logInference.ts',
+    'src/services/characterState/stateMutations.ts',
+    'src/services/characterState/stateSelection.ts',
+    'src/services/characterState/stateValidation.ts',
+    'src/services/characterState/stateValue.ts',
     'src/shared/defaults.ts',
     'src/shared/defaults/index.ts',
     'src/shared/normalizers/index.ts',
     'src/shared/normalizers/common.ts',
+    'src/shared/normalizers/agent.ts',
     'src/shared/normalizers/appData.ts',
+    'src/shared/normalizers/candidateDecision.ts',
+    'src/shared/normalizers/candidateDecisionHistory.ts',
+    'src/shared/normalizers/worldManagement.ts',
+    'src/shared/normalizers/quickRewrite.ts',
     'src/shared/normalizers/characterState.ts',
     'src/shared/normalizers/context.ts',
+    'src/shared/normalizers/contextBudget.ts',
+    'src/shared/normalizers/contextNeedPlan.ts',
+    'src/shared/normalizers/contextPrimitives.ts',
+    'src/shared/normalizers/contextSelection.ts',
+    'src/shared/normalizers/pipelineRunConfig.ts',
     'src/shared/normalizers/continuity.ts',
     'src/shared/normalizers/foreshadowing.ts',
+    'src/shared/normalizers/generation.ts',
     'src/shared/normalizers/memoryUpdate.ts',
     'src/shared/normalizers/reports.ts',
     'src/shared/normalizers/runTrace.ts',
@@ -170,6 +187,8 @@ async function main() {
   checks.push(assert(accepted.characterStateTransactions.length === 1, '接受候选会创建 CharacterStateTransaction'))
   const acceptedAgain = CharacterStateService.applyStateChangeCandidate('candidate-1', accepted)
   checks.push(assert(acceptedAgain.characterStateTransactions.length === 1, '同一个状态候选不能重复接受'))
+  const rejectedAfterAccept = CharacterStateService.rejectStateChangeCandidate('candidate-1', accepted)
+  checks.push(assert(rejectedAfterAccept.characterStateChangeCandidates.find((item) => item.id === 'candidate-1')?.status === 'accepted', '已接受候选不能再反向改成 rejected'))
 
   const rejectedData = normalizeAppData(baseData({ characterStateFacts: [cashFact()], characterStateChangeCandidates: [candidate({ id: 'candidate-reject' })] }))
   const rejected = CharacterStateService.rejectStateChangeCandidate('candidate-reject', rejectedData)
@@ -206,6 +225,36 @@ async function main() {
   const issues = CharacterStateService.validateCharacterStateInText('林克花费 8000 买下装备，然后使用黑色钥匙打开门。', [cashFact(5000), inventoryFact], data.characters)
   checks.push(assert(issues.some((issue) => issue.type === 'resource_underflow'), '现金不足时质量规则生成 resource_underflow'))
   checks.push(assert(issues.some((issue) => issue.type === 'missing_inventory'), '使用未持有物品时质量规则生成 missing_inventory'))
+
+  const secondInventoryFact = { ...inventoryFact, id: 'fact-inventory-2', key: 'inventory-backup', label: '随身物品', value: ['黑色钥匙'] }
+  const aggregatedInventoryIssues = CharacterStateService.validateCharacterStateInText(
+    '林克使用黑色钥匙打开门。',
+    [inventoryFact, secondInventoryFact],
+    data.characters
+  )
+  checks.push(assert(!aggregatedInventoryIssues.some((issue) => issue.type === 'missing_inventory'), '多个 inventory fact 会合并持有物，不会逐条产生相互冲突的误报'))
+
+  const knownFact = { ...cashFact(), id: 'fact-known', category: 'knowledge', key: 'known-secret', label: '已知秘密', valueType: 'list', value: ['旧管理员留下了档案'] }
+  const knownFactIssues = CharacterStateService.validateCharacterStateInText('林克知道门后还有危险。', [knownFact], data.characters)
+  checks.push(assert(!knownFactIssues.some((issue) => issue.type === 'knowledge_leak'), '已知信息账本不会因为正文出现“知道”二字而反向误报 knowledge_leak'))
+  const unknownCharacterData = [{ ...data.characters[0], unknownInformation: '不知道苏晚曾在火灾当晚救过他。' }]
+  const unknownFactIssues = CharacterStateService.validateCharacterStateInText(
+    '林克终于确认，苏晚曾在火灾当晚救过他。',
+    [knownFact],
+    unknownCharacterData
+  )
+  checks.push(assert(unknownFactIssues.some((issue) => issue.type === 'knowledge_leak'), '角色明确说出 unknownInformation 时生成 knowledge_leak'))
+
+  const foreignFact = { ...cashFact(), id: 'foreign-fact', projectId: 'project-2', characterId: 'character-2' }
+  const crossProjectCandidate = candidate({ id: 'candidate-cross-project', targetFactId: foreignFact.id })
+  const crossProjectData = normalizeAppData(baseData({ characterStateFacts: [foreignFact], characterStateChangeCandidates: [crossProjectCandidate] }))
+  let crossProjectRejected = false
+  try {
+    CharacterStateService.applyStateChangeCandidate(crossProjectCandidate.id, crossProjectData)
+  } catch {
+    crossProjectRejected = true
+  }
+  checks.push(assert(crossProjectRejected, '状态候选不能跨项目或跨角色更新事实'))
 
   const normalizedOld = normalizeAppData(baseData({ characterStateFacts: undefined }))
   checks.push(assert(Array.isArray(normalizedOld.characterStateFacts), '旧项目缺 characterStateFacts 时正常补空数组'))
@@ -264,10 +313,18 @@ async function main() {
       await readFile(join(root, 'src', 'renderer', 'src', 'views', 'generation', 'pipelineRunnerEngine.ts'), 'utf-8'),
       await readFile(join(root, 'src', 'renderer', 'src', 'views', 'generation', 'pipelineSteps', 'contextPlanning.ts'), 'utf-8'),
       await readFile(join(root, 'src', 'renderer', 'src', 'views', 'generation', 'pipelineSteps', 'chapterGeneration.ts'), 'utf-8'),
+      await readFile(join(root, 'src', 'renderer', 'src', 'views', 'generation', 'pipelineSteps', 'postDraftAnalysis.ts'), 'utf-8'),
       await readFile(join(root, 'src', 'renderer', 'src', 'views', 'generation', 'pipelineSteps', 'memoryExtraction.ts'), 'utf-8')
     ].join('\n'),
     chapters: await readFile(join(root, 'src', 'renderer', 'src', 'views', 'ChaptersView.tsx'), 'utf-8'),
-    characters: await readFile(join(root, 'src', 'renderer', 'src', 'views', 'CharactersView.tsx'), 'utf-8')
+    characters: [
+      await readFile(join(root, 'src', 'renderer', 'src', 'views', 'CharactersView.tsx'), 'utf-8'),
+      await readFile(join(root, 'src', 'renderer', 'src', 'views', 'characters', 'CharacterFocusCard.tsx'), 'utf-8'),
+      await readFile(join(root, 'src', 'renderer', 'src', 'views', 'characters', 'CharacterListPane.tsx'), 'utf-8'),
+      await readFile(join(root, 'src', 'renderer', 'src', 'views', 'characters', 'CharacterProfilePanels.tsx'), 'utf-8'),
+      await readFile(join(root, 'src', 'renderer', 'src', 'views', 'characters', 'CharacterStateLedgerPanel.tsx'), 'utf-8'),
+      await readFile(join(root, 'src', 'renderer', 'src', 'views', 'characters', 'CharacterStateLogPanel.tsx'), 'utf-8')
+    ].join('\n')
   }
   checks.push(assert(sourceFiles.types.includes('linkedCardFields: CharacterCardField[]'), 'CharacterStateFact 挂接到 9 项角色卡字段'))
   checks.push(assert(sourceFiles.prompt.includes('角色状态账本切片'), 'PromptBuilder 输出角色状态账本切片'))
@@ -279,6 +336,11 @@ async function main() {
   checks.push(assert(sourceFiles.characters.includes('状态日志 / 历史记录'), '角色页将日志文案降级为状态日志 / 历史记录'))
   checks.push(assert(sourceFiles.characters.includes('转为状态事实') && sourceFiles.characters.includes('转为候选'), '角色日志卡片提供转为状态事实 / 转为候选入口'))
   checks.push(assert(sourceFiles.characters.includes('未归类状态'), 'linkedCardFields 为空的 fact 会显示在未归类状态分组'))
+  checks.push(assert(sourceFiles.characters.includes('CharacterListPane') && sourceFiles.characters.includes('未记录情绪'), '角色页列表使用子组件和清晰的情绪缺省文案'))
+  checks.push(assert(sourceFiles.characters.includes('CharacterFocusCard') && sourceFiles.characters.includes('CharacterProfilePanels'), '角色页摘要和基础状态表单使用子组件'))
+  checks.push(assert(sourceFiles.characters.includes('CharacterStateLedgerPanel') && sourceFiles.characters.includes('StateFactCard'), '角色页动态状态账本使用子组件和复用状态事实卡片'))
+  checks.push(assert(sourceFiles.characters.includes('CharacterStateLogPanel'), '角色页将状态日志和转换表单委派给独立面板'))
+  checks.push(assert(sourceFiles.characters.includes('factEditableValue') && sourceFiles.characters.includes('useBufferedField'), '状态事实编辑使用不含单位的缓冲值，避免逐键保存和数值误解析'))
 
   for (const check of checks) {
     if (!check.ok) console.error('✗', check.message, check.details)

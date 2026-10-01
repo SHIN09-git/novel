@@ -1,7 +1,8 @@
 import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs'
-import { join } from 'node:path'
+import { dirname, join } from 'node:path'
+import { fileURLToPath } from 'node:url'
 
-const root = process.cwd()
+const root = dirname(dirname(fileURLToPath(import.meta.url)))
 const checks = []
 
 function check(name, ok, details = '') {
@@ -82,6 +83,15 @@ const secureCredentialsTest = read('scripts/validate-secure-credentials.mjs')
 const oldProviderShapedSentinel = ['sk', 'test', 'plain', 'text', 'key', 'should', 'never', 'appear'].join('-')
 check('secure credentials sentinel does not look like OpenAI key', !secureCredentialsTest.includes(oldProviderShapedSentinel))
 
+// A provider token must stand on its own; avoid treating suffixes such as
+// "risk-confirmation" as credentials embedded in a filename or identifier.
+const openAiLookingTokenPattern = /(?<![A-Za-z0-9_-])sk-[A-Za-z0-9_-]{12,}(?![A-Za-z0-9_-])/
+const syntheticProviderToken = ['sk', 'A1b2C3d4E5f6'].join('-')
+check('release token scanner detects a standalone provider-shaped token', openAiLookingTokenPattern.test(`token=${syntheticProviderToken}`))
+check('release token scanner accepts punctuation after a standalone token', openAiLookingTokenPattern.test(`${syntheticProviderToken}.json`))
+check('release token scanner ignores filename suffixes', !openAiLookingTokenPattern.test('03-high-risk-confirmation.png'))
+check('release token scanner ignores embedded token-shaped identifiers', !openAiLookingTokenPattern.test(`qa-${syntheticProviderToken}`))
+
 const filesToScan = walk('.')
   .filter((file) => !file.startsWith(`node_modules${'\\'}`))
   .filter((file) => !file.startsWith(`.git${'\\'}`))
@@ -105,7 +115,7 @@ for (const file of filesToScan) {
     continue
   }
   if (content.includes('G:' + '\\' + 'novel')) suspicious.push(`${file}: developer path`)
-  if (/sk-[A-Za-z0-9_-]{12,}/.test(content)) suspicious.push(`${file}: OpenAI-looking token`)
+  if (openAiLookingTokenPattern.test(content)) suspicious.push(`${file}: OpenAI-looking token`)
   if (content.includes(launcherBinaryName)) suspicious.push(`${file}: tracked launcher binary reference`)
 }
 

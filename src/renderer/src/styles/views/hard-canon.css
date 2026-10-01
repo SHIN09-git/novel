@@ -1,0 +1,174 @@
+/* Hard Canon: compose rules on the left, review the pack on the right. */
+.hard-canon-layout {
+  display: grid;
+  grid-template-columns: minmax(320px, 400px) minmax(0, 1fr);
+  gap: 20px;
+  align-items: start;
+}
+
+.hard-canon-editor {
+  position: sticky;
+  top: var(--workspace-sticky-offset);
+  display: grid;
+  gap: 16px;
+}
+
+.hard-canon-editor .panel + .panel,
+.hard-canon-main .panel + .panel {
+  margin-top: 0;
+}
+
+.hard-canon-editor .panel,
+.hard-canon-draft {
+  display: grid;
+  gap: 14px;
+}
+
+.hard-canon-editor .panel h2,
+.hard-canon-editor .panel-title-row {
+  margin: 0;
+}
+
+.hard-canon-draft {
+  border-top: 3px solid var(--color-accent);
+}
+
+.hard-canon-message {
+  margin: 0;
+}
+
+.hard-canon-budget {
+  margin: 0;
+  color: var(--muted);
+  font-size: var(--text-sm);
+}
+
+.hard-canon-budget strong {
+  color: var(--ink);
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
+
+.hard-canon-main {
+  display: grid;
+  gap: 16px;
+  min-width: 0;
+}
+
+.hard-canon-count {
+  color: var(--color-text-muted);
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+}
+
+.hard-canon-list {
+  display: grid;
+  gap: 10px;
+}
+
+/* Priority reads as the stripe colour: must = seal red, high = lamp amber, medium = neutral. */
+.hard-canon-item {
+  position: relative;
+  display: grid;
+  gap: 8px;
+  padding: 14px 16px 14px 20px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  background: var(--color-surface-elevated);
+  overflow: hidden;
+  transition:
+    border-color var(--duration-fast) ease,
+    opacity var(--duration-base) ease;
+}
+
+.hard-canon-item::before {
+  content: "";
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 3px;
+  background: var(--color-border-strong);
+}
+
+.hard-canon-item.priority-must::before { background: var(--color-danger); }
+.hard-canon-item.priority-high::before { background: var(--color-warning); }
+
+.hard-canon-item.is-editing {
+  border-color: color-mix(in srgb, var(--color-accent) 50%, var(--line));
+  box-shadow: 0 0 0 3px var(--focus-ring);
+}
+
+.hard-canon-item.is-inactive {
+  opacity: 0.62;
+  background: var(--color-surface-soft);
+}
+
+.hard-canon-item-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 12px;
+}
+
+.hard-canon-item-header > div:first-child {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+}
+
+.hard-canon-item-header strong {
+  font-size: var(--text-md);
+  line-height: 1.5;
+}
+
+.hard-canon-item-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.hard-canon-item .row-actions {
+  flex: 0 0 auto;
+  gap: 4px;
+}
+
+.hard-canon-item .row-actions button {
+  min-height: 28px;
+  padding: 3px 10px;
+  font-size: var(--text-xs);
+}
+
+.hard-canon-item p {
+  margin: 0;
+  line-height: 1.7;
+  white-space: pre-wrap;
+}
+
+.hard-canon-item small {
+  color: var(--color-text-muted);
+  font-size: 11px;
+}
+
+.hard-canon-preview {
+  max-height: 360px;
+  margin: 0;
+  overflow: auto;
+  padding: 14px 16px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  background: var(--color-surface-soft);
+  color: var(--muted);
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  line-height: 1.7;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+@media (max-width: 1180px) {
+  .hard-canon-layout { grid-template-columns: minmax(0, 1fr); }
+  .hard-canon-editor { position: static; }
+}
+
+@media (max-width: 720px) {
+  .hard-canon-item-header { flex-direction: column; }
+}

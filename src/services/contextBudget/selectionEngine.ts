@@ -1,31 +1,23 @@
 import type {
-  Chapter,
-  ChapterTask,
-  CharacterCardField,
-  Character,
-  ContextBudgetProfile,
-  ContextNeedItem,
+  ContextDecisionReasonCode,
   ContextNeedPriority,
   ContextNeedPlan,
   ContextSelectionResult,
-  ContextSelectionTrace,
-  ContextSelectionTraceBlock,
-  ContextSelectionTraceDroppedBlock,
-  ContextSelectionTraceUnmetNeed,
-  Foreshadowing,
-  ForeshadowingTreatmentMode,
-  ForeshadowingWeight,
-  ID,
-  Project,
-  StageSummary,
-  StoryBible,
-  TimelineEvent
+  ID
 } from '../../shared/types'
 
 import { TokenEstimator } from '../TokenEstimator'
 import { replacementTextForCompressedChapter } from '../ContextCompressionService'
 import type { ProjectContextData } from './types'
-import { byId, itemCost, stringifyCharacter, stringifyCharacterForPlan, stringifyChapter, stringifyForeshadowing, stringifyStageSummary, stringifyTimelineEvent } from './scoringEngine'
+import {
+  byId,
+  itemCost,
+  stringifyCharacterForPlan,
+  stringifyChapter,
+  stringifyForeshadowing,
+  stringifyStageSummary,
+  stringifyTimelineEvent
+} from './scoringEngine'
 
 export function scored<T extends { id: ID }>(items: T[], score: (item: T) => number): Array<{ item: T; score: number }> {
   return items.map((item) => ({ item, score: score(item) }))
@@ -84,8 +76,34 @@ export function selectionCost(data: ProjectContextData, selection: ContextSelect
   return itemCost(selectedText)
 }
 
-export function omit(selection: ContextSelectionResult, type: string, id: ID | null, reason: string, estimatedTokensSaved: number) {
-  selection.omittedItems.push({ type, id, reason, estimatedTokensSaved: Math.max(0, estimatedTokensSaved) })
+export interface ContextOmissionOptions {
+  reasonCode: ContextDecisionReasonCode
+  priority?: ContextNeedPriority
+  uncertain?: boolean
+  replacementSourceId?: ID | null
+}
+
+export function omit(
+  selection: ContextSelectionResult,
+  type: string,
+  id: ID | null,
+  reason: string,
+  estimatedTokensSaved: number,
+  options: ContextOmissionOptions
+) {
+  const omission = {
+    type,
+    id,
+    reason,
+    reasonCode: options.reasonCode,
+    priority: options.priority ?? 'low',
+    uncertain: options.uncertain ?? false,
+    replacementSourceId: options.replacementSourceId ?? null,
+    estimatedTokensSaved: Math.max(0, estimatedTokensSaved)
+  }
+  const existingIndex = selection.omittedItems.findIndex((item) => item.type === type && item.id === id)
+  if (existingIndex >= 0) selection.omittedItems[existingIndex] = omission
+  else selection.omittedItems.push(omission)
 }
 
 export function removeOne(

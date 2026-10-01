@@ -2,335 +2,1171 @@
 
 ## 简体中文
 
-这份指南会带你创建一个小型虚构小说项目，准备上下文，生成第一章草稿，并进入修订流程。所有示例名称和故事片段都是 synthetic demo data。如果你在 fixture 或文档中看到 `Fog City Test Draft` / `《雾城测试稿》`，它只是公开测试用的虚构项目。
+这份文档面向第一次打开 Novel Director 的作者。目标不是介绍所有按钮，而是带你完成一个可验证的闭环：
 
-如果你是第一次使用 Novel Director，建议先读更完整的 [新手教程](./docs/BEGINNER_TUTORIAL.md)。本文件适合已经知道基本概念后快速跑通一次流程。
+1. 配好 AI API。
+2. 新建或导入项目。
+3. 写够“不会吃书”的最小资料。
+4. 生成一章草稿。
+5. 看质量门禁、审稿和 Run Trace。
+6. 修订并接受为正式章节。
+7. 备份数据。
 
-### 1. 启动应用
+所有示例都是 synthetic demo data。不要把真实 API Key、私有稿件、本地数据文件、真实截图或导出的真实项目 JSON 发到公开 issue、讨论区或文档里。
 
-```bash
+如果你只想马上跑通，请照着本文的顺序做。更完整的解释、前三章练习路线和修订提示词库见 [新手教程](./docs/BEGINNER_TUTORIAL.md)。
+
+---
+
+## 先找答案：你现在卡在哪
+
+这不是需要从头背到尾的说明书。先按问题跳到对应章节：
+
+| 你现在的问题 | 直接看 | 看完应该做到 |
+| --- | --- | --- |
+| 不知道 API Key、Base URL、模型名怎么填 | 第 2 节“配置 AI API” | 能生成章节计划和正文草稿，Run Trace 不再显示本地 fallback |
+| 不知道服务商是不是兼容 | 第 2 节“先确认接口兼容性” | 确认服务提供 `/chat/completions`，并能对应 `model`、`messages`、`max_tokens` |
+| 不知道哪些设定必须写 | 第 3-7 节 | 能把长期设定、当前硬状态、伏笔和本章任务放进正确栏目 |
+| 已有几十章，不想重建所有资料 | 第 A 节“已有小说续写” | 只建立下一章真正需要的“当前截面” |
+| 草稿写歪，不知道该重跑还是修 | 第 9-10 节 | 能按问题层级选择右键重写、局部修订、整章修订或拒绝重跑 |
+| 修订怕改坏、怕旧版本丢失 | 第 10、12 节 | 会看差异、接受修订，并从版本历史恢复 |
+| 项目消失或开发版/安装版数据不同 | 第 1、13 节和“常见问题” | 找到当前数据文件，完成 JSON 导入或迁移 |
+
+### 10 分钟跑通 API 的最短路径
+
+1. 从模型服务商后台复制 **Base URL、完整 Model ID、API Key**。
+2. 打开 Novel Director 左侧栏“设置 -> AI API 设置”。
+3. 官方 OpenAI 选 `OpenAI`；DeepSeek、通义千问、OpenRouter 等兼容接口选 `Compatible API`；Ollama 选 `Local Model`。
+4. Base URL 只填根路径，不要带 `/chat/completions`。
+5. Model Name 必须复制服务商展示的完整 ID，不要凭印象写简称。
+6. 远程服务粘贴 Key 后点击“保存 Key”；本地模型不需要保存远程 Key。
+7. Temperature 先用 `0.8`，Max Tokens 先用 `8000`。
+8. 新建“API 连通测试”项目，预计字数只填 `800-1200`，运行一次生产流水线。
+9. 看到章节计划、正文草稿和 Run Trace，才算配置成功。
+
+> 只出现任务模板、没有真实正文，通常不是模型文风差，而是 API 没有真正调用成功。先看步骤错误和 Run Trace，再改 Prompt 或设定。
+
+---
+
+## 0. 先理解它的工作方式
+
+Novel Director 不是“一句话写完整本书”的工具。它更像一个本地小说导演台：
+
+- 你维护长期资料：小说圣经、角色卡、动态状态账本、伏笔、时间线、硬设定包、剧情导向。
+- 系统为目标章节规划需要哪些上下文。
+- 系统在 token 预算内选择上下文，生成章节计划和正文草稿。
+- 系统做一致性审稿、质量门禁、Novelty Audit、冗余检测和记忆候选。
+- 你决定接受、拒绝、修订，或把候选写入长期资料。
+
+最重要的原则：
+
+- AI 生成的是候选，不是正式正文。只有点击“接受草稿”或“接受修订”后，内容才进入正式章节和版本链。
+- 资料不是越多越好。优先写会导致吃书的硬事实，少写百科长文和远期灵感。
+- 新规则、新角色、新组织、新机制不要自动写进长期记忆，先看 Novelty Audit，再人工确认。
+
+### 你第一次打开时应该完成的 6 件事
+
+1. 在“设置”里配置 AI API，并用测试项目确认能生成草稿。
+2. 新建项目或导入旧 JSON。
+3. 写最小项目资料：一句话主线、1-3 条 HardCanon、主角角色卡、主角动态状态。
+4. 写目标章节任务：目标、冲突、悬念、结尾钩子、禁止事项。
+5. 用生产流水线生成短章，先不要追求 5000 字。
+6. 看质量门禁和 Run Trace，必要时修订，最后再接受草稿。
+
+如果第 1 步没跑通，先不要调项目资料。API 问题和剧情资料问题分开排查，会省很多时间。
+
+---
+
+## A. 先选你的入门路线
+
+不要从头到尾把所有栏目填满再开始。先按你的实际情况走一条路线，完成第一章闭环后再补资料。
+
+| 你的情况 | 先做什么 | 暂时不要做什么 | 完成标志 |
+| --- | --- | --- | --- |
+| 从零写一本新书 | 配 API，建立一句话主线、1-3 条 HardCanon、主角卡、2 条硬状态和第 1 章任务 | 不写十几页世界史，不建几十个配角，不提前解释终局 | 第 1 章草稿生成，Run Trace 显示真实 AI，质量报告可查看 |
+| 已经有小说正文，想继续写 | 先把已有章节录入“章节”，再补当前出场角色、当前位置/伤势/物品/知识、近期伏笔和下一章任务 | 不必倒推每一章的完整账本，也不要把整本正文复制进 Story Bible | 下一章能准确接住上一章结尾，关键状态进入 prompt |
+| 已经有 Novel Director JSON | 在首页或设置页导入 JSON，检查项目、章节、角色和伏笔数量 | 不要先创建同名空项目再逐项复制 | 导入后项目出现在列表，设置页能看到当前本地数据文件 |
+| 只想确认 API 能不能用 | 建一个虚构短篇测试项目，预计字数设为 800-1200 | 不要直接消耗真实长篇项目的生成次数 | 章节计划、草稿和 Run Trace 都出现 |
+
+### 路线一：从零新建，45 分钟完成第一章
+
+1. 用 5 分钟配置 API，保存 Key。
+2. 用 5 分钟建立项目：项目名、一句话主线、题材边界、文风基调。
+3. 用 10 分钟写 1-3 条 HardCanon 和主角角色卡最关键的 5 项。
+4. 用 5 分钟写主角当前位置和一个伤势/能力限制。
+5. 用 5 分钟写 2-4 条近期伏笔。
+6. 用 5 分钟写第 1 章任务契约。
+7. 用生产流水线生成 800-1200 字测试章。
+8. 用 10 分钟读草稿、看质量门禁和 Run Trace；只修最明显的一个问题。
+
+### 路线二：已有小说续写，先建立“当前截面”
+
+已有几十章正文时，不需要把过去每一章都重新做账。先建立“下一章生成真正需要的当前截面”：
+
+1. 在“章节”中录入已有章节，至少保证最后一章正文完整；最近 2-3 章越完整，衔接越稳。
+2. 在“角色”中只先建立下一章会出场或直接影响行动的角色。
+3. 把当前位置、伤势、物品、现金/资源、已知秘密、承诺和能力限制写进动态状态账本。
+4. 在“伏笔”中录入仍未回收且近期可能使用的伏笔；已回收伏笔可以保留，但不需要重新展开。
+5. 在“时间线”中只补不可逆事件和因果锚点，例如死亡、身份公开、关键物品易手。
+6. 用 1-5 条 HardCanon 记录绝不能被后续正文改写的底线。
+7. 为下一章写任务契约，再用自动构建上下文运行生产流水线。
+
+如果生成结果仍然接不上，先补上一章结尾、角色硬状态和本章任务；不要先加大段世界观。
+
+### 完成第一轮后，你应该得到什么
+
+- 一个可打开的项目和至少一章正式/已有正文。
+- 一个已安全保存的 AI Key；导出 JSON 中不应出现完整 Key。
+- 一个只包含必要资料的上下文体系，而不是资料百科。
+- 一个经过质量门禁和人工阅读的草稿。
+- 一个明确的决定：接受、局部修订、整章修订，或拒绝重跑。
+- 一份可恢复的版本记录和一份 JSON 备份。
+
+---
+
+## 1. 安装、启动和导入旧数据
+
+### 使用安装包
+
+1. 从 GitHub Releases 下载已发布的 `Novel Director Setup <版本号>.exe`；本地试用候选不一定已经上传，请核对下载页面的版本与说明。
+2. 运行安装器。
+3. 从桌面或开始菜单打开 `Novel Director`。
+
+### 使用源码开发版
+
+```powershell
 npm.cmd install
 npm.cmd run dev
 ```
 
-可选验证：
+首次打开项目列表为空是正常的。你可以新建项目，也可以导入旧数据：
 
-```bash
-npm.cmd run typecheck
-npm.cmd test
-npm.cmd run build
+1. 打开首页或“设置”。
+2. 选择“导入旧数据 JSON”。
+3. 选择之前导出的 AppData JSON。
+4. 导入后确认项目列表是否出现。
+
+导入策略现在有明确区分：
+
+- 首页为空时会直接导入所选数据。
+- 首页已有项目时默认使用“合并导入”，保留当前项目并追加可安全导入的数据。
+- 设置页的“覆盖导入 JSON”会替换当前工作台数据，必须经过危险操作确认；写入前系统会创建恢复备份。
+- 如果合并发现无法自动解决的引用冲突，系统会停止写入并保留当前数据，不会静默覆盖。
+- JSON 中即使残留旧版 API Key 也会被忽略；导入不会替换本机安全存储里的凭据。
+
+如果“开发版有项目，安装版没有”，通常是因为它们使用了不同的本地数据目录。到“设置 -> 本地数据文件夹”查看当前 SQLite / JSON 位置，再决定导入、迁移或备份。
+
+---
+
+## 2. 配置 AI 模型
+
+打开左侧栏“设置”，找到“AI 模型接入”。你可以使用 OpenAI-compatible API，也可以复用本机已经登录的 Codex CLI。
+
+### 路线 A：使用 Codex CLI 登录额度
+
+这种方式不需要在工作台保存 API Key：
+
+1. 在终端运行 `npm install -g @openai/codex` 安装 CLI。
+2. 运行 `codex login`，完成 ChatGPT 账号登录。
+3. 回到工作台，Provider 选择 `Codex CLI（订阅登录）`。
+4. “Codex CLI 命令或路径”通常保留 `codex`；如果检测不到，可填写 `codex.exe` 的绝对路径。
+5. “Codex 模型”可以留空，让 CLI 使用默认模型。
+6. 点击“检测 Codex CLI”，确认同时显示“已安装”和“已登录”。
+7. 单次调用超时建议至少 `300` 秒，然后用 `800-1200` 字测试章跑一次完整流水线。
+
+CLI 模式仍会把本章 Prompt 和所选小说资料发送给 OpenAI。它复用的是 Codex CLI 登录态，额度和速度由当前 ChatGPT/Codex 计划决定；工作台不会读取或保存登录令牌。CLI 不提供与 Chat Completions 完全相同的 `temperature` / `max_tokens` 控制，因此“输出长度参考”是写入任务的软约束。
+
+### 路线 B：使用 OpenAI-compatible API
+
+Novel Director 会调用 OpenAI-compatible Chat Completions，因此官方 OpenAI、第三方兼容服务、本地兼容网关都可以接入。
+
+### 先确认接口兼容性
+
+Novel Director 会向下面这个地址发起非流式请求：
+
+```text
+{Base URL}/chat/completions
 ```
 
-### 2. 创建项目
+请求至少会包含：
 
-在首页创建一个项目。
+```json
+{
+  "model": "你填写的 Model Name",
+  "messages": [],
+  "temperature": 0.8,
+  "max_tokens": 8000,
+  "response_format": { "type": "json_object" }
+}
+```
 
-如果你已经有旧版数据，首页为空时可以先点击“导入旧数据 JSON”，选择旧版导出的 AppData JSON 或旧的 `novel-director-data.json`。导入成功后会直接进入第一个项目；如果导入失败，请保留源文件并到设置页检查备份、日志和数据路径。
+因此，服务商至少要兼容 OpenAI Chat Completions 的 `model`、`messages`、`temperature` 和 `max_tokens`。应用会先尝试 JSON 输出模式；如果服务商明确拒绝 `response_format`，会自动降级为不带该字段的请求。Embedding、图片生成、仅 Responses API、仅 Anthropic Messages API 的地址不能直接填在这里。
 
-建议使用虚构示例：
+如果服务商给你的完整请求地址是：
 
-- 名称：`Fog City Echo`
-- 类型：都市悬疑 / 规则怪谈 / 无限流
-- 目标读者：喜欢线索控制和人物张力的长篇悬疑读者
-- 核心情绪：压迫、好奇、延迟揭示
-- 文风：克制、电影感、具体细节、低解释量
+```text
+https://example.com/openai/v1/chat/completions
+```
 
-### 3. 填写小说圣经
+Novel Director 的 Base URL 应填写：
 
-小说圣经用于稳定长期事实，不适合记录每章流水账。
+```text
+https://example.com/openai/v1
+```
 
-可以先填写：
+不要把 `/chat/completions` 再填一次，否则最终地址会重复。
 
-- 世界基线
-- 核心前提
-- 主角欲望与恐惧
-- 主冲突
-- 规则或能力系统
-- 禁止套路
-- 叙事基调
-- 不可违背的设定
+### 配置前先准备三样东西
 
-### 4. 创建角色
+在模型服务商后台找到并保持页面打开：
 
-至少创建：
+1. **Base URL**：OpenAI-compatible 接口根地址，通常以 `/v1` 结尾。
+2. **Model Name**：当前账号真正有权限调用的完整模型名。
+3. **API Key**：新建一个只用于本机 Novel Director 的 Key；不要贴到项目资料或章节正文。
 
-- 主角
-- 盟友或情感关系角色
-- 反派或制度压力来源
+如果服务商只给出一段 `curl` 示例，可以这样对应：请求地址里 `/chat/completions` 前面的部分是 Base URL；JSON 里的 `model` 是 Model Name；`Authorization: Bearer ...` 后面的值是 API Key。
 
-优先填写当前戏剧状态，而不是百科式履历。尽量补全九项角色模板：
+### 第一次配置的推荐值
 
-- 角色定位
-- 表层目标
-- 深层需求
-- 核心恐惧
-- 行动逻辑
-- 能力与资源
-- 弱点与代价
-- 关系张力
-- 后续钩子
+| 设置项 | 第一次怎么选 | 什么时候再改 |
+| --- | --- | --- |
+| API Provider | 官方 OpenAI 选 `OpenAI`；第三方兼容接口选 `Compatible API`；本地网关选 `Local Model` 或兼容模式 | 只有更换服务商或网关时修改 |
+| Base URL | 使用服务商给出的根地址，通常到 `/v1` | 404、接口路径变更或切换网关时检查 |
+| Model Name | 从服务商控制台复制完整名称 | 更换模型时修改，不要自己猜简称 |
+| API Key | 粘贴后点击“保存 Key”，看到“API Key 已加密保存” | Key 失效、轮换或更换账号时点“更换 Key” |
+| Temperature | `0.8` | 文字过于机械可小幅提高；结构不稳、乱发挥可降到 0.5-0.7 |
+| Max Tokens | `8000` | 返回被截断时提高；本地小模型先用 `4000` 测试 |
+| 启用 AI 自动总结 | 第一次测试先关闭 | 正式长篇需要自动阶段处理时再开启 |
+| 启用 AI 章节诊断 | 第一次 API 烟测可关闭 | 正式生成时建议开启，便于定位写歪原因 |
+| 默认 token 预算 | 保持 `16000` | 上下文压力高时先压缩低价值回顾，不要盲目增大 |
+| 默认 Prompt 模式 | `标准模式` | 小模型或低成本测试用轻量；需要更多背景时再用完整模式 |
 
-### 5. 添加角色状态账本事实
+`Max Tokens` 是模型本次最多返回多少内容；“默认 token 预算”是系统允许上下文占用多少。两者不是同一个设置。章节被截断看前者，关键资料没进入 prompt 看后者和 Context Selection Trace。
 
-添加几条容易造成连续性 bug 的硬状态：
+### 必填字段怎么填
 
-- 当前位置
-- 伤势或身体状态
-- 重要持有物
-- 已知秘密
-- 金钱或资源数量
-- 能力限制
+| 字段 | 填写方式 | 示例 |
+| --- | --- | --- |
+| API Provider | 通常选择 `Compatible API`。只要服务兼容 OpenAI Chat Completions，就用这个模式。 | `Compatible API` |
+| Base URL | 只填接口根路径，通常到 `/v1` 为止。不要填完整 `/chat/completions`。 | `https://api.openai.com/v1` |
+| Model Name / 模型名 | provider 后台显示的模型名，必须完全一致。 | 按你的 provider 文档填写 |
+| API Key | provider 给你的密钥。只在设置页保存。 | 不要写进项目资料 |
+| Temperature | 正文生成先用 0.7-0.9；审稿、提取、结构化输出用 0.2-0.6。 | `0.8` |
+| Max Tokens | 模型最多返回多少 token。长篇章节建议从 8000 起步。 | `8000` |
 
-Context Need Planner 可以选择这些事实，并把它们作为硬约束放入 prompt。
+### Base URL 常见写法
 
-### 6. 添加伏笔
+下面的模型名只是格式示意。模型会更新，最终以服务商控制台当前展示的完整 ID 为准。
 
-先创建两到三条伏笔，并设置 treatment mode：
+| 服务 | Provider 选择 | Base URL | Model Name 怎么拿 | Key 怎么拿 |
+| --- | --- | --- | --- | --- |
+| OpenAI 官方 | `OpenAI` | `https://api.openai.com/v1` | 从 [OpenAI Models](https://platform.openai.com/docs/models) 复制账号可用模型 ID | 在 [OpenAI API Keys](https://platform.openai.com/api-keys) 创建 project key |
+| DeepSeek | `Compatible API` | `https://api.deepseek.com` | 从 [DeepSeek API 文档](https://api-docs.deepseek.com/) 复制当前模型名 | 在 DeepSeek 开放平台创建 key |
+| 通义千问 / 阿里云百炼（北京） | `Compatible API` | `https://dashscope.aliyuncs.com/compatible-mode/v1` | 从百炼模型列表复制完整模型 ID | 创建与 Base URL 地域一致的百炼 API Key |
+| OpenRouter | `Compatible API` | `https://openrouter.ai/api/v1` | 从模型页复制带厂商前缀的 slug，例如 `openai/...` | 在 OpenRouter Keys 页面创建 key |
+| Ollama 本地模型 | `Local Model` | `http://127.0.0.1:11434/v1` | 运行 `ollama list`，复制本机已有模型名 | 不需要远程 Key；Novel Director 的 Local Model 模式不会发送 Authorization |
 
-- `hint`：只轻微暗示
-- `advance`：可以推进但不能揭底
-- `mislead`：可以制造误导
-- `payoff`：可以揭示或回收
-- `pause`：冻结，不推进
-- `hidden`：除非强制选择，否则不提及
+阿里云百炼的 Key 与地域不能混用：北京、新加坡、美国等地域有不同 Base URL。OpenRouter 的模型名通常带厂商前缀，不能只填模型简称。Ollama 必须先启动本地服务并确保目标模型已经下载。
 
-早期章节建议使用 `hint` 或 `pause`。除非该章明确用于兑现线索，否则不要轻易设为 `payoff`。
+不要这样填：
 
-### 7. 构建第一章 Prompt
+```text
+https://api.openai.com/v1/chat/completions
+```
 
-打开 Prompt 构建器：
+保存 API Key 后，界面只会显示“已保存”，不会回显完整密钥。正常情况下，密钥不会写入 AppData JSON、SQLite 普通 payload 或导出文件。
 
-1. 选择目标章节 `1`。
-2. 选择 `standard` 模式。
-3. 生成或编辑 Context Need Plan。
-4. 检查被选中的角色、状态事实、伏笔和被省略的上下文。
-5. 填写章节任务字段。
-6. 生成最终 prompt。
-7. 如果希望生产流水线严格使用这份上下文，保存 Prompt Context Snapshot。
+### API 从 0 到 1 的测试步骤
 
-### 8. 生成草稿
+1. 去模型服务商后台创建 API Key。
+2. 回到 Novel Director，打开“设置 -> AI API 设置”。
+3. Provider 选择兼容 OpenAI Chat Completions 的模式。
+4. Base URL 填到 `/v1`，不要带 `/chat/completions`。
+5. Model Name 复制服务商文档里的模型名，不要自己起别名。
+6. API Key 粘贴到设置页并保存。
+7. Max Tokens 先填 `8000`。如果模型上下文较小，先降到 `4000` 测试。
+8. Temperature 正文生成先用 `0.8`。
+9. 新建一个测试项目，目标章节预计字数填 `800-1200`。
+10. 跑一次生产流水线。能看到章节计划和草稿正文，才算 API 跑通。
 
-打开生产流水线：
+保存 Key 后请先看设置页提示：成功时显示“API Key 已加密保存”，页面不会回显完整密钥。当前没有必要把 Key 写进 `.env`、项目 JSON、Story Bible 或任何 Prompt；远程调用会从主进程安全存储读取。
 
-1. 选择目标章节 `1`。
-2. 选择自动构建上下文，或选择已保存的 Prompt Context Snapshot。
-3. 选择保守或标准生成模式。
-4. 设置预计字数和读者情绪目标。
-5. 开始生成。
+### 如何从服务商的 curl 示例反推设置
 
-流水线会展示：
+假设服务商给出：
 
-- 上下文需求规划
-- 上下文预算选择
-- prompt 构建
-- 章节任务书
-- 正文草稿
-- 章节复盘
-- 记忆候选
-- 一致性审稿
-- 质量门禁
-- Run Trace
+```bash
+curl https://provider.example/v1/chat/completions \
+  -H "Authorization: Bearer ${API_KEY}" \
+  -H "Content-Type: application/json" \
+  -d '{"model":"provider/model-name","messages":[{"role":"user","content":"hello"}]}'
+```
 
-没有 API Key 时，AI 调用应优雅失败；部分位置会使用本地模板兜底。
+对应关系是：
 
-### 9. 接受前检查
+| curl 中的位置 | Novel Director 设置 |
+| --- | --- |
+| `/chat/completions` 前面的 `https://provider.example/v1` | Base URL |
+| JSON 中的 `provider/model-name` | Model Name |
+| `Bearer` 后面的真实密钥 | API Key，只粘贴到设置页 |
+| 接口声明兼容 OpenAI | Provider 选 `Compatible API` |
 
-接受草稿前，请检查：
+文档里的 `${API_KEY}` 是环境变量占位符，不是可用 Key。不要把真实 Key 写进截图、issue、小说资料或导出 JSON。
 
-- 正文草稿本身。
-- 质量门禁和一致性审稿。
-- Novelty audit 是否发现未授权新规则、角色或设定。
-- Run Trace 是否能解释实际使用了哪些上下文。
-- 长期记忆候选是否正确；不要盲目接受。
+### 模型怎么选才不容易失败
 
-### 10. 修订
+第一次不要只看“写作榜单”，先确认四件事：
 
-打开修订工作台：
+1. 支持 Chat Completions，而不是只有图片、Embedding 或其他专用接口。
+2. 上下文窗口足够容纳本章 Prompt；长篇项目建议优先选择长上下文模型。
+3. 输出上限能覆盖章节字数和结构化结果；否则正文会因 `max_tokens` 被截断。
+4. 对 JSON 指令和长中文写作足够稳定；结构化能力太弱的模型会让任务书、审稿报告解析失败。
 
-1. 选择章节或草稿。
-2. 选择修订类型，例如去 AI 味、加强冲突、加强章节衔接、减少冗余。
-3. 生成修订版本。
-4. 对比原文、修订稿和差异视图。
-5. 满意后再接受。
+本地小模型建议先用轻量 Prompt、`800-1200` 字测试章和 `4000` Max Tokens。确认章节计划能稳定解析后，再逐步增加上下文和字数。推理型模型通常更慢，也可能消耗更多输出预算；先用短章测试成本和响应时间。
 
-接受修订会先把旧正文保存为 `ChapterVersion`。
+### 常见 provider 应该怎么填
 
-### 11. 导出
+下面不是推荐名单，只是帮助你理解字段怎么对应。真实地址和模型名以你的服务商后台为准。
 
-在章节页，你可以：
+#### OpenAI 官方
 
-- 复制正文。
-- 复制标题 + 正文。
-- 导出单章 TXT。
-- 导出单章 Markdown。
-- 批量导出全部章节 TXT 或 Markdown。
+```text
+API Provider: OpenAI
+Base URL: https://api.openai.com/v1
+Model Name: 从 OpenAI Models 页面复制账号有权限的完整模型 ID
+API Key: OpenAI Platform 里创建的 project key
+Temperature: 0.8
+Max Tokens: 8000
+```
 
-导出通过 Electron IPC 写入文件，不让 renderer 直接访问文件系统。
+如果返回 401 / 403，优先检查 key 是否属于当前 project、模型是否有权限、账号是否有额度。
+
+#### DeepSeek
+
+```text
+API Provider: Compatible API
+Base URL: https://api.deepseek.com
+Model Name: 使用 DeepSeek 文档当前列出的模型名
+API Key: DeepSeek 开放平台创建的 key
+Temperature: 0.8
+Max Tokens: 8000
+```
+
+不要长期照抄教程里的旧模型名。DeepSeek 会升级或停用旧别名，配置时应以当前官方文档为准。
+
+#### 通义千问 / 阿里云百炼
+
+```text
+API Provider: Compatible API
+Base URL: https://dashscope.aliyuncs.com/compatible-mode/v1
+Model Name: 从当前地域的模型列表复制完整模型 ID
+API Key: 与该地域匹配的百炼 API Key
+Temperature: 0.8
+Max Tokens: 8000
+```
+
+北京、新加坡、美国等地域的 Base URL 不同，Key 也不能跨地域使用。出现 401 时，除了检查 Key，还要检查 Base URL 地域是否匹配。
+
+#### OpenRouter
+
+```text
+API Provider: Compatible API
+Base URL: https://openrouter.ai/api/v1
+Model Name: 从 OpenRouter 模型页复制完整 slug，通常包含厂商前缀
+API Key: OpenRouter 创建的 key
+Temperature: 0.8
+Max Tokens: 8000
+```
+
+如果模型页写的是 `provider/model-name`，就要连同前缀一起填写。只写最后一段通常会返回模型不存在。
+
+#### Ollama 本地模型
+
+```text
+API Provider: Local Model
+Base URL: http://127.0.0.1:11434/v1
+Model Name: 运行 ollama list 后复制已有模型名
+API Key: 留空
+Temperature: 0.7
+Max Tokens: 4000 起步
+```
+
+先在终端确认 Ollama 服务和模型：
+
+```powershell
+ollama list
+ollama run 你的模型名 "只回复：连接正常"
+```
+
+本地小模型更容易在长 prompt 下跑偏。第一次测试时把预计字数降到 `800-1200`，确认能稳定返回结构化章节计划，再提高字数。
+
+### API 配好后立刻做一次“烟测”
+
+不要一上来生成真实章节。先建一个临时测试项目：
+
+```text
+项目名：API 连通测试
+题材：悬疑短篇
+主角：林澈
+HardCanon：不得临时新增无铺垫救命规则。
+本章目标：林澈进入废弃候车室，听见广播念出他的名字。
+预计字数：800-1200
+```
+
+跑生产流水线后，只检查三件事：
+
+1. 是否生成了“章节计划”。
+2. 是否生成了“正文草稿”。
+3. Run Trace 里是否显示使用了真实 AI，而不是无 API Key fallback。
+
+如果这三件事通过，再开始导入或创建真实项目。这样可以把 API 问题和项目资料问题分开排查。
+
+### 常见错误怎么判断
+
+| 错误 | 常见原因 | 处理 |
+| --- | --- | --- |
+| 401 / 403 | API Key 错、权限不足、模型不可用、余额不足 | 回 provider 后台检查 key、模型权限和额度 |
+| 404 | Base URL 或模型名不对 | 确认 Base URL 只到 `/v1`，模型名完全一致 |
+| 413 | Prompt 太长或输出上限不合适 | 减少上下文、降低预计字数、换更大上下文模型 |
+| 429 | 速率限制 | 系统会指数退避重试；频繁出现时降低并发或换配额 |
+| 502 / 503 / 504 | 服务临时不可用 | 系统会自动重试；仍失败时稍后再试 |
+| 生成像模板 | 可能使用了 fallback，或 AI 调用失败 | 看 Run Trace 和步骤输出，不要直接判断模型质量 |
+
+---
+
+## 3. 第一个项目只写最小必要资料
+
+新手最容易犯的错，是一开始把所有设定都塞进去。正确做法是先写“如果不写，AI 会吃书”的资料。
+
+### 30 分钟跑通最小路线
+
+1. 新建项目，只填项目名、题材、主线一句话和大致文风。
+2. 写 1 条 HardCanon：例如“不得临时新增无铺垫救命规则”。
+3. 写 1 个主角角色卡，只填角色定位、表层目标、行动逻辑、能力与资源、弱点与代价。
+4. 给主角加 2 条动态状态：当前位置、一个身体或能力限制。
+5. 写 2-4 条近期伏笔，不要超过这个数量。
+6. 写第 1 章，或导入已有第 1 章。
+7. 给下一章写 5 行本章任务：目标、冲突、保留悬念、结尾钩子、读者情绪。
+8. 跑生产流水线，先用 `800-1200` 字测试。
+9. 看草稿、质量门禁、Novelty Audit、Run Trace 作者摘要。
+10. 不满意时先局部修订，不要立刻堆更多设定。
+
+### 必写、按需写、以后再写
+
+| 优先级 | 内容 | 判断标准 |
+| --- | --- | --- |
+| 生成前必写 | 上一章正文/结尾、本章目标、冲突、禁止越界点、当前出场角色、关键硬状态 | 缺失后会直接导致接不上、角色吃书或任务空泛 |
+| 强烈建议写 | 1-5 条 HardCanon、近期相关伏笔、不可逆时间线事件、结尾钩子、读者情绪 | 能显著降低新规则救场、伏笔提前揭底和节奏漂移 |
+| 本章相关时再写 | 关系张力、Story Direction、远期 StageSummary、非现场角色、世界背景 | 只有本章会调用时才值得占用 prompt |
+| 暂时不要写 | 未确认新设定、完整终局答案、远期角色百科、泛泛灵感、审稿意见原文 | 容易把候选误当 canon，或挤掉关键上下文 |
+
+一个简单判断：**这条信息如果漏掉，会不会让角色凭空换位置、恢复伤势、拿出不存在的物品、知道不该知道的秘密、提前回收伏笔或发明新规则？** 会，就写进正确账本；不会，就先别塞进本章上下文。
+
+### 新项目第一页到底怎么填
+
+如果你不知道从哪里开始，可以先照下面的最小模板填。它不是文学设定表，而是为了让 AI 不乱写。
+
+```text
+项目名：
+一句话主线：主角必须在什么压力下达成什么目标。
+题材边界：规则怪谈 / 无限流 / 悬疑 / 都市 / 奇幻等，只选最核心的。
+故事底线：哪些规则不能被 AI 改写。
+文风基调：一句话即可，例如“紧张、克制、少解释，多动作和对白潜台词”。
+当前目标章节：第几章。
+```
+
+新手可以先这样填：
+
+```text
+项目名：雾城测试稿
+一句话主线：主角被困在会吞掉身份的山城副本里，必须在规则诱导下保护同伴并找出出口。
+题材边界：规则怪谈 + 悬疑逃生，不写无代价系统爽文。
+故事底线：不得临时新增救命规则；不得让未知管理员突然救场；角色不知道的信息不能直接说出。
+文风基调：冷静、压迫、具体动作优先，少用解释性旁白。
+当前目标章节：第 1 章或下一章。
+```
+
+先不要写：
+
+- 十几页世界观历史。
+- 全部副本规则的最终答案。
+- 每个配角的完整童年传记。
+- “后面会很震撼”“角色要很复杂”这类抽象愿望。
+- 尚未确认的新组织、新管理员、新核心机制。
+
+这些内容不是不能有，而是应该拆到合适模块：硬规则进 HardCanon，当前事实进动态状态账本，线索进伏笔，未来方向进剧情导向。
+
+### 各资料模块应该写什么
+
+| 模块 | 应该写 | 不应该写 | 进入生成的方式 |
+| --- | --- | --- | --- |
+| 小说圣经 | 长期背景、题材边界、主线冲突、叙事基调 | 当前伤势、临时位置、每章流水账 | 被压缩成最小硬设定和后置风格参考 |
+| HardCanon 硬设定包 | 不可违背短规则、身份底线、时间锚点、禁止事项 | 长篇世界观解释、待确认新设定 | 高优先级进入正文 prompt，预算不足时 must 优先 |
+| 角色卡九项 | 长期动机、行动逻辑、弱点、资源、关系张力 | 当前现金、临时位置、每章小动作 | 按 Context Need Plan 切片进入 prompt |
+| 动态状态账本 | 位置、伤势、物品、资源、已知秘密、承诺、能力限制 | 普通情绪、未确认猜测 | 本章需要时优先进入 prompt 和质量门禁 |
+| 伏笔账本 | 伏笔标题、状态、权重、treatmentMode、回收方向 | 泛泛灵感池 | 按权重最多选择 10 条相关伏笔 |
+| 时间线 | 不可改变的事件顺序和因果锚点 | 普通剧情复述 | 本章相关时作为时间锚点进入 prompt |
+| 阶段摘要 | 远期旧章节剧情压缩 | 角色关系、伏笔、下一阶段规划 | 只作远期背景，低于硬状态和伏笔 |
+| 剧情导向 | 未来 5/10 章软性方向 | 已发生事实、硬设定、正式回收结论 | 作为软指导进入 prompt，不覆盖硬事实 |
+
+### 一条信息到底应该放哪里
+
+按下面顺序判断，不要在多个模块重复粘贴同一段话：
+
+1. **已经发生、以后不能否认吗？** 是不可逆事件就放“时间线”；是绝不能违反的规则或身份底线就放“HardCanon”。
+2. **它只属于某个角色当前状态吗？** 位置、伤势、物品、钱、已知信息、承诺和能力限制放“动态状态账本”。
+3. **它是角色长期如何行动的原因吗？** 动机、恐惧、决策逻辑、弱点和关系张力放“角色卡”。
+4. **它是未来要暗示、推进或回收的线索吗？** 放“伏笔账本”，并设置 treatmentMode。
+5. **它只指导未来几章往哪里走吗？** 放“剧情导向”，不要写成已经发生的事实。
+6. **它只服务下一章吗？** 放“本章任务”，不要升级成全书设定。
+7. **它只是旧章节的压缩背景吗？** 放“阶段摘要”，不要重复角色状态或伏笔账本。
+
+同一事实可以有来源关联，但不要把同一大段文字原样复制到小说圣经、HardCanon、角色卡和本章任务四处。重复不会让模型更重视，只会挤占上下文并增加冲突概率。
+
+### 第一次填写的合理上限
+
+这些不是代码硬限制，而是新手阶段的实用控制线：
+
+| 模块 | 第一次建议量 | 写到什么程度就停 |
+| --- | --- | --- |
+| 项目简介 | 3-6 句 | 能说明主线、题材边界、核心吸引力和文风即可 |
+| 小说圣经 | 每个已用字段 1-3 小段 | 只保留长期稳定内容；出现章节流水账就停 |
+| HardCanon | 1-5 条 | 每条 1-3 句，能判断“违反/未违反”即可 |
+| 核心角色 | 1-4 人 | 先填近期会出场或直接影响行动的人 |
+| 每个角色状态 | 3-8 条 active hard/soft fact | 位置、伤势、物品、资源、知识、承诺和能力限制够用就停 |
+| 近期伏笔 | 2-5 条 | 只录近期会暗示、推进或禁止揭示的线索；单个 prompt 最多调度 10 条 |
+| 时间线 | 只录不可逆节点 | 死亡、身份公开、关键物品易手、重大因果发生后再记 |
+| 阶段摘要 | 每 5-15 章按需压缩 | 只写旧剧情压缩、不可逆变化和结尾承接状态 |
+| 剧情导向 | 未来 5 或 10 章 | 写方向和每章 beat，不把候选新设定写成 canon |
+
+如果你发现自己在“设定”里写了几千字但还没写下一章任务，先停下来。对生成质量最直接的通常是上一章结尾、本章任务、当前角色硬状态和本章伏笔规则。
+
+### 写 / 不写判断表
+
+| 你想写的内容 | 应该写吗 | 放在哪里 |
+| --- | --- | --- |
+| 主角右手结晶化，使用能力会灼痛 | 要写 | 动态状态账本，category 选 physical 或 ability |
+| 角色已经知道广播来自禁闭室 | 要写 | 动态状态账本，category 选 knowledge |
+| 副本规则不能突然补充救命条款 | 要写 | HardCanon，priority 选 must |
+| 对向站台以后会回收 | 要写，但简短 | 伏笔账本，设置 treatmentMode 和权重 |
+| 未来几章要更压迫、更悬疑 | 可以写 | 剧情导向或本章读者情绪 |
+| 远期大结局完整真相 | 暂时别写进 prompt | 可先放私人笔记；确认要约束生成时拆成伏笔或 HardCanon |
+| 配角童年三千字传记 | 通常先不写 | 除非本章会用，否则会变成噪声 |
+| 场景要高级、好看、有宿命感 | 不要这样写 | 改成具体风格要求：少解释、多动作、对白有潜台词 |
+| 待补充 / 随便发挥 | 不要写 | 留空即可 |
+
+### 一套可直接照填的最小示例
+
+以下示例足够跑通第 1 章，不需要再补十页设定。
+
+```text
+【小说圣经】
+一句话主线：周烬被困在会吞掉身份的山城车站，必须在规则诱导下保护同伴并找到出口。
+题材边界：规则怪谈 + 悬疑逃生；不写无代价系统爽文。
+叙事基调：冷静、压迫、少解释；用动作、对白和感官细节推进。
+
+【HardCanon】
+1. 新规则不得无铺垫解决当前危机。priority = must
+2. 角色不知道的信息不得直接说出。priority = must
+3. 已死亡角色不得无解释复活。priority = high
+
+【主角卡：周烬】
+角色定位：主角，负责把规则压力转化为行动选择。
+表层目标：离开车站并保护韩笑颜。
+行动逻辑：高压下先验证规则，再承担风险。
+能力与资源：记忆力强，持有旧站票。
+弱点与代价：习惯独自承担；能力使用后右手灼痛。
+
+【动态状态】
+位置：旧站台 3 号门外。trackingLevel = hard
+身体：右手出现结晶化，使用能力会灼痛。trackingLevel = hard
+物品：持有旧站票；没有黑色钥匙。trackingLevel = hard
+知识：不知道广播源头的完整身份。trackingLevel = hard
+
+【近期伏笔】
+对向站台的注视代价：weight = high，treatmentMode = hint；只允许轻微暗示。
+广播会念出旧名字：weight = high，treatmentMode = advance；不得解释来源。
+
+【第 1 章任务】
+目标：进入废弃候车室，确认广播正在实时回应周烬。
+冲突：韩笑颜坚持离开，周烬必须说服她停留三分钟验证规则。
+保留悬念：广播源头身份不得揭晓。
+结尾钩子：广播念出周烬从未告诉任何人的旧名字。
+读者情绪：紧张、被注视、对同伴产生轻微怀疑。
+禁止：不得新增管理员、临时权限或系统补充条款救场。
+```
+
+### 用这套示例完整跑一遍下一章
+
+下面是一条可以直接照做的操作链。每一步都有完成标志：
+
+1. **章节**：先保存第 1 章正文，确认结尾确实是“广播念出旧名字”。
+   完成标志：第 1 章正文不为空，结尾钩子与实际正文一致。
+2. **角色**：打开周烬，把“右手结晶化并灼痛”“持有旧站票”“不知道广播源头身份”写成 active 状态事实。
+   完成标志：这些内容显示在动态状态账本，而不只是状态日志。
+3. **伏笔**：把“广播念出旧名字”设为 `advance`，把“对向站台的注视代价”设为 `hint` 或 `pause`。
+   完成标志：每条伏笔都有权重和 treatmentMode。
+4. **本章任务**：目标写“追查广播为什么知道旧名字”；冲突写“周烬想追查，韩笑颜要求立刻撤离”；禁止写“不得解释广播源头”。
+   完成标志：目标、冲突、保留悬念和结尾钩子都有具体动作或结果。
+5. **生产流水线**：目标章节选第 2 章，生成模式选“标准”，预计字数先填 `1000-1500`，上下文来源选“自动构建上下文”。
+   完成标志：步骤依次生成任务书、草稿、审稿和质量报告。
+6. **草稿检查**：搜索“管理员”“临时权限”“补充条款”“完全恢复”等高风险词，再读开头和结尾。
+   完成标志：开头接住旧名字广播；结尾形成新压力；没有用新规则直接脱困。
+7. **诊断检查**：打开 Run Trace 作者摘要。
+   完成标志：能看到周烬的状态事实、相关伏笔和 HardCanon 已进入上下文；若被省略，trace 有明确原因。
+8. **处理结果**：小问题走局部修订；任务方向错误就拒绝草稿并重写任务；满足标准后再“接受草稿”。
+   完成标志：正式第 2 章出现，版本历史保留本次提交。
+
+这条流程里，最容易犯的错是：发现草稿写歪后继续往小说圣经里堆资料。先看问题到底来自任务空泛、硬状态缺失、伏笔越界，还是模型表达；只修对应层。
+
+---
+
+## 4. 角色卡怎么写
+
+角色卡不是人物简历。第一版只填能指导行动的 9 项。
+
+| 字段 | 写法 | 示例 |
+| --- | --- | --- |
+| roleFunction / 角色定位 | 这个角色在故事结构里承担什么功能 | 主角，负责把规则压力转化为行动选择 |
+| surfaceGoal / 表层目标 | 当前明面上想要什么 | 离开雾城车站并救出同伴 |
+| deepNeed / 深层需求 | 真正想修复、证明或逃避什么 | 证明自己不是只会服从系统的人 |
+| coreFear / 核心恐惧 | 最怕失去什么或面对什么真相 | 害怕自己也是规则的一部分 |
+| decisionLogic / 行动逻辑 | 高压下如何决策 | 优先保护同伴，但会先验证规则漏洞 |
+| abilitiesAndResources / 能力与资源 | 智力、物品、权限、信息、人际资源 | 记忆力强，持有旧站票，右手可短暂感知广播源 |
+| weaknessAndCost / 弱点与代价 | 为什么会犯错，犯错有什么代价 | 习惯独自承担，能力使用后右手灼痛 |
+| relationshipTension / 关系张力 | 与核心人物的吸引、互补、怀疑、债务 | 信任韩笑颜，但怀疑她隐瞒档案 |
+| futureHooks / 后续钩子 | 还能推动什么剧情 | 他的右手变化可能连向聚合体机制 |
+
+不要在角色卡里写每章都会变化的现金、位置、伤势、物品。这些放进动态状态账本。
+
+---
+
+## 5. 动态状态账本怎么用
+
+状态账本只记录会影响后续生成的事实。
+
+适合写成状态事实：
+
+- 当前位于“旧站台 3 号门外”。
+- 右手结晶化，使用能力会灼痛。
+- 持有黑色钥匙、旧地图。
+- 现金剩余 5000。
+- 已知秘密：广播源头来自禁闭室。
+- 不知道的信息：韩笑颜没有告诉他档案编号。
+- 承诺：必须带韩笑颜离开车站。
+- 能力限制：感知广播源每次只能维持 30 秒。
+
+不适合写成状态事实：
+
+- 他今天很难过。
+- 这个场景很压抑。
+- 她可能以后会背叛。
+- 这一段写得很有氛围。
+
+如果只是自然语言记录，先写到“状态日志 / 历史记录”。需要影响生成时，再点击“转为状态事实”或“转为候选”。只有 CharacterStateFact 会进入 PromptBuilder、Context Need Plan、质量门禁和 Run Trace。
+
+---
+
+## 6. 伏笔怎么写
+
+伏笔账本不需要写成百科。每条伏笔至少写：
+
+- 标题：一句话能识别。
+- 状态：未回收、推进中、已回收等。
+- 权重：越关键权重越高。
+- treatmentMode：hidden、hint、advance、mislead、payoff、pause。
+- 首次出现章节。
+- 预计回收方向。
+- 本章具体允许动作和禁止越界点。
+
+例子：
+
+```text
+标题：对向站台的注视代价
+权重：high
+treatmentMode：hint
+首次出现：第 2 章
+预计回收：未来主角需要观察对向站台时付出时间代价，或利用此规则制造陷阱。
+本章允许：只能用短暂错觉、视线压力或系统乱码轻轻带过。
+本章禁止：不得解释来源，不得让角色直接说破，不得回收。
+```
+
+注意：每个 prompt 最多推进 10 条相关伏笔，并按权重排序。不要把几十条远期伏笔全塞进同一章。
+
+---
+
+## 7. 本章任务怎么写
+
+本章任务是导演指令，不是完整大纲。它要告诉 AI “这一章必须完成什么、不能越界什么”。
+
+可复制模板：
+
+```text
+本章目标：
+
+本章必须推进的冲突：
+
+本章必须保留的悬念：
+
+本章允许回收或推进的伏笔：
+
+本章禁止回收或解释的伏笔：
+
+本章结尾钩子：
+
+读者应该产生的情绪：
+
+禁止写法：
+```
+
+填写示例：
+
+```text
+本章目标：主角进入旧站台广播室，确认广播不是普通录音，而是某种实时回应。
+本章必须推进的冲突：韩笑颜想立刻离开，主角必须说服她留下 3 分钟验证规则。
+本章必须保留的悬念：不得解释广播源头的完整身份。
+本章允许回收或推进的伏笔：轻微推进“对向站台的注视代价”。
+本章禁止回收或解释的伏笔：不得解释聚合体来源，不得出现区域管理员。
+本章结尾钩子：广播念出主角尚未告诉任何人的旧名字。
+读者应该产生的情绪：紧张、被迫做选择、对同伴产生轻微怀疑。
+禁止写法：不得新增无铺垫救命规则；不得让系统面板突然给出便利条款。
+```
+
+如果字段没想好，留空。不要写“待补充”。系统会跳过空字段，但占位符会污染写作 Prompt。
+
+---
+
+## 8. 用 Prompt 构建器还是生产流水线
+
+### Prompt 构建器适合
+
+- 你想检查本章到底选了哪些上下文。
+- 你想手动选择或排除角色、伏笔、时间线、硬设定。
+- 你想保存 Prompt Context Snapshot 给生产流水线复用。
+- 你想排查为什么某个状态、伏笔或设定没有进入 prompt。
+
+推荐步骤：
+
+1. 选择目标章节。
+2. 生成或编辑 Context Need Plan。
+3. 检查“被选中 / 被省略”的上下文和原因。
+4. 填写本章任务。
+5. 生成最终 prompt。
+6. 需要锁定上下文时，保存 Prompt Context Snapshot。
+
+### 生产流水线适合
+
+- 你想完整生成一章草稿。
+- 你希望系统自动规划上下文、生成章节计划、补全上下文、生成正文、审稿、提取候选。
+- 你愿意在最后人工决定接受或修订。
+
+生产流水线会依次执行：
+
+1. 上下文需求规划。
+2. 上下文预算选择。
+3. 构建 prompt。
+4. 生成章节计划。
+5. 根据章节计划做二次上下文补全。
+6. 重建正文 prompt。
+7. 生成正文草稿。
+8. 章节复盘。
+9. 角色状态、伏笔和记忆候选。
+10. 一致性审稿。
+11. 质量门禁。
+12. 等待你确认。
+
+运行中不要重复点击开始。失败时先看失败步骤，再点击“重试失败步骤”。
+
+### 第一次在生产流水线里怎么点
+
+1. 打开左侧“生产流水线”。
+2. 在左侧配置栏选择“目标章节编号”。已有第 1 章时，下一章通常填 `2`。
+3. “生成模式”第一次选“标准”。保守模式适合严格续写，激进模式会允许更强的情节推进。
+4. “预计字数”第一次填 `800-1200`，先验证链路，不要直接生成 5000 字。
+5. 填写“读者情绪目标”，例如“紧张、被注视、对同伴产生轻微怀疑”。
+6. “上下文来源”第一次选“自动构建上下文”。只有你已经在 Prompt 构建器保存了快照时才选“Prompt 快照”。
+7. 检查顶部状态条显示的目标章节和上下文来源，点击“开始生成”。
+8. 运行时看“流程状态”，不要重复点击开始；AI 请求可能需要一些时间。
+9. 有草稿后，“当前主要产物”会优先打开“草稿”Tab；“步骤输出”里的 JSON 默认只用于排查。
+10. 失败时看红色失败步骤的错误摘要，再点“重试失败步骤”。不要新建多个相同 Job 来碰运气。
+
+### 怎么判断这次生成链路真的成功
+
+- `generate_chapter_plan` 有结构化任务书，而不是空模板。
+- `rebuild_context_with_plan` 完成，正文使用的是计划后二次补全的上下文。
+- “草稿”Tab 有连续正文，不是大纲或错误提示。
+- 一致性审稿、质量门禁、Novelty Audit 和冗余检查有结构化结果。
+- 最终状态为“等待确认”，而不是仍在运行或失败。
+- Run Trace 作者摘要能解释选了哪些上下文、遗漏了什么，以及下一步建议。
+
+---
+
+## 9. 接受草稿前看什么
+
+至少看四处：
+
+1. 草稿正文：是否接住上一章结尾，是否像小说而不是大纲。
+2. 质量门禁：当前通过线是 50 分；低于 80 分或关键维度低于 70 分时，建议人工确认后再接受。
+3. Novelty Audit：有没有未授权新规则、新角色、新组织、新机制或机械降神补丁。
+4. Run Trace 作者摘要：问题更可能来自上下文缺失、任务书、角色状态、伏笔，还是模型输出。
+
+不要直接接受这些草稿：
+
+- 用临时新增规则解决危机。
+- 角色突然知道状态账本里没有记录的秘密。
+- 角色使用未持有物品或无来源资源。
+- 伤势、位置、能力限制被无解释重置。
+- hidden / pause 伏笔被提前解释。
+- 正文明显像大纲、说明书或重复规则解释。
+
+质量门禁通过不等于正文完美。它只是帮你挡掉明显硬伤，最终仍需要作者判断节奏、情绪和文风。
+
+---
+
+## 10. 怎么修订
+
+修订工作台用于把“方向基本正确但有问题”的草稿打磨成正式版本。
+
+### 三个修订入口怎么选
+
+| 入口 | 适合场景 | 不适合场景 | 结果 |
+| --- | --- | --- | --- |
+| 右键 AI 快速重写 | 选中一句话或一小段，去 AI 味、压缩、换语气 | 大范围剧情重构、批量状态更新 | 先看可编辑候选，再明确应用到选区 |
+| 从质量门禁 / 一致性 issue 进入修订 | 某个问题已经被报告指出，例如“伤势无解释恢复” | 你还没读草稿，不知道要改哪里 | 创建针对该 issue 的修订请求 |
+| 修订工作台手动修订 | 章节方向基本对，但节奏、冲突、衔接、文风需要打磨 | 完全错误的章节，任务都写错了 | 生成修订版本，接受后进入版本链 |
+
+一个简单判断：
+
+- 只改 1-3 段：先用右键或局部修订。
+- 修一个明确问题：从质量门禁或一致性审稿进入。
+- 整体语言和节奏都要调：用修订工作台。
+- 整章方向错了：拒绝草稿，改本章任务后重跑，不要硬修。
+
+### 先判断问题属于哪一层
+
+| 你看到的问题 | 先改哪里 | 为什么 |
+| --- | --- | --- |
+| 一两句太像 AI、对白生硬 | 章节页/阅读页右键重写 | 只改表达，不需要建立正式修订会话 |
+| 某段节奏慢、重复解释 | 右键“去 AI 味”或局部修订 | 改动范围小，避免整章漂移 |
+| 角色伤势、物品、知识写错 | 从一致性 issue 进入修订，并检查动态状态账本 | 这既是正文问题，也可能是上下文资料问题 |
+| 伏笔提前解释或回收 | 从伏笔/一致性 issue 进入局部修订 | 必须保留 treatmentMode，不能只做文风润色 |
+| 新管理员、新权限、新规则救场 | 从 Novelty/质量问题进入修订，删除临时机制 | 不能把错误写法洗进长期设定 |
+| 整章目标、冲突或结尾方向错 | 拒绝草稿，修改本章任务后重跑 | 硬修会让正文越来越不自然 |
+| 已接受章节后来要改 | 修订工作台创建正式修订版本 | 需要保留版本链和恢复能力 |
+
+### 常见修订目标
+
+| 问题 | 推荐修订方式 |
+| --- | --- |
+| AI 味重、句式模板化 | 去 AI 味重写，减少口号式心理和解释 |
+| 情节软、冲突不具体 | 加强阻力、代价和选择 |
+| 上一章衔接断裂 | 强化章节衔接，接住地点、动作、伤势、情绪 |
+| 伏笔提前揭底 | 局部修订，删除解释或改成轻微暗示 |
+| 新增未授权规则 | 删除临时规则，改为使用已有规则、能力或伏笔 |
+| 描写重复 | 压缩重复段落和重复解释 |
+| 只想改一小段 | 选中文本后用右键快速重写 |
+
+### 标准修订流程
+
+1. 打开“修订工作台”。
+2. 选择章节或草稿。
+3. 选择修订类型，或输入自定义修订需求。
+4. 如果只改局部，选定目标片段，不要让 AI 重写整章。
+5. 点击生成修订候选。
+6. 切换“原文 / 修订后 / 差异对比”。
+7. 检查新增、删除和替换，尤其检查是否引入新设定。
+8. 满意后点击接受修订。
+
+接受前额外检查两件事：修订后的正文是否仍接住上一章 Bridge；修订是否新增了未记录的角色状态、伏笔回收或世界规则。正式接受会创建新的章节版本，旧正文不会被静默覆盖。
+
+### 修订实战：删除“临时救命规则”
+
+假设草稿里出现了下面这段：
+
+```text
+追兵已经堵住出口。系统面板忽然弹出一行补充条款：核心单元在五米范围内可以共享临时身份。周烬立刻把韩笑颜纳入范围，两人因此绕过门禁。
+```
+
+问题不只是“文风像 AI”，而是正文临时发明了“核心单元、五米范围、共享身份”三个机制，并直接解除危机。此时不要用“去 AI 味”把句子写得更漂亮，也不要把新机制录入 HardCanon。正确做法：
+
+1. 在质量门禁、Novelty Audit 或正文中确认问题证据。
+2. 打开“修订工作台”，来源选择这份草稿或已接受章节。
+3. 修订类型选择“修复设定冲突”或“修复剧情逻辑”。
+4. 把上面一段粘到“局部修订文本”。
+5. 在“自定义修订指令”填写：
+
+```text
+只修订选中段落。删除“核心单元、五米范围共享身份、临时权限”等未铺垫机制。
+危机必须使用已有信息解决：周烬持有旧站票；右手结晶化可以短暂感知广播，但使用后会灼痛。
+保留“追兵堵住出口”和“必须带韩笑颜通过门禁”的结果压力。
+不要新增管理员、新道具、新规则或巧合救援。
+```
+
+6. 点击“生成修订版本”。
+7. 切换“差异对比”，确认只替换目标段落，周围正文没有被重写。
+8. 检查修订后是否真的支付代价，例如右手灼痛加剧，而不是换了一个名字继续无代价脱困。
+9. 满意后点击“接受版本”；不满意就点“继续修改”或“拒绝版本”。
+
+合格结果不要求固定写法，但必须满足：使用旧站票或已存在能力；保留追兵和门禁压力；没有新增 canon；周烬的身体代价仍然存在。
+
+### 修订完成后还要检查什么
+
+| 检查项 | 通过标准 |
+| --- | --- |
+| 修改范围 | 局部修订没有改写无关段落；整章修订保留事件顺序和关键事实 |
+| 上一章衔接 | 地点、未完成动作、伤势、情绪和人物在场关系没有被重置 |
+| 角色状态 | 没有凭空获得物品、资源、知识或解除伤势/能力限制 |
+| 伏笔 | 没有越过 treatmentMode；`hidden` / `pause` 没被说破 |
+| 新设定 | 没有为解决当前问题新增规则、组织、管理员或系统权限 |
+| 版本链 | 接受后出现新的 ChapterVersion，旧版本仍可查看和恢复 |
+
+如果修订连续两次都解决不了同一问题，通常说明源头不是措辞，而是本章任务或上下文缺失。此时应停止继续改写，补任务契约、角色状态或伏笔规则，再重新生成。
+
+### 从质量门禁进入修订的具体做法
+
+1. 在生产流水线里打开最新 Job。
+2. 看“质量门禁”或“一致性审稿”摘要。
+3. 找到 high / medium issue，优先处理 high。
+4. 点击 issue 旁边的“进入修订”或“生成修订候选”。
+5. 系统会带上该 issue 的证据和建议修复方向。
+6. 生成修订后，先看差异对比，不要只看修订后正文。
+7. 如果修订引入了新规则、新角色、新组织，拒绝该修订或继续局部修。
+8. 接受修订后，它会进入版本链；旧正文不会丢。
+
+### 右键快速重写的具体做法
+
+1. 在章节页或修订工作台中选中一小段文本。
+2. 右键打开“AI 快速重写”菜单。
+3. 选择：
+   - 空白重写：只保留大意，换一种写法。
+   - 去 AI 味重写：减少模板句、解释腔和口号式心理。
+   - 自定义需求：自己写“压缩到 120 字”“更冷静”“对白更含蓄”等。
+4. 在“重写候选”中编辑文字，或切换“与原文对比”。不满意可以填写“继续修改要求”再改一次。
+5. 点击“应用到选区”才修改原文。AI 返回整章时会显示“作为整章采用”，需要再明确确认；也可以复制或放弃候选。
+6. 原文已变化时，先重新定位；原片段出现多次则收起候选，在同一章重新选择后点击“使用当前选区”。
+
+章节页应用时会等待正文保存成功，再清理候选；阅读页明确应用会创建正式修订提交和版本记录。候选本身不会修改角色、伏笔或 HardCanon。看到“候选已暂存”后，可以切换页面或重新打开程序继续改；不同章节的候选互相隔离。保存失败时点击“重试暂存”或先复制文本。阅读页的内联编辑仍需点击“保存本章”。
+
+等待 AI 时会显示实际模型、已耗时、等待/读取响应/重试状态，可点击“取消本次”。这些状态不是生成百分比，也不会显示模型隐藏推理。
+
+涉及“角色知道了什么、物品是否存在、伏笔是否回收、规则是否生效”时，建议进入修订工作台检查影响范围，并单独处理相关账本；保存正文不等于自动更新长期设定。
+
+可复制的自定义修订请求：
+
+```text
+只修订选中段落。保留剧情事实和对白信息，不新增规则。
+目标：减少 AI 味，压缩解释，增加角色动作、停顿和感官细节。
+禁止：不得改变右手结晶化状态，不得解释广播来源，不得新增管理员或系统补充条款。
+```
+
+更多可直接使用的修订模板：
+
+修复角色状态连续性：
+
+```text
+只修订发生状态冲突的段落。保留其余剧情和对白。
+角色当前状态：右手结晶化并持续灼痛；没有黑色钥匙；不知道广播源头身份。
+目标：让动作、物品使用和认知范围符合这些状态。
+禁止：不得用新增治疗、临时权限或补充规则解释冲突。
+```
+
+收紧伏笔：
+
+```text
+只修订涉及“对向站台的注视代价”的段落。
+当前 treatmentMode = hint：只允许短暂错觉、视线压力或乱码暗示。
+删除来源解释、角色直接说破和任何 payoff。
+不得改变其他事件顺序。
+```
+
+加强冲突而不改事实：
+
+```text
+保留场景、事件结果和角色已知信息。
+通过阻力、代价、动作选择和对白潜台词加强冲突。
+不要新增角色、规则、道具或系统权限；不要把正文改成大纲。
+```
+
+整章去 AI 味：
+
+```text
+保留章节事实、事件顺序、人物关系和结尾钩子。
+减少总结式心理、排比口号、重复解释和“他意识到/这意味着”句式。
+增加具体动作、停顿、感官细节和不完全说透的对白。
+不得新增设定，不得改变伏笔 treatmentMode 和角色硬状态。
+```
+
+### 右键快速重写什么时候用
+
+适合：
+
+- 改写一句或一小段对白。
+- 去掉明显 AI 味。
+- 压缩重复描写。
+- 空白重写一小段。
+- 按自定义要求调整选中文本。
+
+不适合：
+
+- 重写整章。
+- 改变剧情事实。
+- 回收伏笔。
+- 修改角色状态。
+- 新增世界规则。
+- 绕过质量门禁直接改正式章节。
+
+涉及剧情事实、角色状态、伏笔回收、章节结构的修改，最好走修订工作台和版本链。
+
+---
+
+## 11. 记忆候选怎么处理
+
+章节复盘会生成候选，例如：
+
+- 角色状态变化。
+- 伏笔状态变化。
+- 时间线事件。
+- 阶段摘要。
+- 新设定或硬设定候选。
+
+原则：
+
+- 未确认的候选不会写入长期记忆。
+- AI 提取的新规则、新角色、新设定默认只是候选。
+- Novelty 风险高的候选不要一键接受。
+- 低风险候选可以批量接受，但接受前仍建议查看 evidence。
+
+接受前问三个问题：
+
+1. 这是正文里已经明确发生的事实吗？
+2. 它是否违反已有硬设定、角色状态或伏笔 treatmentMode？
+3. 以后生成如果引用它，会不会造成设定污染？
+
+不确定时，先保持 pending 或拒绝。
+
+---
+
+## 12. 阅读页、版本历史和恢复
+
+阅读页适合连续审阅已经成稿的章节。右侧章节栏可以快速跳转，正文居中显示，避免在章节编辑页里来回翻长文本。
+
+在同一窗口内离开再返回时，会尽量恢复该项目的阅读段落；前文变长后也按段落定位，不沿用旧绝对滚动坐标。段落完全改写或出现重复时会回到该章附近。手动编辑完成后可保存或放弃，再回到原阅读位置。
+
+章节页的版本历史可以查看：
+
+- 导入版本。
+- AI 草稿采纳版本。
+- 手动修订版本。
+- AI 辅助修订版本。
+- 历史版本恢复版本。
+
+恢复历史版本不会删除当前正文。系统会创建一个新的恢复提交，原版本链仍然保留。
+
+---
+
+## 13. 备份和迁移
+
+SQLite 是默认本地数据文件，JSON 导入导出用于备份、迁移和测试。
+
+建议：
+
+- 重要创作阶段前导出 JSON。
+- 换机器时，优先用设置页导出 JSON，再在新机器导入。
+- 发布 bug、截图或示例前使用 synthetic demo data。
+- 不公开真实项目 JSON。
+- 不把 API Key 放进项目资料、章节正文、截图或 issue。
+
+---
+
+## 常见问题
+
+### 项目列表为空
+
+可能是第一次打开、开发版和安装版使用了不同 userData，或数据目录被切换。到设置页查看本地数据文件夹；如果有旧 JSON，可以导入旧数据。
+
+### API 配好了但生成失败
+
+先检查 Base URL 是否只到 `/v1`，模型名是否与 provider 一致，API Key 是否已保存，Max Tokens 是否过低。再看失败步骤和 Run Trace，不要重复点开始。
+
+### AI 写出了新规则或新角色
+
+先看 Novelty Audit。如果这是你允许的新信息，把它补进任务书、伏笔、HardCanon 或记忆候选；如果不是，进入修订工作台删除或改写。
+
+### 角色状态没有进入 prompt
+
+确认它是否已经是动态状态账本事实，而不只是状态日志。日志需要转入账本或转为候选后接受，才会影响 PromptBuilder、质量门禁和 Run Trace。
+
+### 应该用 Prompt 构建器还是生产流水线
+
+想控制上下文、保存快照、排查 prompt 时，用 Prompt 构建器。想完整生成一章草稿并自动审稿时，用生产流水线。
+
+### 修订后还能恢复旧版吗
+
+可以。章节版本历史会保留导入版本、草稿采纳版本、手动修订版本、AI 辅助修订版本和恢复版本。恢复历史版本也会创建新的修订提交，不会删除旧版本链。
 
 ---
 
 ## English
 
-This walkthrough creates a small synthetic fiction project, prepares context, generates a first draft, and revises it. All example names and story fragments are synthetic demo data. If you see `Fog City Test Draft` / `《雾城测试稿》` in fixtures or docs, it is a fictional public test project.
+This quickstart helps a first-time author complete the practical Novel Director loop: configure an AI provider, prepare minimum project data, generate a draft, inspect risks, revise, accept, and back up.
 
-If this is your first time using Novel Director, start with the fuller [Beginner Tutorial](./docs/BEGINNER_TUTORIAL.md). This quickstart is for running through the workflow once you know the basic concepts.
+All examples are synthetic demo data. Do not publish real API keys, private manuscripts, local data files, screenshots, or exported real project JSON.
 
-### 1. Start the App
+### 1. Configure the AI Provider
 
-```bash
-npm.cmd install
-npm.cmd run dev
-```
+Open Settings and configure an OpenAI-compatible provider:
 
-Optional validation:
+- Provider: usually `Compatible API`.
+- Base URL: the API root, usually ending at `/v1`; do not include `/chat/completions`.
+- Model Name: exactly as shown by your provider.
+- API Key: save it in Settings only.
+- Temperature: start around 0.7-0.9 for prose; use lower values for review and extraction.
+- Max Tokens: 8000 or more for long chapters if your model supports it.
 
-```bash
-npm.cmd run typecheck
-npm.cmd test
-npm.cmd run build
-```
+Run a small `800-1200` word test chapter first. If it fails, inspect the failed pipeline step and Run Trace before retrying.
 
-### 2. Create a Project
+### 2. Minimum Project Data
 
-On the home screen, create a project.
+Write only the facts that prevent continuity mistakes:
 
-If you already have old data, click `导入旧数据 JSON` on the empty home screen and select an exported AppData JSON file or legacy `novel-director-data.json`. After a successful import, the app opens the first project. If import fails, keep the source file and use Settings to inspect backups, logs, and data paths.
+- Story Bible: long-term premise, genre boundary, tone, and main conflict.
+- HardCanon: short non-negotiable rules, identity facts, timeline anchors, and prohibitions.
+- Characters: motivation, action logic, weakness, resources, relationship tension.
+- Character State Ledger: location, injury, inventory, money, known secrets, promises, and ability limits.
+- Foreshadowing: title, status, weight, treatment mode, payoff direction.
+- Timeline: irreversible event order and causal anchors.
 
-Suggested synthetic example:
+Avoid huge encyclopedias, unused side-character biographies, far-future reveals, vague style slogans, and `TBD` placeholders.
 
-- Name: `Fog City Echo`
-- Genre: urban mystery / weird rules / suspense
-- Target readers: long-form suspense readers who enjoy clue control and character tension
-- Core emotion: pressure, curiosity, delayed revelation
-- Style: restrained, cinematic, concrete details, low exposition
+### 3. Chapter Task
 
-### 3. Fill the Story Bible
+The chapter task is a director note, not a full outline. Fill only what is real:
 
-Use the Story Bible for stable long-term facts, not chapter-by-chapter notes.
+- Goal.
+- Conflict.
+- Suspense to keep.
+- Allowed payoffs.
+- Forbidden payoffs.
+- Ending hook.
+- Reader emotion.
+- Prohibitions.
 
-Start with:
+Leave uncertain fields empty. Do not write `TBD`.
 
-- World baseline
-- Central premise
-- Protagonist desire and fear
-- Main conflict
-- Rule or power system
-- Forbidden tropes
-- Narrative tone
-- Non-negotiable canon
+### 4. Generate, Review, Revise
 
-### 4. Create Characters
+Use Prompt Builder when you want to inspect or lock context. Use Generation Pipeline for the full automated flow: context need planning, budget selection, prompt build, chapter plan, plan-based context gap fill, draft generation, review, memory candidates, consistency review, quality gate, and author confirmation.
 
-Create at least:
+Before accepting a draft, check:
 
-- Protagonist
-- Ally or love interest
-- Antagonist or institutional pressure
+- Whether it continues the previous chapter.
+- Whether it completes the chapter task.
+- Whether Quality Gate or Consistency Review found high-risk issues.
+- Whether Novelty Audit flagged unauthorized new rules, characters, organizations, or mechanisms.
+- Whether Run Trace Author Summary points to missing context, weak task instructions, state ledger gaps, or model output.
 
-Focus on current dramatic state rather than encyclopedia biography. Fill the nine-card template where possible:
+Use the Revision Workbench for official edits. Right-click rewrite is for short text polishing only. Accepting a revision creates a versioned commit; it does not silently overwrite history.
 
-- Role function
-- Surface goal
-- Deep need
-- Core fear
-- Decision logic
-- Abilities and resources
-- Weakness and cost
-- Relationship tension
-- Future hooks
+### 5. Backup
 
-### 5. Add State Ledger Facts
-
-Add a few hard facts that can cause continuity bugs:
-
-- Current location
-- Injury or physical condition
-- Important inventory
-- Known secrets
-- Money or resource amount
-- Ability limitation
-
-These facts can be selected by the Context Need Planner and included in the prompt as hard constraints.
-
-### 6. Add Foreshadowing
-
-Create two or three foreshadowing entries first. Set a treatment mode:
-
-- `hint`: light signal only
-- `advance`: can move forward but not reveal the truth
-- `mislead`: can create a false lead
-- `payoff`: can reveal or resolve
-- `pause`: keep frozen
-- `hidden`: do not mention unless forced
-
-For early chapters, prefer `hint` or `pause`. Avoid `payoff` unless the chapter is meant to resolve that clue.
-
-### 7. Build the First Prompt
-
-Open Prompt Builder:
-
-1. Choose target chapter `1`.
-2. Choose mode `standard`.
-3. Generate or edit the Context Need Plan.
-4. Review selected characters, state facts, foreshadowing, and omitted context.
-5. Fill the chapter task fields.
-6. Generate the final prompt.
-7. Save a Prompt Context Snapshot if you want the pipeline to use exactly this context.
-
-### 8. Generate a Draft
-
-Open Generation Pipeline:
-
-1. Choose target chapter `1`.
-2. Choose automatic context or a saved Prompt Context Snapshot.
-3. Choose conservative or standard mode.
-4. Set expected word count and reader emotion.
-5. Start generation.
-
-The pipeline shows:
-
-- context planning
-- context budget selection
-- prompt construction
-- chapter plan
-- draft
-- chapter review
-- memory candidates
-- consistency review
-- quality gate
-- run trace
-
-Without an API key, AI calls should fail gracefully or use local templates where implemented.
-
-### 9. Review Before Accepting
-
-Before accepting a draft:
-
-- Read the draft.
-- Check quality gate and consistency review.
-- Check novelty audit for unapproved new rules, characters, or lore.
-- Check Run Trace to confirm what context was actually used.
-- Do not accept long-term memory candidates unless they are correct.
-
-### 10. Revise
-
-Open Revision Workbench:
-
-1. Select the chapter or draft.
-2. Choose a revision type such as reduce AI tone, strengthen conflict, improve continuity, or reduce redundancy.
-3. Generate a revision.
-4. Compare original, revised, and diff view.
-5. Accept only when satisfied.
-
-Accepting a revision saves the previous chapter body as a `ChapterVersion`.
-
-### 11. Export
-
-In Chapters, you can:
-
-- Copy body.
-- Copy title plus body.
-- Export one chapter as TXT or Markdown.
-- Export all chapters as TXT or Markdown.
-
-Exports are written through Electron IPC, not direct renderer file-system access.
+SQLite is the default local data store. Use JSON export/import for backup and migration. Never publish real project JSON or API keys.

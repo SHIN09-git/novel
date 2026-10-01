@@ -1,8 +1,9 @@
 #!/usr/bin/env node
 import { existsSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
+import { repoRoot } from './utils/repo-root.mjs'
 
-const root = process.cwd()
+const root = repoRoot
 const checks = []
 
 function read(path) {
@@ -18,17 +19,25 @@ const aiErrorsPath = 'src/main/utils/aiErrors.ts'
 const aiServicePath = 'src/main/services/AIService.ts'
 const aiHttpClientPath = 'src/main/services/AIHttpClient.ts'
 const ipcPath = 'src/main/ipc/registerIpcHandlers.ts'
+const aiIpcPath = 'src/main/ipc/aiIpcHandlers.ts'
+const aiChatValidationPath = 'src/main/ipc/aiChatValidation.ts'
+const appDataNormalizerPath = 'src/shared/normalizers/appData.ts'
 
 check('retry utility exists', existsSync(join(root, retryPath)))
 check('AI retry error utility exists', existsSync(join(root, aiErrorsPath)))
 check('main-process AI service exists', existsSync(join(root, aiServicePath)))
 check('main-process AI HTTP client exists', existsSync(join(root, aiHttpClientPath)))
+check('AI chat IPC handler exists', existsSync(join(root, aiIpcPath)))
+check('AI chat IPC validation helper exists', existsSync(join(root, aiChatValidationPath)))
 
 const retry = read(retryPath)
 const aiErrors = read(aiErrorsPath)
 const aiService = read(aiServicePath)
 const aiHttpClient = read(aiHttpClientPath)
 const ipc = read(ipcPath)
+const aiIpc = read(aiIpcPath)
+const aiChatValidation = read(aiChatValidationPath)
+const appDataNormalizer = read(appDataNormalizerPath)
 const types = `${read('src/shared/types.ts')}\n${read('src/shared/types/appData.ts')}`
 const defaults = `${read('src/shared/defaults.ts')}\n${read('src/shared/defaults/index.ts')}`
 const runner = read('scripts/run-tests.mjs')
@@ -39,7 +48,7 @@ check('retry initial delay defaults to 1000ms', /initialDelayMs \?\? 1000/.test(
 check('retry max delay defaults to 32000ms', /maxDelayMs \?\? 32_000/.test(retry))
 check('retry uses exponential backoff', /2 \*\* Math\.max/.test(retry))
 check('retry adds jitter', /Math\.random\(\)/.test(retry))
-check('retry logs or calls onRetry on each retry', /onRetry\?:/.test(retry) && /options\.onRetry/.test(retry) && /LogService\.warn/.test(retry))
+check('retry logs or calls onRetry on each retry', /onRetry\?:/.test(retry) && /options\.onRetry/.test(retry) && /console\.warn/.test(retry))
 check('retry supports shouldRetry predicate', /shouldRetry\?:/.test(retry) && /!shouldRetry\(error\)/.test(retry))
 
 check('AI HTTP error type carries status', /class AiHttpError/.test(aiErrors) && /readonly status: number/.test(aiErrors))
@@ -47,18 +56,31 @@ check('AI retry predicate retries 429 and 5xx transient statuses', /status === 4
 check('AI retry predicate does not retry client/request errors', /\[400, 401, 403, 413\]/.test(aiErrors))
 check('AI retry predicate recognizes transient network codes', /ECONNRESET/.test(aiErrors) && /ETIMEDOUT/.test(aiErrors) && /ENOTFOUND/.test(aiErrors))
 
-const aiHandler = ipc.slice(ipc.indexOf('IPC_CHANNELS.AI_CHAT_COMPLETION'))
 const aiServiceChatCompletion = aiService.slice(aiService.indexOf('async chatCompletion'))
 const limiterIndex = aiServiceChatCompletion.indexOf('await limiter.acquire()')
 const retryIndex = aiServiceChatCompletion.indexOf('retryWithBackoff')
 check('rate limiter still runs before retry wrapper in AIService', limiterIndex >= 0 && retryIndex > limiterIndex)
-check('AI handler delegates to AIService', /context\.aiService\.chatCompletion\(validateChatCompletionRequest\(request\)\)/.test(aiHandler))
-check('AIService wraps chat completion HTTP call with retryWithBackoff', /retryWithBackoff\(\s*\(\) => this\.performChatCompletion/.test(aiService))
+check('AI handler validates input and delegates to AIService',
+  aiIpc.includes('const validated = validateChatCompletionRequest(request)') &&
+  aiIpc.includes('aiService.chatCompletion(validateChatRequestCallId(request, validated))'))
+check('AI chat IPC is split out of registerIpcHandlers', /from '\.\/aiIpcHandlers'/.test(ipc) && /registerAiIpcHandlers\(context\.aiService\)/.test(ipc) && !/IPC_CHANNELS\.AI_CHAT_COMPLETION/.test(ipc))
+check('AI chat request validation is split out of registerIpcHandlers', /from '\.\/aiChatValidation'/.test(aiIpc) && !/const apiProviders = new Set/.test(ipc) && !/const chatMessageRoles = new Set/.test(ipc))
+check('AI chat validation helper owns provider and message validation', /const apiProviders = new Set/.test(aiChatValidation) && /const chatMessageRoles = new Set/.test(aiChatValidation) && /export function validateChatCompletionRequest/.test(aiChatValidation))
+check(
+  'AIService wraps chat completion HTTP call with retryWithBackoff',
+  /retryWithBackoff\([\s\S]*?this\.performChatCompletion\(/.test(aiService)
+)
 check('AIHttpClient preserves response_format fallback', /response_format\|json_object\|unsupported/.test(aiHttpClient) && /fallbackBody/.test(aiHttpClient))
 check('AI retry logs sanitized retry summaries', /AI request retry scheduled/.test(aiService) && /sanitizeAiErrorText\(describeAiRetryError/.test(aiService))
 
 check('AppSettings exposes retry controls', /retryEnabled: boolean/.test(types) && /maxRetries: number/.test(types))
 check('DEFAULT_SETTINGS enables retry with 3 attempts', /retryEnabled: true/.test(defaults) && /maxRetries: 3/.test(defaults))
+check('default AI hard timeout is five minutes', /requestTimeoutMs: 300_000/.test(defaults) && /settings\.requestTimeoutMs \|\| 300_000/.test(aiService))
+check(
+  'legacy two-minute defaults upgrade without replacing custom timeouts',
+  /LEGACY_DEFAULT_AI_TIMEOUT_MS = 120_000/.test(appDataNormalizer) &&
+    /value === LEGACY_DEFAULT_AI_TIMEOUT_MS \? DEFAULT_SETTINGS\.requestTimeoutMs : value/.test(appDataNormalizer)
+)
 check('npm test runs AI retry validation', /validate-ai-retry-backoff\.mjs/.test(runner))
 
 const failed = checks.filter((item) => !item.ok)

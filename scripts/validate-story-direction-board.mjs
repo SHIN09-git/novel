@@ -1,7 +1,8 @@
 import fs from 'node:fs'
 import path from 'node:path'
+import { repoRoot } from './utils/repo-root.mjs'
 
-const root = process.cwd()
+const root = repoRoot
 const read = (file) => fs.readFileSync(path.join(root, file), 'utf8')
 
 function assert(condition, message) {
@@ -33,13 +34,17 @@ const runner = [
   read('src/renderer/src/views/generation/usePipelineRunnerCore.ts'),
   read('src/renderer/src/views/generation/pipelineRunnerEngine.ts'),
   read('src/renderer/src/views/generation/pipelineSteps/contextPlanning.ts'),
+  read('src/renderer/src/views/generation/pipelineSteps/chapterPlanGeneration.ts'),
   read('src/renderer/src/views/generation/pipelineSteps/chapterGeneration.ts'),
   read('src/renderer/src/views/generation/pipelineUtils.ts')
 ].join('\n')
 const app = read('src/renderer/src/App.tsx')
 const navTypes = read('src/renderer/src/components/layoutParts/types.ts')
 const view = read('src/renderer/src/views/StoryDirectionView.tsx')
-const runTracePanel = read('src/renderer/src/views/generation/RunTracePanel.tsx')
+const runTracePanel = [
+  read('src/renderer/src/components/pipeline/PipelineTracePanel.tsx'),
+  read('src/renderer/src/views/generation/runTraceSummary.ts')
+].join('\n')
 
 assert(types.includes('export interface StoryDirectionGuide'), 'StoryDirectionGuide type exists')
 assert(types.includes('export interface StoryDirectionChapterBeat'), 'StoryDirectionChapterBeat type exists')
@@ -68,10 +73,18 @@ assert(promptBuilder.indexOf("id: 'story-direction-guide'") > promptBuilder.inde
 assert(promptBuilder.indexOf("id: 'story-direction-guide'") < promptBuilder.indexOf("id: 'current-progress'"), 'Story guide appears before current progress')
 
 assert(promptContext.includes('storyDirectionGuide?: StoryDirectionGuide | null'), 'promptContext accepts storyDirectionGuide')
-assert(promptContext.includes('storyDirectionGuide: storyDirectionGuide ?? null'), 'promptContext forwards storyDirectionGuide to PromptBuilder')
+assert(
+  promptContext.includes('storyDirectionGuide: isolateOpeningLegacyContext ? null : storyDirectionGuide ?? null'),
+  'promptContext forwards story direction for later chapters while isolating authoritative chapter 1'
+)
 
 assert(runner.includes('StoryDirectionService.getActiveGuideForChapter'), 'Pipeline selects active StoryDirectionGuide')
-assert(runner.includes('pipelineChapterTask(project, options, activeStoryDirectionGuide)'), 'Pipeline chapter task receives active guide')
+assert(
+  runner.includes('pipelineChapterTask(project, options, activeStoryDirectionGuide, job.chapterTaskSnapshot)') ||
+    runner.includes('pipelineChapterTask(env.project, options, activeStoryDirectionGuide, job.chapterTaskSnapshot)'),
+  'Pipeline chapter task receives active guide and the immutable task snapshot'
+)
+assert(runner.includes('if (chapterTaskSnapshot) return { ...chapterTaskSnapshot }'), 'Explicit job task overrides stale StoryDirection guidance')
 assert(runner.includes('storyDirectionPromptText: StoryDirectionService.formatForPrompt'), 'ContextNeedPlanner receives story direction prompt text')
 assert(runner.includes('storyDirectionTracePatch'), 'Pipeline writes story direction metadata into run trace')
 assert(runner.includes("job.contextSource === 'prompt_snapshot'") && runner.includes('activeStoryDirectionGuide'), 'Snapshot mode avoids automatic active guide application')

@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type {
   StoryDirectionChapterBeat,
   StoryDirectionGenerationResult,
@@ -6,13 +6,13 @@ import type {
   StoryDirectionGuideSource,
   StoryDirectionHorizon
 } from '../../../shared/types'
-import { AIService } from '../../../services/AIService'
 import { StoryDirectionService } from '../../../services/StoryDirectionService'
 import { EmptyState, NumberInput, TextArea, TextInput } from '../components/FormFields'
 import { Header } from '../components/Layout'
 import { newId, now } from '../utils/format'
-import { projectData } from '../utils/projectData'
+import { useProjectData } from '../hooks/useProjectData'
 import type { ProjectProps } from './viewTypes'
+import '../styles/views/story-direction.css'
 import { updateProjectTimestamp } from './viewTypes'
 
 function makeBeat(raw: Omit<StoryDirectionChapterBeat, 'id'>, index: number, startChapterOrder: number): StoryDirectionChapterBeat {
@@ -75,9 +75,9 @@ function guideFromResult(
 }
 
 export function StoryDirectionView({ data, project, saveData }: ProjectProps) {
-  const scoped = projectData(data, project.id)
-  const chapters = [...scoped.chapters].sort((a, b) => a.order - b.order)
-  const stageSummaries = [...scoped.stageSummaries].sort((a, b) => a.chapterStart - b.chapterStart)
+  const scoped = useProjectData(data, project.id)
+  const chapters = useMemo(() => [...scoped.chapters].sort((a, b) => a.order - b.order), [scoped.chapters])
+  const stageSummaries = useMemo(() => [...scoped.stageSummaries].sort((a, b) => a.chapterStart - b.chapterStart), [scoped.stageSummaries])
   const latestChapterOrder = chapters.at(-1)?.order ?? 0
   const [userRawIdea, setUserRawIdea] = useState('')
   const [userPolishedIdea, setUserPolishedIdea] = useState('')
@@ -87,13 +87,30 @@ export function StoryDirectionView({ data, project, saveData }: ProjectProps) {
   const [draftGuide, setDraftGuide] = useState<StoryDirectionGuide | null>(activeGuide)
   const [message, setMessage] = useState('')
   const [isBusy, setIsBusy] = useState(false)
-  const aiService = useMemo(() => new AIService(data.settings), [data.settings])
+  const previousProjectIdRef = useRef(project.id)
+  const getAiService = useCallback(async () => {
+    const { AIService } = await import('../../../services/AIService')
+    return new AIService(data.settings)
+  }, [data.settings])
   const stageReview = StoryDirectionService.formatStageSummaryReview(stageSummaries)
+
+  useEffect(() => {
+    if (previousProjectIdRef.current === project.id) return
+    previousProjectIdRef.current = project.id
+    const nextStartChapterOrder = latestChapterOrder + 1 || 1
+    setUserRawIdea('')
+    setUserPolishedIdea('')
+    setHorizon(5)
+    setStartChapterOrder(nextStartChapterOrder)
+    setDraftGuide(StoryDirectionService.getActiveGuideForChapter(data.storyDirectionGuides ?? [], project.id, nextStartChapterOrder))
+    setMessage('')
+  }, [data.storyDirectionGuides, latestChapterOrder, project.id])
 
   async function polishIdea() {
     setIsBusy(true)
     setMessage('')
     try {
+      const aiService = await getAiService()
       const result = await aiService.polishStoryDirectionIdea({
         userRawIdea,
         project,
@@ -114,6 +131,7 @@ export function StoryDirectionView({ data, project, saveData }: ProjectProps) {
     setIsBusy(true)
     setMessage('')
     try {
+      const aiService = await getAiService()
       const recentChapters = chapters.slice(-6)
       const result = await aiService.generateStoryDirectionGuide({
         project,
@@ -154,7 +172,7 @@ export function StoryDirectionView({ data, project, saveData }: ProjectProps) {
     if (!draftGuide) return
     const timestamp = now()
     const guide: StoryDirectionGuide = { ...draftGuide, status, updatedAt: timestamp }
-    await saveData((current) => ({
+    const saved = await saveData((current) => ({
       ...current,
       projects: updateProjectTimestamp(current, project.id),
       storyDirectionGuides: [
@@ -164,6 +182,7 @@ export function StoryDirectionView({ data, project, saveData }: ProjectProps) {
           .map((item) => (status === 'active' && item.projectId === project.id && item.status === 'active' ? { ...item, status: 'archived' as const, updatedAt: timestamp } : item))
       ]
     }))
+    if (!saved.ok) return
     setDraftGuide(guide)
     setMessage(status === 'active' ? '已设为当前剧情导向，后续正文生成会读取它。' : '已保存剧情导向草稿。')
   }
@@ -171,13 +190,14 @@ export function StoryDirectionView({ data, project, saveData }: ProjectProps) {
   async function archiveActiveGuide() {
     if (!activeGuide) return
     const timestamp = now()
-    await saveData((current) => ({
+    const saved = await saveData((current) => ({
       ...current,
       projects: updateProjectTimestamp(current, project.id),
       storyDirectionGuides: current.storyDirectionGuides.map((guide) =>
         guide.id === activeGuide.id ? { ...guide, status: 'archived', updatedAt: timestamp } : guide
       )
     }))
+    if (!saved.ok) return
     if (draftGuide?.id === activeGuide.id) setDraftGuide({ ...activeGuide, status: 'archived', updatedAt: timestamp })
     setMessage('已归档当前剧情导向。')
   }

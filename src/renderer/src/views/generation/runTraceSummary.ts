@@ -5,12 +5,17 @@ export function buildRunTraceSummary(
   consistencyReport: ConsistencyReviewReport | null,
   qualityReport: QualityGateReport | null
 ) {
+  const composition = trace.promptCompositionMetrics
   return {
     id: trace.id,
     jobId: trace.jobId,
     targetChapterOrder: trace.targetChapterOrder,
     contextSource: trace.contextSource,
     promptContextSnapshotId: trace.promptContextSnapshotId,
+    pipelineRecipeId: trace.pipelineRecipeId,
+    pipelineRecipeVersion: trace.pipelineRecipeVersion,
+    pipelineRecipeExplanation: trace.pipelineRecipeExplanation,
+    aiCalls: trace.aiCalls ?? [],
     selectedCounts: {
       chapters: trace.selectedChapterIds.length,
       stageSummaries: trace.selectedStageSummaryIds.length,
@@ -43,6 +48,23 @@ export function buildRunTraceSummary(
     compressionRecords: trace.compressionRecords,
     promptBlockOrder: trace.promptBlockOrder,
     finalPromptTokenEstimate: trace.finalPromptTokenEstimate,
+    promptCompositionMetrics: composition
+      ? {
+          totalTokenEstimate: composition.totalTokenEstimate,
+          attributedTokenEstimate: composition.attributedTokenEstimate,
+          unattributedTokenEstimate: composition.unattributedTokenEstimate,
+          categoryTokenEstimates: composition.categoryTokenEstimates,
+          categoryShares: composition.categoryShares,
+          blockMetrics: composition.blockMetrics,
+          constraintLineCount: composition.constraintLineCount,
+          reviewToneLineCount: composition.reviewToneLineCount,
+          alertCounts: {
+            repeatedSentences: composition.repeatedSentences.length,
+            similarConstraints: composition.similarConstraints.length
+          },
+          summary: composition.summary
+        }
+      : null,
     generatedDraftId: trace.generatedDraftId,
     continuityBridgeId: trace.continuityBridgeId,
     continuitySource: trace.continuitySource,

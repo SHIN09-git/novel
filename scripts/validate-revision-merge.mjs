@@ -2,8 +2,9 @@ import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import { pathToFileURL } from 'node:url'
 import { join, resolve } from 'node:path'
 import ts from 'typescript'
+import { repoRoot } from './utils/repo-root.mjs'
 
-const root = resolve('.')
+const root = repoRoot
 const sourcePath = join(root, 'src', 'renderer', 'src', 'utils', 'revisionMerge.ts')
 const outDir = join(root, 'tmp', 'revision-merge-test')
 const outPath = join(outDir, 'revisionMerge.mjs')

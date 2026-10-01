@@ -1,15 +1,21 @@
 import type { AIResult, AppSettings } from '../../shared/types'
+import type { CancelAiCallResult } from '../../shared/ipc/ipcTypes'
 import { normalizeAIError, parseWithFallback } from '../AIJsonParser'
 import { fallbackResult, isTruncatedFinishReason } from './AIResponseNormalizer'
 import { formatSchemaValidationError, type AISchemaValidator } from './AISchemaValidator'
-import type { AIJsonClient } from './AIJsonClient'
+import type { AIJsonClient, AIRequestControl } from './AIJsonClient'
+import { createRendererAITransport, type AIChatCompletionTransport } from './AITransport'
 
 export class AIClient implements AIJsonClient {
-  constructor(private readonly settings?: AppSettings) {}
+  constructor(
+    private readonly settings?: AppSettings,
+    private readonly transport: AIChatCompletionTransport = createRendererAITransport(),
+    private readonly runId?: string
+  ) {}
 
   private hasApiConfig(): boolean {
     if (!this.settings) return false
-    return this.settings.apiProvider === 'local' || this.settings.hasApiKey
+    return this.settings.apiProvider === 'local' || this.settings.apiProvider === 'codex_cli' || this.settings.hasApiKey
   }
 
   async requestJson<T>(
@@ -18,21 +24,18 @@ export class AIClient implements AIJsonClient {
     normalize: (value: unknown) => T,
     fallback: T,
     parseFallback?: (rawText: string) => T | null,
-    validate?: AISchemaValidator
+    validate?: AISchemaValidator,
+    requestControl?: AIRequestControl
   ): Promise<AIResult<T>> {
     if (!this.settings || !this.hasApiConfig()) {
       return fallbackResult(fallback)
     }
 
     try {
-      const bridge = window.novelDirector
-      if (!bridge?.ai?.chatCompletion) {
-        return { ok: false, usedAI: true, data: null, error: 'AI 桥接未加载，请重新启动应用或检查安装包。' }
-      }
-
-      // Validation anchor: this is the single renderer-side call site for window.novelDirector.ai.chatCompletion.
-      const response = await bridge.ai.chatCompletion({
+      const response = await this.transport.chatCompletion({
         settings: this.settings,
+        runId: requestControl?.runId ?? this.runId,
+        clientCallId: requestControl?.clientCallId,
         messages: [
           { role: 'system', content: systemPrompt },
           { role: 'user', content: userPrompt }
@@ -40,7 +43,13 @@ export class AIClient implements AIJsonClient {
       })
 
       if (!response.ok || !response.content) {
-        return { ok: false, usedAI: true, data: null, error: response.error || 'AI 调用失败。' }
+        return {
+          ok: false,
+          usedAI: true,
+          data: null,
+          error: response.error || 'AI 调用失败。',
+          telemetry: response.telemetry
+        }
       }
 
       if (isTruncatedFinishReason(response.finishReason)) {
@@ -50,6 +59,7 @@ export class AIClient implements AIJsonClient {
           data: null,
           rawText: response.content,
           finishReason: response.finishReason,
+          telemetry: response.telemetry,
           error: 'AI 输出被 max tokens 截断。请提高设置页 Max Tokens，或降低章节预计字数后重试。'
         }
       }
@@ -65,7 +75,8 @@ export class AIClient implements AIJsonClient {
           usedAI: true,
           data: normalize(parsed.data),
           rawText: response.content,
-          finishReason: response.finishReason
+          finishReason: response.finishReason,
+          telemetry: response.telemetry
         }
       } catch (error) {
         const fallbackData = parseFallback?.(response.content)
@@ -76,6 +87,7 @@ export class AIClient implements AIJsonClient {
             data: fallbackData,
             rawText: response.content,
             finishReason: response.finishReason,
+            telemetry: response.telemetry,
             parseError: normalizeAIError(error),
             error: 'AI 没有返回严格 JSON，已将原始正文保留为章节草稿。'
           }
@@ -87,6 +99,7 @@ export class AIClient implements AIJsonClient {
           data: null,
           rawText: response.content,
           finishReason: response.finishReason,
+          telemetry: response.telemetry,
           parseError: normalizedError,
           error: normalizedError.startsWith('AI 返回结构不符合') ? normalizedError : '解析失败，可手动复制原始返回。'
         }
@@ -94,5 +107,10 @@ export class AIClient implements AIJsonClient {
     } catch (error) {
       return { ok: false, usedAI: true, data: null, error: normalizeAIError(error) }
     }
+  }
+
+  async cancelCall(runId: string, callId: string): Promise<CancelAiCallResult> {
+    if (!this.transport.cancelCall) return { ok: true, cancelled: false }
+    return this.transport.cancelCall(runId, callId)
   }
 }

@@ -1,11 +1,14 @@
 import type { AppData, ID, Project } from '../../../shared/types'
-import type { SaveDataInput } from '../hooks/useAppData'
+import type { ImportDataResult, ImportDataStrategy } from '../../../shared/ipc/ipcTypes'
+import type { SaveDataHandler } from '../utils/saveDataState'
 import { now } from '../utils/format'
 
 export interface PersistProps {
   data: AppData
-  saveData: (next: SaveDataInput) => Promise<void>
+  saveData: SaveDataHandler
 }
+
+export type ImportDataHandler = (strategy: ImportDataStrategy) => Promise<ImportDataResult>
 
 export interface ProjectProps extends PersistProps {
   project: Project

@@ -13,13 +13,21 @@ import type {
   GenerationRunTrace,
   ID,
   NoveltyAuditResult,
+  PipelineAIRole,
   PipelineMode,
   PlanContextGapAnalysisResult,
   Project,
   PromptContextSnapshot,
-  StoryDirectionGuide
+  StoryDirectionGuide,
+  AppSettings
 } from '../../../../shared/types'
+import type {
+  DiagnosticsAnalyzeRedundancyRequest,
+  DiagnosticsAuditNoveltyRequest,
+  DiagnosticsEvaluateQualityGateRequest
+} from '../../../../shared/ipc/ipcTypes'
 import type { AIService } from '../../../../services/AIService'
+import type { PipelineStepSkipReason } from '../../../../services/PipelineRecipeService'
 
 export interface PipelineRunOptions {
   targetChapterOrder: number
@@ -31,6 +39,8 @@ export interface PipelineRunOptions {
 }
 
 export type PersistPipelineWorking = (next: AppData, jobId?: ID, statusMessage?: string) => Promise<AppData>
+export type GetPipelineAiService = (role: PipelineAIRole) => Promise<AIService>
+export type GetPipelineAiSettings = (role: PipelineAIRole) => AppSettings
 
 export type UpdateStepInData = (
   working: AppData,
@@ -38,6 +48,12 @@ export type UpdateStepInData = (
   patch: Partial<ChapterGenerationStep>,
   jobPatch?: Partial<ChapterGenerationJob>
 ) => AppData
+
+export interface PipelineDiagnosticsAdapter {
+  analyzeRedundancy(request: DiagnosticsAnalyzeRedundancyRequest): Promise<AppData['redundancyReports'][number]>
+  auditNovelty(request: DiagnosticsAuditNoveltyRequest): Promise<NoveltyAuditResult>
+  evaluateQualityGate(request: DiagnosticsEvaluateQualityGateRequest): Promise<AppData['qualityGateReports'][number]>
+}
 
 export interface RunPipelineFromStepEngineEnv {
   data: AppData
@@ -58,7 +74,12 @@ export interface RunPipelineFromStepEngineEnv {
   readerEmotionTarget: string
   budgetMode: ContextBudgetMode
   budgetMaxTokens: number
-  aiService: AIService
+  getAiService: GetPipelineAiService
+  getAiSettings: GetPipelineAiSettings
+  aiSettings: AppSettings
+  runId: ID
+  diagnostics?: PipelineDiagnosticsAdapter
+  shouldCancel?: () => boolean | Promise<boolean>
   persistWorking: PersistPipelineWorking
   updateStepInData: UpdateStepInData
 }
@@ -76,6 +97,7 @@ export interface PipelineRunnerState {
   contextNeedPlan: ContextNeedPlan | null
   budgetProfile: ContextBudgetProfile
   budgetSelection: ContextSelectionResult | null
+  recipeSkipReasons: PipelineStepSkipReason[]
 }
 
 export interface PipelineStepHandlerContext {

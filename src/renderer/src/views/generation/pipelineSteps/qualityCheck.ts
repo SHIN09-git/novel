@@ -1,48 +1,59 @@
 import type { ConsistencyReviewReport } from '../../../../../shared/types'
-import { newId, now } from '../../../utils/format'
+import { now } from '../../../utils/format'
 import { auditNoveltyDiagnostic, evaluateQualityGateDiagnostic } from '../../../utils/diagnosticsApi'
-import { upsertGenerationRunTrace } from '../../../utils/runTrace'
-import { serializeOutput } from '../pipelineUtils'
+import {
+  bindNoveltyAuditToDraft,
+  draftContentHash,
+  latestConsistencyReportsForDraft,
+  latestRedundancyReportForDraft,
+  noveltyAuditMatchesDraft
+} from '../../../../../services/DraftDiagnosticBindingService'
+import { deriveConsistencyReviewFromQualityGate } from '../../../../../services/CombinedSemanticReviewService'
+import { PipelineRecipeService } from '../../../../../services/PipelineRecipeService'
+import { appendGenerationRunTraceAiCall, upsertGenerationRunTrace } from '../../../utils/runTrace'
+import { noveltyReferenceContext, serializeOutput } from '../pipelineUtils'
 import type { PipelineStepHandlerContext } from '../pipelineRunnerTypes'
-
-export async function runConsistencyReviewStep(ctx: PipelineStepHandlerContext) {
-  const { env, state, job, step } = ctx
-  const { project, aiService, updateStepInData } = env
-  if (!state.draftResult) throw new Error('缺少章节正文草稿，无法审稿')
-  const result = await aiService.generateConsistencyReview(state.draftResult, state.context)
-  if (!result.data) throw new Error(result.error || result.parseError || '一致性审稿失败')
-  const report: ConsistencyReviewReport = {
-    id: newId(),
-    projectId: project.id,
-    jobId: job.id,
-    chapterId: null,
-    promptContextSnapshotId: job.promptContextSnapshotId ?? null,
-    issues: result.data.issues,
-    legacyIssuesText: '',
-    suggestions: result.data.suggestions.join('\n'),
-    severitySummary: result.data.severitySummary,
-    createdAt: now()
-  }
-  state.working = {
-    ...updateStepInData(state.working, step.id, { status: 'completed', output: serializeOutput(result.data) }),
-    consistencyReviewReports: [report, ...state.working.consistencyReviewReports]
-  }
-  state.working = upsertGenerationRunTrace(state.working, job, { consistencyReviewReportId: report.id })
-}
+import { finalizeEditorialVerdict } from '../pipelineEditorialVerdict'
 
 export async function runQualityGateStep(ctx: PipelineStepHandlerContext) {
   const { env, state, job, step } = ctx
-  const { project, aiService, updateStepInData } = env
+  const { project, updateStepInData } = env
   if (!state.draftResult) throw new Error('缺少章节正文草稿，无法执行质量门禁')
+  const currentDraft = state.draftRecord
+  const currentBody = (currentDraft ?? state.draftResult).body
+  const auditNovelty = env.diagnostics?.auditNovelty ?? auditNoveltyDiagnostic
+  const evaluateQualityGate = env.diagnostics?.evaluateQualityGate ?? evaluateQualityGateDiagnostic
   state.noveltyAuditResult =
-    state.noveltyAuditResult ??
-    await auditNoveltyDiagnostic({
-      generatedText: (state.draftRecord ?? state.draftResult).body,
+    currentDraft && noveltyAuditMatchesDraft(state.noveltyAuditResult, currentDraft)
+      ? state.noveltyAuditResult
+      : bindNoveltyAuditToDraft(await auditNovelty({
+      generatedText: currentBody,
       context: state.context,
-      chapterPlan: state.plan
+      chapterPlan: state.plan,
+      project,
+      ...noveltyReferenceContext(state.working, project.id)
+    }), currentDraft ?? {
+      id: `transient:${job.id}`,
+      projectId: project.id,
+      chapterId: null,
+      jobId: job.id,
+      title: state.draftResult.title,
+      body: currentBody,
+      summary: '',
+      status: 'draft',
+      tokenEstimate: 0,
+      createdAt: now(),
+      updatedAt: now()
     })
-  const report = await evaluateQualityGateDiagnostic({
-    settings: env.data.settings,
+  const latestConsistencyReports = currentDraft
+    ? latestConsistencyReportsForDraft(state.working.consistencyReviewReports.filter((item) => item.jobId === job.id), currentDraft).slice(0, 1)
+    : []
+  const currentRedundancyReport = currentDraft
+    ? latestRedundancyReportForDraft(state.working.redundancyReports.filter((item) => item.jobId === job.id), currentDraft)
+    : null
+  let report = await evaluateQualityGate({
+    settings: env.getAiSettings('reviewer'),
+    runId: env.runId,
     projectId: project.id,
     jobId: job.id,
     chapterId: state.draftRecord?.chapterId ?? null,
@@ -50,15 +61,54 @@ export async function runQualityGateStep(ctx: PipelineStepHandlerContext) {
     chapterDraft: state.draftRecord ?? state.draftResult,
     context: state.context,
     chapterPlan: state.plan,
-    consistencyReports: state.working.consistencyReviewReports.filter((item) => item.jobId === job.id),
+    consistencyReports: latestConsistencyReports,
+    noveltyAuditResult: state.noveltyAuditResult,
+    redundancyReport: currentRedundancyReport,
+    characterStateFacts: state.working.characterStateFacts.filter((fact) => fact.projectId === project.id),
+    characters: env.scoped.characters,
     promptContextSnapshotId: job.promptContextSnapshotId ?? null,
-    contextSource: job.contextSource
+    contextSource: job.contextSource,
+    targetChapterOrder: job.targetChapterOrder,
+    hasAuthoritativeChapterTask: Boolean(job.chapterTaskSnapshot),
+    chapterTask: job.chapterTaskSnapshot ?? null
   })
+  state.working = appendGenerationRunTraceAiCall(
+    state.working,
+    job.id,
+    step,
+    'reviewer',
+    report.aiTelemetry,
+    report.aiTelemetry?.terminationCategory === 'timeout' || report.aiTelemetry?.terminationCategory === 'cancelled'
+      ? 'failed'
+      : 'success'
+  )
+  let combinedConsistencyReport: ConsistencyReviewReport | null = null
+  const recipe = PipelineRecipeService.resolveRecipe(
+    job.pipelineRecipe ?? job.pipelineRecipeId ?? job.pipelineMode,
+    job.pipelineMode ?? ctx.options.pipelineMode
+  )
+  if (recipe.id === 'standard' && currentDraft) {
+    const combined = deriveConsistencyReviewFromQualityGate(report, currentDraft)
+    report = combined.qualityGateReport
+    combinedConsistencyReport = combined.consistencyReviewReport
+  }
   state.working = {
     ...updateStepInData(state.working, step.id, { status: 'completed', output: serializeOutput(report) }),
-    qualityGateReports: [report, ...state.working.qualityGateReports]
+    qualityGateReports: [report, ...state.working.qualityGateReports.filter((item) => item.id !== report.id)],
+    consistencyReviewReports: combinedConsistencyReport
+      ? [
+          combinedConsistencyReport,
+          ...state.working.consistencyReviewReports.filter((item) => item.id !== combinedConsistencyReport?.id)
+        ]
+      : state.working.consistencyReviewReports
   }
-  state.working = upsertGenerationRunTrace(state.working, job, { qualityGateReportId: report.id, noveltyAuditResult: state.noveltyAuditResult })
+  state.working = upsertGenerationRunTrace(state.working, job, {
+    qualityGateReportId: report.id,
+    consistencyReviewReportId: combinedConsistencyReport?.id,
+    noveltyAuditResult: state.noveltyAuditResult
+  })
+
+  if (currentDraft) finalizeEditorialVerdict(ctx, currentDraft)
 }
 
 export function runAwaitUserConfirmationStep(ctx: PipelineStepHandlerContext) {

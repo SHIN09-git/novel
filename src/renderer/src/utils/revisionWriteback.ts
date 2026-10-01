@@ -1,4 +1,6 @@
 import type { AppData, Chapter, ChapterVersion, GeneratedChapterDraft, ID, RevisionVersion } from '../../../shared/types'
+import { invalidateDraftDiagnosticsAfterChange } from '../../../services/DraftDiagnosticBindingService'
+import { assertRevisionSourceMatches } from '../../../services/RevisionSourceBindingService'
 
 export type RevisionWritebackSource =
   | { kind: 'chapter'; chapter: Chapter }
@@ -53,6 +55,8 @@ export function applyAcceptedRevisionWriteback(
   version: RevisionVersion,
   timestamp: string
 ): RevisionWritebackResult {
+  assertRevisionSourceMatches(version, source.kind === 'draft' ? source.draft.body : source.chapter.body,
+    source.kind === 'draft' ? source.linkedChapter?.body : source.chapter.body)
   const base = acceptRevisionMetadata(
     {
       ...data,
@@ -79,29 +83,30 @@ export function applyAcceptedRevisionWriteback(
     }
   }
 
-  const nextDrafts = base.generatedChapterDrafts.map((draft) =>
-    draft.id === source.draft.id
-      ? { ...draft, body: version.body, status: 'accepted' as const, updatedAt: timestamp }
+  const invalidated = invalidateDraftDiagnosticsAfterChange(base, source.draft.id, version.body, timestamp)
+  const nextDrafts = invalidated.generatedChapterDrafts.map((draft) =>
+    draft.id === source.draft.id && draft.projectId === projectId
+      ? { ...draft, body: version.body, status: source.linkedChapter ? 'accepted' as const : 'draft' as const, updatedAt: timestamp }
       : draft
   )
 
   if (!source.linkedChapter) {
     return {
       data: {
-        ...base,
+        ...invalidated,
         generatedChapterDrafts: nextDrafts
       },
       wroteChapter: false,
       updatedDraftId: source.draft.id,
       createdChapterVersion: false,
-      message: '已接受修订版本并更新草稿；该草稿尚未关联章节，请先在流水线中接受/创建章节后再写入正文。'
+      message: '修订已应用到草稿，尚未正式采纳为章节。请返回流水线重新审稿后接受。'
     }
   }
 
   const snapshot = chapterSnapshot(projectId, source.linkedChapter, version, timestamp)
   return {
     data: {
-      ...base,
+      ...invalidated,
       generatedChapterDrafts: nextDrafts,
       chapters: base.chapters.map((chapter) =>
         chapter.id === source.linkedChapter?.id ? { ...chapter, body: version.body, updatedAt: timestamp } : chapter

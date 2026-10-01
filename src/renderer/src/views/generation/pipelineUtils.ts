@@ -1,66 +1,28 @@
 import type {
-  ChapterGenerationStepType,
+  AppData,
   ChapterTask,
-  CharacterStateFact,
-  ContextBudgetMode,
-  ContextNeedPlan,
-  ContextSelectionTrace,
   ID,
   NoveltyAuditResult,
-  PipelineMode,
   Project,
   PromptContextSnapshot,
   StoryDirectionGuide
 } from '../../../../shared/types'
+import { collectNoveltyReviewFindings } from '../../../../shared/noveltyReview'
 import { safeParseJson } from '../../../../services/AIJsonParser'
+import { ChapterTaskContractService } from '../../../../services/ChapterTaskContractService'
 import { TokenEstimator } from '../../../../services/TokenEstimator'
 import { StoryDirectionService } from '../../../../services/StoryDirectionService'
-
-export const PIPELINE_STEP_ORDER: ChapterGenerationStepType[] = [
-  'context_need_planning',
-  'context_budget_selection',
-  'build_context',
-  'generate_chapter_plan',
-  'context_need_planning_from_plan',
-  'context_budget_selection_delta',
-  'rebuild_context_with_plan',
-  'generate_chapter_draft',
-  'generate_chapter_review',
-  'propose_character_updates',
-  'propose_foreshadowing_updates',
-  'consistency_review',
-  'quality_gate',
-  'await_user_confirmation'
-]
-
-export const PIPELINE_STEP_LABELS: Record<ChapterGenerationStepType, string> = {
-  context_need_planning: '上下文需求规划',
-  context_budget_selection: '上下文预算选择',
-  build_context: '构建上下文',
-  generate_chapter_plan: '生成任务书',
-  context_need_planning_from_plan: '计划后需求补全',
-  context_budget_selection_delta: '补选上下文',
-  rebuild_context_with_plan: '重建计划上下文',
-  generate_chapter_draft: '生成正文',
-  generate_chapter_review: '复盘章节',
-  propose_character_updates: '提取角色更新',
-  propose_foreshadowing_updates: '提取伏笔更新',
-  consistency_review: '一致性审稿',
-  quality_gate: '质量门禁',
-  await_user_confirmation: '等待确认'
-}
-
-export function serializeOutput(value: unknown): string {
-  return typeof value === 'string' ? value : JSON.stringify(value, null, 2)
-}
-
-export function parseOutput<T>(value: string, fallback: T): T {
-  if (!value.trim()) return fallback
-  const parsed = safeParseJson<T>(value, '流水线步骤输出')
-  return parsed.ok ? parsed.data : fallback
-}
-
+import { PipelineRecipeService } from '../../../../services/PipelineRecipeService'
+import { normalizePipelineOptions } from './pipelineRuntimeBasics'
+export { PIPELINE_STEP_LABELS, PIPELINE_STEP_ORDER, canSkipPipelineStep } from './pipelineStepDefinitions'
+export { normalizePipelineOptions, parseOutput, serializeOutput } from './pipelineRuntimeBasics'
+export {
+  characterStateFactsPresentInPrompt,
+  enrichContextSelectionTrace,
+  hardCanonTraceFromPrompt
+} from './contextSelectionTraceRuntime'
 export function pipelineContextFromStepOutput(output: string): string {
+  if (PipelineRecipeService.isSkipOutput(output)) return ''
   const parsed = safeParseJson<{ finalPrompt?: string; context?: string; contextSource?: string }>(output, '流水线上下文输出')
   if (parsed.ok && typeof parsed.data.finalPrompt === 'string' && parsed.data.finalPrompt.trim()) return parsed.data.finalPrompt
   if (parsed.ok && typeof parsed.data.context === 'string' && parsed.data.context.trim()) return parsed.data.context
@@ -76,100 +38,19 @@ export function diffIds(next: ID[] = [], previous: ID[] = []): ID[] {
   return uniqueIds(next.filter((id) => !previousSet.has(id)))
 }
 
-export function enrichContextSelectionTrace(
-  baseTrace: ContextSelectionTrace | null | undefined,
-  args: {
-    jobId: ID
-    contextNeedPlan: ContextNeedPlan | null
-    includedCharacterStateFacts: CharacterStateFact[]
-    hardCanonTrace: { itemCount: number; tokenEstimate: number; includedItemIds: ID[]; truncatedItemIds: ID[] }
-    finalPromptTokenEstimate: number
-  }
-): ContextSelectionTrace | null {
-  if (!baseTrace) return null
-  const selectedBlocks = [...baseTrace.selectedBlocks]
-  const droppedBlocks = [...baseTrace.droppedBlocks]
-  const unmetNeeds = [...baseTrace.unmetNeeds]
-
-  for (const fact of args.includedCharacterStateFacts) {
-    selectedBlocks.push({
-      blockType: 'character_state_fact',
-      sourceId: fact.id,
-      priority: fact.trackingLevel === 'hard' ? 'must' : 'high',
-      tokenEstimate: TokenEstimator.estimate([fact.label, fact.value, fact.evidence].filter(Boolean).join('\n')),
-      reason: `角色状态账本事实「${fact.label || fact.key}」进入 prompt，约束本章连续性。`
-    })
-  }
-
-  const hardCanonToken = args.hardCanonTrace.includedItemIds.length
-    ? Math.max(1, Math.round(args.hardCanonTrace.tokenEstimate / args.hardCanonTrace.includedItemIds.length))
-    : 0
-  for (const itemId of args.hardCanonTrace.includedItemIds) {
-    const needReason = args.contextNeedPlan?.contextNeeds.find((need) => need.sourceHint === 'hardCanon' && need.sourceId === itemId)?.reason
-    selectedBlocks.push({
-      blockType: 'hard_canon',
-      sourceId: itemId,
-      priority: 'must',
-      tokenEstimate: hardCanonToken,
-      reason: needReason
-        ? `HardCanonPack 条目进入 prompt，作为不可违背硬设定。需求理由：${needReason}`
-        : 'HardCanonPack 条目进入 prompt，作为不可违背硬设定。'
-    })
-  }
-  for (const itemId of args.hardCanonTrace.truncatedItemIds) {
-    const needReason = args.contextNeedPlan?.contextNeeds.find((need) => need.sourceHint === 'hardCanon' && need.sourceId === itemId)?.reason
-    droppedBlocks.push({
-      blockType: 'hard_canon',
-      sourceId: itemId,
-      priority: 'must',
-      tokenEstimate: hardCanonToken,
-      dropReason: needReason
-        ? `HardCanonPack 超出预算，被压缩或截断。未满足需求：${needReason}`
-        : 'HardCanonPack 超出预算，被压缩或截断。'
-    })
-    unmetNeeds.push({
-      needType: 'hard_canon',
-      priority: 'must',
-      reason: 'HardCanonPack 有 must/high 条目未完整进入 prompt。',
-      sourceId: itemId
-    })
-  }
-
-  const factsByCharacterId = new Set(args.includedCharacterStateFacts.map((fact) => fact.characterId))
-  for (const [characterId, categories] of Object.entries(args.contextNeedPlan?.requiredStateFactCategories ?? {})) {
-    if (categories.length > 0 && !factsByCharacterId.has(characterId)) {
-      unmetNeeds.push({
-        needType: 'character_state',
-        priority: 'must',
-        reason: `本章需求计划要求角色状态类别 ${categories.join(', ')}，但 prompt 未找到匹配状态事实。`,
-        sourceId: characterId
-      })
-    }
-  }
-
-  const seenUnmet = new Set<string>()
+export function noveltyReferenceContext(data: AppData, projectId: ID): {
+  knownCharacterNames: string[]
+  knownForeshadowingTexts: string[]
+  knownCanonTexts: string[]
+} {
   return {
-    ...baseTrace,
-    jobId: args.jobId,
-    selectedBlocks,
-    droppedBlocks,
-    unmetNeeds: unmetNeeds.filter((item) => {
-      const key = `${item.needType}:${item.sourceId ?? ''}:${item.priority}`
-      if (seenUnmet.has(key)) return false
-      seenUnmet.add(key)
-      return true
-    }),
-    budgetSummary: {
-      ...baseTrace.budgetSummary,
-      usedTokens: args.finalPromptTokenEstimate,
-      reservedTokens: Math.max(0, baseTrace.budgetSummary.totalBudget - args.finalPromptTokenEstimate),
-      pressure:
-        args.finalPromptTokenEstimate >= baseTrace.budgetSummary.totalBudget * 0.9 || droppedBlocks.length >= 12
-          ? 'high'
-          : args.finalPromptTokenEstimate >= baseTrace.budgetSummary.totalBudget * 0.7 || droppedBlocks.length >= 4
-            ? 'medium'
-            : 'low'
-    }
+    knownCharacterNames: data.characters.filter((item) => item.projectId === projectId).map((item) => item.name).filter(Boolean),
+    knownForeshadowingTexts: data.foreshadowings
+      .filter((item) => item.projectId === projectId)
+      .map((item) => [item.title, item.description, item.expectedPayoff].filter(Boolean).join(' ')),
+    knownCanonTexts: data.hardCanonPacks
+      .filter((pack) => pack.projectId === projectId)
+      .flatMap((pack) => pack.items.filter((item) => item.status === 'active').map((item) => `${item.title} ${item.content}`))
   }
 }
 
@@ -190,39 +71,13 @@ export function summarizeSnapshot(snapshot: PromptContextSnapshot) {
   }
 }
 
-export function normalizePipelineOptions(
-  options: Partial<{
-    targetChapterOrder: number
-    pipelineMode: PipelineMode
-    estimatedWordCount: string
-    readerEmotionTarget: string
-    budgetMode: ContextBudgetMode
-    budgetMaxTokens: number
-  }>,
-  fallback: {
-    targetChapterOrder: number
-    pipelineMode: PipelineMode
-    estimatedWordCount: string
-    readerEmotionTarget: string
-    budgetMode: ContextBudgetMode
-    budgetMaxTokens: number
-  }
-) {
-  return {
-    targetChapterOrder: Number.isFinite(options.targetChapterOrder) ? Number(options.targetChapterOrder) : fallback.targetChapterOrder,
-    pipelineMode: options.pipelineMode ?? fallback.pipelineMode,
-    estimatedWordCount: options.estimatedWordCount || fallback.estimatedWordCount,
-    readerEmotionTarget: options.readerEmotionTarget || fallback.readerEmotionTarget,
-    budgetMode: options.budgetMode ?? fallback.budgetMode,
-    budgetMaxTokens: Number.isFinite(options.budgetMaxTokens) ? Number(options.budgetMaxTokens) : fallback.budgetMaxTokens
-  }
-}
-
 export function pipelineChapterTask(
   project: Project,
   options: ReturnType<typeof normalizePipelineOptions>,
-  activeStoryDirectionGuide?: StoryDirectionGuide | null
+  activeStoryDirectionGuide?: StoryDirectionGuide | null,
+  chapterTaskSnapshot?: ChapterTask | null
 ): ChapterTask {
+  if (chapterTaskSnapshot) return { ...chapterTaskSnapshot }
   const directionPatch = StoryDirectionService.deriveChapterTaskPatch(activeStoryDirectionGuide ?? null, options.targetChapterOrder)
   return {
     goal: directionPatch.goal || `生成第 ${options.targetChapterOrder} 章草稿`,
@@ -235,6 +90,33 @@ export function pipelineChapterTask(
     targetWordCount: options.estimatedWordCount,
     styleRequirement: project.style
   }
+}
+
+const CHAPTER_TASK_PROMPT_FIELDS = [
+  'goal',
+  'conflict',
+  'suspenseToKeep',
+  'allowedPayoffs',
+  'forbiddenPayoffs',
+  'endingHook',
+  'readerEmotion',
+  'targetWordCount',
+  'styleRequirement'
+] as const satisfies readonly (keyof ChapterTask)[]
+
+export function assertChapterTaskPresentInPrompt(
+  prompt: string,
+  chapterTask: ChapterTask,
+  stage: 'plan' | 'draft'
+): void {
+  const missingFields = CHAPTER_TASK_PROMPT_FIELDS.filter((field) => {
+    const value = chapterTask[field].trim()
+    return value.length > 0 && !prompt.includes(value)
+  })
+  if (missingFields.length === 0) return
+  throw new Error(
+    `显式章节任务契约未完整进入${stage === 'plan' ? '计划生成前' : '正文生成前'} Prompt；缺失字段：${missingFields.join(', ')}。请重新开始该章节任务，避免静默丢失修订要求。`
+  )
 }
 
 export function minimumDraftTokens(expectedWordCount: string): number {
@@ -265,20 +147,27 @@ export function validateGeneratedChapterDraft(body: string, expectedWordCount: s
   return null
 }
 
+export function validateAuthoritativeChapterTaskDraft(
+  body: string,
+  title: string,
+  expectedWordCount: string,
+  strict: boolean,
+  chapterTask?: ChapterTask | null,
+  options: { allowReviewableLengthUnderflow?: boolean } = {}
+): string | null {
+  const basicError = validateGeneratedChapterDraft(body, expectedWordCount, strict)
+  if (basicError || !chapterTask) return basicError
+  const evaluation = ChapterTaskContractService.evaluate({ body, title, chapterTask })
+  if (options.allowReviewableLengthUnderflow && ChapterTaskContractService.isReviewableLengthUnderflow(evaluation)) return null
+  return evaluation.retryReason
+}
+
 export function noveltyWarnings(audit: NoveltyAuditResult | null): string[] {
   if (!audit || audit.severity === 'pass') return []
-  const findings = [
-    ...audit.newNamedCharacters,
-    ...audit.newWorldRules,
-    ...audit.newSystemMechanics,
-    ...audit.newOrganizationsOrRanks,
-    ...audit.majorLoreReveals,
-    ...audit.suspiciousDeusExRules,
-    ...audit.untracedNames
-  ]
+  const reviewFindings = collectNoveltyReviewFindings(audit)
   return [
     `Novelty audit ${audit.severity}: ${audit.summary}`,
-    ...findings.slice(0, 6).map((finding) => `${finding.kind}: ${finding.text} - ${finding.evidenceExcerpt}`)
+    ...reviewFindings.slice(0, 6).map((finding) => `${finding.kind}: ${finding.text} - ${finding.evidenceExcerpt}`)
   ]
 }
 

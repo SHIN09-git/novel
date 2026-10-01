@@ -255,7 +255,7 @@ export function contextNeedPriorityScore(priority: ContextNeedPriority): number 
 function needMatchesRetrievalType(need: ContextNeedItem, type: string): boolean {
   const sourceHintByType: Record<string, ContextNeedSourceHint[]> = {
     character_card: ['character'],
-    character_state: ['character_state', 'character'],
+    character_state: ['character_state'],
     foreshadowing: ['foreshadowing'],
     timeline: ['timeline'],
     stage_summary: ['stageSummary'],
@@ -275,7 +275,14 @@ export function planPriority(context: ScoringContext, type: string, id: ID): num
     .filter((need) => needMatchesRetrievalType(need, type))
     .filter((need) => !need.sourceId || need.sourceId === id)
     .reduce((best, need) => Math.max(best, contextNeedPriorityScore(need.priority) - (need.uncertain ? 10 : 0)), 0)
-  return Math.max(explicitScore, needScore)
+  let score = Math.max(explicitScore, needScore)
+  if (type === 'character_card' || type === 'character_state') {
+    const expected = context.contextNeedPlan?.expectedCharacters.find((item) => item.characterId === id)
+    if (expected?.uncertain) score = Math.min(score, type === 'character_state' ? 54 : 60)
+    if (expected?.involvement === 'mentioned') score = Math.min(score, type === 'character_state' ? 32 : 44)
+    if (type === 'character_state' && expected?.stateCheckRequired === false) score = Math.min(score, 24)
+  }
+  return score
 }
 
 export function foreshadowingOmitReason(item: Foreshadowing, budgetProfile: ContextBudgetProfile, context?: ScoringContext): string {

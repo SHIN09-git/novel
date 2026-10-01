@@ -1,13 +1,80 @@
-import type { ReactNode } from 'react'
+import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react'
+import { ArrowLeft, PanelLeftClose, PanelLeftOpen } from 'lucide-react'
 import type { ID, Project } from '../../../../shared/types'
 import { type View, viewLabels } from './types'
+import appIconUrl from '../../../../../build/icon.png'
 
 const navGroups: Array<{ label: string; items: View[] }> = [
-  { label: '总览', items: ['dashboard'] },
-  { label: '故事资产', items: ['bible', 'chapters', 'characters', 'foreshadowings', 'timeline', 'stages', 'hardCanon', 'direction'] },
-  { label: 'AI 工作流', items: ['prompt', 'pipeline', 'revision'] },
+  { label: '写作', items: ['dashboard', 'inbox', 'chapters', 'reader', 'pipeline', 'revision'] },
+  { label: '故事世界', items: ['direction', 'characters', 'foreshadowings', 'hardCanon', 'bible', 'timeline'] },
+  { label: '资料与高级', items: ['stages', 'prompt', 'agentRuns'] },
   { label: '系统', items: ['settings'] }
 ]
+
+const SIDEBAR_COLLAPSED_KEY = 'novel-director:sidebar-collapsed'
+
+function readSidebarCollapsed() {
+  try {
+    return window.localStorage?.getItem(SIDEBAR_COLLAPSED_KEY) === '1'
+  } catch {
+    return false
+  }
+}
+
+function writeSidebarCollapsed(collapsed: boolean) {
+  try {
+    window.localStorage?.setItem(SIDEBAR_COLLAPSED_KEY, collapsed ? '1' : '0')
+  } catch {
+    // Storage can be unavailable; the toggle still works for this session.
+  }
+}
+
+// Replays a short settle-in on each route change without remounting the view.
+function useViewEnterAnimation(view: View) {
+  const ref = useRef<HTMLDivElement | null>(null)
+  useEffect(() => {
+    const element = ref.current
+    if (!element || typeof element.animate !== 'function') return
+    if (window.matchMedia?.('(prefers-reduced-motion: reduce)').matches) return
+    const animation = element.animate(
+      [
+        { opacity: 0, transform: 'translateY(6px)' },
+        { opacity: 1, transform: 'none' }
+      ],
+      { duration: 240, easing: 'cubic-bezier(0.22, 0.8, 0.24, 1)' }
+    )
+    return () => animation.cancel()
+  }, [view])
+  return ref
+}
+
+// One highlight slides between nav items instead of each item fading its own background.
+function useNavIndicator(view: View, enabled: boolean) {
+  const navRef = useRef<HTMLElement | null>(null)
+  const indicatorRef = useRef<HTMLSpanElement | null>(null)
+  useLayoutEffect(() => {
+    const nav = navRef.current
+    const indicator = indicatorRef.current
+    if (!enabled || !nav || !indicator) return
+    const place = () => {
+      const active = nav.querySelector<HTMLElement>('button[aria-current="page"]')
+      if (!active) {
+        nav.removeAttribute('data-indicator-ready')
+        return
+      }
+      indicator.style.transform = `translateY(${active.offsetTop}px)`
+      indicator.style.height = `${active.offsetHeight}px`
+    }
+    place()
+    if (!nav.hasAttribute('data-indicator-ready')) {
+      // Skip the slide on first placement so the highlight starts where the user already is.
+      const frame = requestAnimationFrame(() => nav.setAttribute('data-indicator-ready', ''))
+      return () => cancelAnimationFrame(frame)
+    }
+    return undefined
+  }, [view, enabled])
+  return { navRef, indicatorRef }
+}
 
 function IconSvg({ children }: { children: ReactNode }) {
   return (
@@ -28,6 +95,14 @@ function NavIcon({ view }: { view: View }) {
           <rect x="14" y="14" width="6" height="6" rx="1.5" />
         </IconSvg>
       )
+    case 'inbox':
+      return (
+        <IconSvg>
+          <path d="M4 5.5h16v13H4v-13Z" />
+          <path d="M4 13h4l1.5 2h5l1.5-2h4" />
+          <path d="M8 9h8" />
+        </IconSvg>
+      )
     case 'bible':
       return (
         <IconSvg>
@@ -42,6 +117,17 @@ function NavIcon({ view }: { view: View }) {
           <path d="M9 8h6" />
           <path d="M9 12h6" />
           <path d="M9 16h3.5" />
+        </IconSvg>
+      )
+    case 'reader':
+      return (
+        <IconSvg>
+          <path d="M4 5.5c2.8-1.1 5.2-1 8 1v13c-2.8-2-5.2-2.1-8-1V5.5Z" />
+          <path d="M12 6.5c2.8-2 5.2-2.1 8-1v13c-2.8-1.1-5.2-1-8 1v-13Z" />
+          <path d="M8 9h2" />
+          <path d="M8 12h2" />
+          <path d="M14 9h2" />
+          <path d="M14 12h2" />
         </IconSvg>
       )
     case 'characters':
@@ -121,6 +207,17 @@ function NavIcon({ view }: { view: View }) {
           <path d="M11 20h9" />
         </IconSvg>
       )
+    case 'agentRuns':
+      return (
+        <IconSvg>
+          <rect x="4" y="5" width="16" height="12" rx="2.5" />
+          <path d="M8 9h.1" />
+          <path d="M16 9h.1" />
+          <path d="M9 13h6" />
+          <path d="M12 3v2" />
+          <path d="M7 20h10" />
+        </IconSvg>
+      )
     case 'settings':
       return (
         <IconSvg>
@@ -154,27 +251,53 @@ export function Shell({
   children: ReactNode
   status: string
 }) {
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(readSidebarCollapsed)
+  const contentRef = useViewEnterAnimation(view)
+  const currentGroup = navGroups.find((group) => group.items.includes(view))?.label
+
+  const { navRef, indicatorRef } = useNavIndicator(view, !sidebarCollapsed)
+
+  useEffect(() => writeSidebarCollapsed(sidebarCollapsed), [sidebarCollapsed])
+  const saveStateTone = /失败|冲突|错误/.test(status)
+    ? 'danger'
+    : /正在|保存中|迁移/.test(status)
+      ? 'busy'
+      : 'ready'
+
   return (
-    <div className="app-shell">
-      <aside className="sidebar">
+    <div className="app-shell" data-sidebar-collapsed={sidebarCollapsed || undefined} data-writing-workspace={['chapters', 'pipeline', 'revision', 'reader'].includes(view) ? 'true' : undefined}>
+      <a className="skip-to-content" href="#workspace-main">跳到正文工作区</a>
+      <aside className="sidebar" id="workspace-sidebar" hidden={sidebarCollapsed} inert={sidebarCollapsed || undefined} aria-label="项目导航">
         <div className="brand-mark">
-          <div className="brand-symbol" aria-hidden="true">ND</div>
+          <div className="brand-symbol" aria-hidden="true">
+            <img src={appIconUrl} alt="" />
+          </div>
           <div>
             <strong>Novel Director</strong>
             <span>长篇小说导演台</span>
           </div>
         </div>
+        <button type="button" className="back-button" onClick={() => setProjectId(null)}>
+          <ArrowLeft size={16} aria-hidden="true" />
+          返回项目列表
+        </button>
         <div className="project-badge">
-          <span>当前创作项目</span>
-          <strong>{project.name}</strong>
-          <small>{project.genre || '未设置题材'}{project.coreAppeal ? ` · ${project.coreAppeal}` : ''}</small>
+          <span className="project-badge-label">当前作品</span>
+          <strong title={project.name}>{project.name}</strong>
+          {project.genre && <small>{project.genre}</small>}
         </div>
-        <nav className="nav-list">
+        <nav className="nav-list" aria-label="工作台功能" ref={navRef}>
+          <span className="nav-indicator" ref={indicatorRef} aria-hidden="true" />
           {navGroups.map((group) => (
-            <div className="nav-group" key={group.label}>
+            <div className={`nav-group${group.items.includes(view) ? ' current' : ''}`} key={group.label}>
               <span className="nav-group-label">{group.label}</span>
               {group.items.map((item) => (
-                <button key={item} className={item === view ? 'active' : ''} onClick={() => setView(item)}>
+                <button
+                  key={item}
+                  className={item === view ? 'active' : ''}
+                  aria-current={item === view ? 'page' : undefined}
+                  onClick={() => setView(item)}
+                >
                   <span className="nav-icon"><NavIcon view={item} /></span>
                   <span>{viewLabels[item]}</span>
                 </button>
@@ -182,29 +305,32 @@ export function Shell({
             </div>
           ))}
         </nav>
-        <div className="sidebar-footer">
-          <button className="back-button" onClick={() => setProjectId(null)}>
-            返回项目列表
-          </button>
-          <span>{status || '本地自动保存就绪'}</span>
-        </div>
       </aside>
-      <main className="main-panel">
+      <main className="main-panel" id="workspace-main" tabIndex={-1}>
         <div className="workspace-topbar">
-          <div>
-            <span>Project</span>
-            <strong>{project.name}</strong>
-          </div>
-          <div>
-            <span>Current View</span>
+          <button
+            type="button"
+            className="sidebar-toggle icon-button"
+            aria-controls="workspace-sidebar"
+            aria-expanded={!sidebarCollapsed}
+            aria-label={sidebarCollapsed ? '展开侧栏' : '收起侧栏'}
+            title={sidebarCollapsed ? '展开侧栏' : '收起侧栏'}
+            onClick={() => setSidebarCollapsed((collapsed) => !collapsed)}
+          >
+            {sidebarCollapsed ? <PanelLeftOpen size={19} aria-hidden="true" /> : <PanelLeftClose size={19} aria-hidden="true" />}
+          </button>
+          <div className="workspace-location">
+            <span className="workspace-project-name" title={project.name}>{project.name}</span>
+            <span className="workspace-location-separator workspace-project-separator" aria-hidden="true">/</span>
+            {currentGroup ? <span className="workspace-group-name">{currentGroup}</span> : null}
+            {currentGroup ? <span className="workspace-location-separator" aria-hidden="true">/</span> : null}
             <strong>{viewLabels[view]}</strong>
           </div>
-          <div className="workspace-save-state">
-            <span>Storage</span>
-            <strong>{status || '本地自动保存就绪'}</strong>
+          <div className={`workspace-save-state ${saveStateTone}`} aria-live="polite">
+            <strong key={status}>{status || '本地自动保存就绪'}</strong>
           </div>
         </div>
-        <div className="workspace-content">{children}</div>
+        <div className="workspace-content" ref={contentRef}>{children}</div>
       </main>
     </div>
   )

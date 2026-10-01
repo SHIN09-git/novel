@@ -140,11 +140,25 @@ function createWindow(): void {
               const loaded = await api.data.load()
               const storage = await api.app.getStoragePath()
               const credential = await api.credentials.hasApiKey()
+              const ordinaryNovelty = await api.diagnostics.auditNovelty({
+                generatedText: '她没有回应。然后她转过身。我伸手扶住门框。',
+                context: '',
+                chapterPlan: null,
+                knownCharacterNames: []
+              })
+              const explicitNameNovelty = await api.diagnostics.auditNovelty({
+                generatedText: '“我叫顾临川。”他说。',
+                context: '',
+                chapterPlan: null,
+                knownCharacterNames: []
+              })
               return {
                 hasApi: true,
                 hasDataApi: Boolean(api.data?.load && api.data?.save && api.data?.import && api.data?.export),
                 hasAppApi: Boolean(api.app?.getStoragePath && api.app?.openStorageFolder),
                 hasCredentialApi: Boolean(api.credentials?.hasApiKey),
+                hasDiagnosticsApi: Boolean(api.diagnostics?.auditNovelty),
+                hasCodexCliStatusApi: Boolean(api.ai?.getCodexCliStatus),
                 hasImportExportApi: Boolean(api.data?.import && api.data?.export),
                 storagePath: storage.storagePath,
                 defaultStoragePath: storage.defaultStoragePath,
@@ -152,6 +166,12 @@ function createWindow(): void {
                 defaultStoragePathLooksLocal: /\\.(sqlite|db|json)$/i.test(storage.defaultStoragePath),
                 hasApiKey: Boolean(credential.hasApiKey),
                 projectCount: Array.isArray(loaded.data?.projects) ? loaded.data.projects.length : -1,
+                ordinaryNoveltyNameCount: ordinaryNovelty.newNamedCharacters?.length ?? -1,
+                explicitNoveltyNameDetected: Boolean(
+                  explicitNameNovelty.newNamedCharacters?.some(
+                    (finding) => finding.text === '顾临川' && finding.confidence === 'high'
+                  )
+                ),
                 bodyText: document.body.innerText.trim().slice(0, 120)
               }
             })()`
@@ -162,6 +182,8 @@ function createWindow(): void {
               hasDataApi?: boolean
               hasAppApi?: boolean
               hasCredentialApi?: boolean
+              hasDiagnosticsApi?: boolean
+              hasCodexCliStatusApi?: boolean
               hasImportExportApi?: boolean
               storagePath?: string
               defaultStoragePath?: string
@@ -169,6 +191,8 @@ function createWindow(): void {
               defaultStoragePathLooksLocal?: boolean
               hasApiKey?: boolean
               projectCount?: number
+              ordinaryNoveltyNameCount?: number
+              explicitNoveltyNameDetected?: boolean
               bodyText?: string
             }) => {
               if (
@@ -176,10 +200,14 @@ function createWindow(): void {
                 !result.hasDataApi ||
                 !result.hasAppApi ||
                 !result.hasCredentialApi ||
+                !result.hasDiagnosticsApi ||
+                !result.hasCodexCliStatusApi ||
                 !result.hasImportExportApi ||
                 !result.storagePathLooksLocal ||
                 !result.defaultStoragePathLooksLocal ||
                 result.hasApiKey ||
+                result.ordinaryNoveltyNameCount !== 0 ||
+                !result.explicitNoveltyNameDetected ||
                 !result.bodyText
               ) {
                 console.error(`Smoke test render failed: ${JSON.stringify(result)}`)
@@ -238,6 +266,10 @@ if (!hasSingleInstanceLock) {
     credentialService = new SecureCredentialService(app.getPath('userData'))
     backupService = new BackupService(app.getPath('userData'))
     const aiService = new AIService(credentialService, aiRateLimiters)
+    aiService.setLogger({
+      info: (message) => LogService.info(message),
+      warn: (message) => LogService.warn(message)
+    })
     const configuredStoragePath = await appConfig.getStoragePath()
     storage = createStorageService(configuredStoragePath)
     if (storage.getStoragePath() !== configuredStoragePath) {
@@ -249,6 +281,7 @@ if (!hasSingleInstanceLock) {
       backupService,
       getStorage: () => storage,
       setStorage: (nextStorage) => {
+        if (storage !== nextStorage) storage.close?.()
         storage = nextStorage
       },
       aiService

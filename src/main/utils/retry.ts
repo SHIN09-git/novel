@@ -1,5 +1,3 @@
-import { LogService } from '../LogService'
-
 export interface RetryOptions {
   maxRetries?: number
   initialDelayMs?: number
@@ -43,7 +41,7 @@ export async function retryWithBackoff<T>(
       if (options.onRetry) {
         options.onRetry(retryAttempt, error, waitMs)
       } else {
-        LogService.warn(`Retrying operation after transient failure. attempt=${retryAttempt}, delayMs=${waitMs}`)
+        console.warn(`Retrying operation after transient failure. attempt=${retryAttempt}, delayMs=${waitMs}`)
       }
       await delay(waitMs)
     }

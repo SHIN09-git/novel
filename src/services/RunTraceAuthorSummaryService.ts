@@ -1,23 +1,34 @@
 import type {
   AppData,
-  ConsistencyReviewIssue,
-  ConsistencyReviewReport,
-  GeneratedChapterDraft,
-  GenerationRunTrace,
   ID,
-  NoveltyAuditResult,
-  QualityGateIssue,
-  QualityGateReport,
-  RedundancyReport,
-  RunTraceAuthorActionType,
   RunTraceAuthorNextAction,
   RunTraceAuthorProblemSource,
-  RunTraceAuthorSummary,
-  RunTraceAuthorSummaryStatus
+  RunTraceAuthorSummary
 } from '../shared/types'
+import {
+  actionableNoveltyFindings,
+  compactText,
+  consistencyEvidence,
+  oneLineForStatus,
+  pushAction,
+  qualityEvidence,
+  redundancyRisk,
+  severityRank,
+  statusFromProblems,
+  uniqueStrings,
+  upsertProblem
+} from './runTraceAuthorSummary/summaryHelpers'
+import { appendContextDiagnosis } from './runTraceAuthorSummary/contextDiagnosis'
+import {
+  findConsistencyReport,
+  findDraft,
+  findQualityReport,
+  findRedundancyReport,
+  findTrace
+} from './runTraceAuthorSummary/sourceLookup'
+import { noveltyAuditMatchesDraft } from './DraftDiagnosticBindingService'
 
 const SUMMARY_VERSION = 1
-const MAX_EVIDENCE_LENGTH = 180
 
 export interface BuildRunTraceAuthorSummaryParams {
   traceId?: ID
@@ -25,158 +36,18 @@ export interface BuildRunTraceAuthorSummaryParams {
   createdAt?: string
 }
 
-function compactText(value: string | undefined | null, maxLength = MAX_EVIDENCE_LENGTH): string {
-  const normalized = String(value ?? '').replace(/\s+/g, ' ').trim()
-  if (!normalized) return ''
-  return normalized.length > maxLength ? `${normalized.slice(0, maxLength)}...` : normalized
-}
-
-function uniqueStrings(values: string[]): string[] {
-  return Array.from(new Set(values.map((item) => compactText(item)).filter(Boolean)))
-}
-
-function severityRank(severity: 'low' | 'medium' | 'high'): number {
-  if (severity === 'high') return 3
-  if (severity === 'medium') return 2
-  return 1
-}
-
-function upsertProblem(
-  problems: RunTraceAuthorProblemSource[],
-  problem: RunTraceAuthorProblemSource
-): void {
-  const existing = problems.find((item) => item.source === problem.source)
-  if (!existing) {
-    problems.push({
-      ...problem,
-      evidence: uniqueStrings(problem.evidence).slice(0, 5)
-    })
-    return
-  }
-  existing.severity = severityRank(problem.severity) > severityRank(existing.severity) ? problem.severity : existing.severity
-  existing.evidence = uniqueStrings([...existing.evidence, ...problem.evidence]).slice(0, 5)
-  if (problem.recommendation && !existing.recommendation.includes(problem.recommendation)) {
-    existing.recommendation = existing.recommendation
-      ? `${existing.recommendation} ${problem.recommendation}`
-      : problem.recommendation
-  }
-}
-
-function pushAction(actions: RunTraceAuthorNextAction[], action: RunTraceAuthorNextAction): void {
-  if (actions.some((item) => item.actionType === action.actionType && item.label === action.label)) return
-  actions.push(action)
-}
-
-function findTrace(appData: AppData, params: BuildRunTraceAuthorSummaryParams): GenerationRunTrace {
-  const trace =
-    (params.traceId ? appData.generationRunTraces.find((item) => item.id === params.traceId) : null) ??
-    (params.jobId ? appData.generationRunTraces.find((item) => item.jobId === params.jobId) : null)
-  if (!trace) throw new Error('缺少生成追踪记录，无法构建作者诊断摘要。')
-  return trace
-}
-
-function findDraft(appData: AppData, trace: GenerationRunTrace): GeneratedChapterDraft | null {
-  if (trace.generatedDraftId) {
-    const draft = appData.generatedChapterDrafts.find((item) => item.id === trace.generatedDraftId)
-    if (draft) return draft
-  }
-  return appData.generatedChapterDrafts.find((item) => item.jobId === trace.jobId) ?? null
-}
-
-function findQualityReport(appData: AppData, trace: GenerationRunTrace, draft: GeneratedChapterDraft | null): QualityGateReport | null {
-  if (trace.qualityGateReportId) {
-    const report = appData.qualityGateReports.find((item) => item.id === trace.qualityGateReportId)
-    if (report) return report
-  }
-  if (draft) {
-    const report = appData.qualityGateReports.find((item) => item.draftId === draft.id)
-    if (report) return report
-  }
-  return appData.qualityGateReports.find((item) => item.jobId === trace.jobId) ?? null
-}
-
-function findConsistencyReport(appData: AppData, trace: GenerationRunTrace): ConsistencyReviewReport | null {
-  if (trace.consistencyReviewReportId) {
-    const report = appData.consistencyReviewReports.find((item) => item.id === trace.consistencyReviewReportId)
-    if (report) return report
-  }
-  return appData.consistencyReviewReports.find((item) => item.jobId === trace.jobId) ?? null
-}
-
-function findRedundancyReport(appData: AppData, trace: GenerationRunTrace, draft: GeneratedChapterDraft | null): RedundancyReport | null {
-  if (trace.redundancyReportId) {
-    const report = appData.redundancyReports.find((item) => item.id === trace.redundancyReportId)
-    if (report) return report
-  }
-  if (draft) {
-    const report = appData.redundancyReports.find((item) => item.draftId === draft.id)
-    if (report) return report
-  }
-  return appData.redundancyReports.find((item) => item.jobId === trace.jobId) ?? null
-}
-
-function qualityEvidence(issues: QualityGateIssue[]): string[] {
-  return issues.slice(0, 3).map((issue) => compactText([issue.type, issue.description || issue.evidence].filter(Boolean).join('：')))
-}
-
-function consistencyEvidence(issues: ConsistencyReviewIssue[]): string[] {
-  return issues.slice(0, 3).map((issue) => compactText([issue.title || issue.type, issue.description || issue.evidence].filter(Boolean).join('：')))
-}
-
-function allNoveltyFindings(audit: NoveltyAuditResult | null) {
-  if (!audit) return []
-  return [
-    ...audit.newNamedCharacters,
-    ...audit.newWorldRules,
-    ...audit.newSystemMechanics,
-    ...audit.newOrganizationsOrRanks,
-    ...audit.majorLoreReveals,
-    ...audit.suspiciousDeusExRules,
-    ...audit.untracedNames
-  ]
-}
-
-function redundancyRisk(report: RedundancyReport | null): 'low' | 'medium' | 'high' | 'unknown' {
-  if (!report) return 'unknown'
-  if (report.overallRedundancyScore >= 70) return 'high'
-  if (report.overallRedundancyScore >= 45) return 'medium'
-  return 'low'
-}
-
-function contextBudgetPressure(trace: GenerationRunTrace): 'low' | 'medium' | 'high' | 'unknown' {
-  const estimate = trace.finalPromptTokenEstimate || trace.contextTokenEstimate
-  if (!estimate) return trace.omittedContextItems.length > 8 ? 'medium' : 'unknown'
-  const contextRatio = trace.contextTokenEstimate / Math.max(1, estimate)
-  if (trace.omittedContextItems.length > 12 || contextRatio > 0.82) return 'high'
-  if (trace.omittedContextItems.length > 4 || contextRatio > 0.65) return 'medium'
-  return 'low'
-}
-
-function statusFromProblems(problems: RunTraceAuthorProblemSource[], hasFailedStep: boolean): RunTraceAuthorSummaryStatus {
-  if (hasFailedStep) return 'failed'
-  if (problems.some((item) => item.severity === 'high')) return 'risky'
-  if (problems.some((item) => item.severity === 'medium' || item.severity === 'low')) return 'needs_attention'
-  return 'good'
-}
-
-function oneLineForStatus(status: RunTraceAuthorSummaryStatus, problems: RunTraceAuthorProblemSource[]): string {
-  if (status === 'failed') return '生成流程中存在失败步骤，优先检查模型响应、API Key、Provider 或失败步骤输出。'
-  if (status === 'risky') {
-    const source = problems.find((item) => item.severity === 'high')?.source ?? 'unknown'
-    return `这一章存在高风险问题，最可能来自 ${source}，建议先修订再正式采纳。`
-  }
-  if (status === 'needs_attention') return '这一章生成链路有需要人工确认的风险点，建议先看摘要中的证据和下一步动作。'
-  if (status === 'good') return '这一章生成链路未发现明显高风险问题，但仍建议人工阅读正文节奏和人物情绪。'
-  return '诊断信息不足，建议查看质量门禁、审稿报告和原始 Run Trace。'
-}
-
 export function buildRunTraceAuthorSummary(appData: AppData, params: BuildRunTraceAuthorSummaryParams): RunTraceAuthorSummary {
   const trace = findTrace(appData, params)
   const job = appData.chapterGenerationJobs.find((item) => item.id === trace.jobId) ?? null
   const draft = findDraft(appData, trace)
   const qualityReport = findQualityReport(appData, trace, draft)
-  const consistencyReport = findConsistencyReport(appData, trace)
+  const consistencyReport = findConsistencyReport(appData, trace, draft)
   const redundancyReport = findRedundancyReport(appData, trace, draft)
+  const noveltyAudit = draft
+    ? noveltyAuditMatchesDraft(trace.noveltyAuditResult, draft)
+      ? trace.noveltyAuditResult
+      : null
+    : trace.noveltyAuditResult
   const now = params.createdAt ?? new Date().toISOString()
   const problems: RunTraceAuthorProblemSource[] = []
   const nextActions: RunTraceAuthorNextAction[] = []
@@ -269,12 +140,12 @@ export function buildRunTraceAuthorSummary(appData: AppData, params: BuildRunTra
     }
   }
 
-  const noveltyFindings = allNoveltyFindings(trace.noveltyAuditResult)
-  if (trace.noveltyAuditResult && (trace.noveltyAuditResult.severity !== 'pass' || noveltyFindings.length)) {
+  const riskyNoveltyFindings = actionableNoveltyFindings(noveltyAudit)
+  if (noveltyAudit && (noveltyAudit.severity !== 'pass' || riskyNoveltyFindings.length)) {
     upsertProblem(problems, {
       source: 'novelty_drift',
-      severity: trace.noveltyAuditResult.severity === 'fail' ? 'high' : 'medium',
-      evidence: [trace.noveltyAuditResult.summary, ...noveltyFindings.slice(0, 4).map((finding) => compactText(`${finding.text}：${finding.reason || finding.evidenceExcerpt}`))],
+      severity: noveltyAudit.severity === 'fail' ? 'high' : 'medium',
+      evidence: [noveltyAudit.summary, ...riskyNoveltyFindings.slice(0, 4).map((finding) => compactText(`${finding.text}：${finding.reason || finding.evidenceExcerpt}`))],
       recommendation: '确认新角色、新机制或新规则是否被任务书允许；未授权内容建议删除或改写为已有线索的结果。'
     })
     pushAction(nextActions, {
@@ -284,10 +155,10 @@ export function buildRunTraceAuthorSummary(appData: AppData, params: BuildRunTra
     })
   }
 
-  if (noveltyFindings.length && (!trace.includedHardCanonItemIds.length || trace.truncatedHardCanonItemIds.length)) {
+  if (riskyNoveltyFindings.length && (!trace.includedHardCanonItemIds.length || trace.truncatedHardCanonItemIds.length)) {
     upsertProblem(problems, {
       source: 'novelty_drift',
-      severity: trace.noveltyAuditResult?.severity === 'fail' ? 'high' : 'medium',
+      severity: noveltyAudit?.severity === 'fail' ? 'high' : 'medium',
       evidence: [
         trace.includedHardCanonItemIds.length
           ? `HardCanonPack 已纳入 ${trace.includedHardCanonItemIds.length} 条，截断 ${trace.truncatedHardCanonItemIds.length} 条。`
@@ -315,53 +186,7 @@ export function buildRunTraceAuthorSummary(appData: AppData, params: BuildRunTra
     })
   }
 
-  const traceUnmetNeeds = trace.contextSelectionTrace?.unmetNeeds ?? []
-  const traceDroppedBlocks = trace.contextSelectionTrace?.droppedBlocks ?? []
-  const highPriorityUnmetNeeds = traceUnmetNeeds.filter((need) => need.priority === 'must' || need.priority === 'high')
-  const contextTraceMissingHints = highPriorityUnmetNeeds.map((need) =>
-    `${need.needType}${need.sourceId ? `:${need.sourceId}` : ''} - ${need.reason}`
-  )
-  const droppedHighPriorityHints = traceDroppedBlocks
-    .filter((block) => block.priority === 'must' || block.priority === 'high')
-    .map((block) => `${block.blockType}${block.sourceId ? `:${block.sourceId}` : ''} - ${block.dropReason}`)
-
-  const missingHints = uniqueStrings([
-    ...contextTraceMissingHints,
-    ...droppedHighPriorityHints,
-    ...trace.contextNeedPlanWarnings,
-    ...trace.contextNeedPlanOmittedItems.map((item) => `${item.type}: ${item.reason}`),
-    ...trace.contextWarnings.filter((warning) => /缺|missing|omitted|省略|未纳入/i.test(warning))
-  ]).slice(0, 6)
-  if (missingHints.length || (Object.keys(trace.requiredStateFactCategories).length > 0 && trace.includedCharacterStateFactIds.length === 0)) {
-    upsertProblem(problems, {
-      source: 'context_missing',
-      severity: highPriorityUnmetNeeds.some((need) => need.priority === 'must') || droppedHighPriorityHints.length > 0 || trace.contextNeedPlanOmittedItems.length > 3 ? 'high' : 'medium',
-      evidence: missingHints.length ? missingHints : ['上下文需求计划要求角色状态，但最终没有纳入角色状态事实。'],
-      recommendation: '补充角色状态、伏笔或时间线记录，或在 Prompt 构建器中调整上下文选择。'
-    })
-    pushAction(nextActions, {
-      label: '调整上下文',
-      actionType: 'adjust_context',
-      reason: '生成问题可能来自关键上下文没有进入正文 prompt。'
-    })
-  }
-
-  const pressure = contextBudgetPressure(trace)
-  const tracePressure = trace.contextSelectionTrace?.budgetSummary.pressure
-  const stageSummaryTokenShare =
-    trace.contextSelectionTrace?.budgetSummary.usedTokens
-      ? trace.contextSelectionTrace.selectedBlocks
-          .filter((block) => block.blockType === 'stageSummary')
-          .reduce((sum, block) => sum + block.tokenEstimate, 0) / Math.max(1, trace.contextSelectionTrace.budgetSummary.usedTokens)
-      : 0
-  if (pressure === 'high' || tracePressure === 'high' || stageSummaryTokenShare > 0.28) {
-    upsertProblem(problems, {
-      source: 'context_noise',
-      severity: 'medium',
-      evidence: [`上下文预算压力高：上下文 ${trace.contextTokenEstimate} / 最终 ${trace.finalPromptTokenEstimate} token，省略 ${trace.omittedContextItems.length} 项。`],
-      recommendation: '优先压缩远期摘要、减少低相关角色/伏笔，避免噪声挤掉本章硬状态。'
-    })
-  }
+  const { missingHints, pressure, tracePressure } = appendContextDiagnosis(trace, problems, nextActions)
 
   if (trace.characterStateWarnings.length || trace.characterStateIssueIds.length) {
     upsertProblem(problems, {
@@ -400,7 +225,7 @@ export function buildRunTraceAuthorSummary(appData: AppData, params: BuildRunTra
     chapterId: draft?.chapterId ?? qualityReport?.chapterId ?? consistencyReport?.chapterId ?? null,
     jobId: trace.jobId,
     traceId: trace.id,
-    generatedDraftId: trace.generatedDraftId,
+    generatedDraftId: draft?.id ?? trace.generatedDraftId,
     createdAt: now,
     summaryVersion: SUMMARY_VERSION,
     overallStatus,
@@ -427,7 +252,7 @@ export function buildRunTraceAuthorSummary(appData: AppData, params: BuildRunTra
       timelineIssues: consistencyReport
         ? consistencyReport.issues.filter((issue) => issue.type === 'timeline_conflict').map((issue) => issue.title || issue.description)
         : [],
-      newCanonRisks: trace.noveltyAuditResult ? noveltyFindings.map((finding) => `${finding.text}: ${finding.severity}`).slice(0, 6) : []
+      newCanonRisks: riskyNoveltyFindings.map((finding) => `${finding.text}: ${finding.severity}`).slice(0, 6)
     },
     draftDiagnosis: {
       qualityGatePassed: qualityReport?.pass,
@@ -440,7 +265,7 @@ export function buildRunTraceAuthorSummary(appData: AppData, params: BuildRunTra
       qualityGateReportId: qualityReport?.id,
       consistencyReviewReportId: consistencyReport?.id,
       redundancyReportIds: redundancyReport ? [redundancyReport.id] : [],
-      noveltyAuditId: trace.noveltyAuditResult ? trace.id : undefined,
+      noveltyAuditId: noveltyAudit ? trace.id : undefined,
       generationRunTraceId: trace.id,
       contextNeedPlanId: trace.contextNeedPlanId ?? undefined
     }

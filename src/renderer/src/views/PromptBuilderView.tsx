@@ -1,93 +1,72 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
+import { ArrowRight, Copy, Layers, Save, WandSparkles } from 'lucide-react'
 import type {
   AppData,
   BuildPromptResult,
   ChapterTask,
   ContextNeedPlan,
   ContextBudgetMode,
-  Foreshadowing,
   ForeshadowingTreatmentMode,
   ID,
   Project,
   PromptContextSnapshot,
-  PromptContextSnapshotSource,
   PromptMode,
-  PromptModuleSelection
+  PromptModuleSelection,
+  PromptVersion
 } from '../../../shared/types'
 import { createEmptyChapterTask, defaultModulesForMode } from '../../../shared/defaults'
-import {
-  effectiveTreatmentMode,
-  FORESHADOWING_TREATMENT_OPTIONS,
-  treatmentDescription
-} from '../../../shared/foreshadowingTreatment'
-import { ContextBudgetManager } from '../../../services/ContextBudgetManager'
 import { ContextNeedPlannerService } from '../../../services/ContextNeedPlannerService'
-import { endingExcerpt, resolveContinuityBridge } from '../../../services/ContinuityService'
+import { resolveContinuityBridge } from '../../../services/ContinuityService'
 import { PromptBuilderService } from '../../../services/PromptBuilderService'
-import { PromptLintService } from '../../../services/PromptLintService'
 import { StoryDirectionService } from '../../../services/StoryDirectionService'
 import { TokenEstimator } from '../../../services/TokenEstimator'
-import { useConfirm } from '../components/ConfirmDialog'
-import { NumberInput, SelectField, TextArea, TextInput, Toggle } from '../components/FormFields'
+import { nextChapterOrder } from '../../../services/ChapterLifecycleService'
 import { Header } from '../components/Layout'
-import { StatCard, TokenBudgetMeter } from '../components/UI'
-import { formatDate, modeLabel, newId, now, statusLabel, treatmentModeLabel, weightLabel } from '../utils/format'
-import { projectData } from '../utils/projectData'
+import { useConfirm } from '../components/ConfirmDialog'
+import { useProjectData } from '../hooks/useProjectData'
+import { getNovelDirectorClipboardApi } from '../platform/novelDirectorBridge'
+import { compareForeshadowingByStatusWeightUpdatedAt } from '../utils/foreshadowingSort'
+import { now } from '../utils/format'
 import {
   createContextBudgetProfile,
   recommendedCharacters,
   recommendedForeshadowings,
   selectBudgetContext
 } from '../utils/promptContext'
-import type { SaveDataInput } from '../utils/saveDataState'
+import type { SaveDataHandler } from '../utils/saveDataState'
+import { PromptBudgetPanel } from './promptBuilder/PromptBudgetPanel'
+import { PromptCharacterSelectionPanel } from './promptBuilder/PromptCharacterSelectionPanel'
+import { PromptChapterTaskPanel } from './promptBuilder/PromptChapterTaskPanel'
+import { PromptContextNeedPanel } from './promptBuilder/PromptContextNeedPanel'
+import { PromptContinuityPanel } from './promptBuilder/PromptContinuityPanel'
+import { PromptControlPanel } from './promptBuilder/PromptControlPanel'
+import { PromptEditorPanel } from './promptBuilder/PromptEditorPanel'
+import { PromptHistoryPanels } from './promptBuilder/PromptHistoryPanels'
+import { PromptManualForeshadowingPanel } from './promptBuilder/PromptManualForeshadowingPanel'
+import {
+  restorePromptBuilderFromSnapshot,
+  restorePromptBuilderFromVersion
+} from './promptBuilder/promptBuilderHistoryState'
+import {
+  toggleNeedPlanCharacter,
+  toggleNeedPlanForeshadowing,
+  updateForeshadowingTreatmentOverrides
+} from './promptBuilder/promptBuilderNeedPlan'
+import { usePromptBuilderHistoryActions } from './promptBuilder/usePromptBuilderHistoryActions'
+import { PromptWorkspaceTabs, type PromptWorkspaceTab } from './promptBuilder/PromptWorkspaceTabs'
+import { createPromptBuilderSnapshotBinding, type PromptBuilderSnapshotBinding } from './promptBuilder/promptBuilderSnapshotConsistency'
 
 interface ProjectProps {
   data: AppData
   project: Project
-  saveData: (next: SaveDataInput) => Promise<void>
+  saveData: SaveDataHandler
   onSendToPipeline?: (snapshotId: ID) => void
-}
-
-const moduleLabels: Record<keyof PromptModuleSelection, string> = {
-  bible: '全书核心设定',
-  progress: '当前剧情进度',
-  recentChapters: '最近章节回顾',
-  characters: '主要角色状态',
-  foreshadowing: '当前相关伏笔',
-  stageSummaries: '阶段摘要档案',
-  timeline: '时间线校验',
-  chapterTask: '当前章节任务书',
-  forbidden: '本章禁止事项',
-  outputFormat: '输出格式要求'
-}
-
-function safeModeLabel(mode: ContextBudgetMode): string {
-  return mode === 'custom' ? '自定义模式' : modeLabel(mode)
-}
-
-const FORESHADOWING_WEIGHT_ORDER: Record<Foreshadowing['weight'], number> = {
-  payoff: 4,
-  high: 3,
-  medium: 2,
-  low: 1
-}
-
-function archivedForeshadowingRank(item: Foreshadowing): number {
-  return item.status === 'resolved' || item.status === 'abandoned' ? 1 : 0
-}
-
-function compareForeshadowingForPrompt(a: Foreshadowing, b: Foreshadowing): number {
-  const archiveDelta = archivedForeshadowingRank(a) - archivedForeshadowingRank(b)
-  if (archiveDelta !== 0) return archiveDelta
-  const weightDelta = FORESHADOWING_WEIGHT_ORDER[b.weight] - FORESHADOWING_WEIGHT_ORDER[a.weight]
-  if (weightDelta !== 0) return weightDelta
-  return b.updatedAt.localeCompare(a.updatedAt)
 }
 
 export function PromptBuilderView({ data, project, saveData, onSendToPipeline }: ProjectProps) {
   const confirmAction = useConfirm()
-  const scoped = projectData(data, project.id)
-  const nextChapter = Math.max(0, ...scoped.chapters.map((chapter) => chapter.order)) + 1
+  const scoped = useProjectData(data, project.id)
+  const nextChapter = nextChapterOrder(scoped.allChapters, project.id)
   const [targetChapterOrder, setTargetChapterOrder] = useState(nextChapter)
   const [mode, setMode] = useState<PromptMode>(data.settings.defaultPromptMode)
   const [modules, setModules] = useState<PromptModuleSelection>(defaultModulesForMode(data.settings.defaultPromptMode))
@@ -102,9 +81,17 @@ export function PromptBuilderView({ data, project, saveData, onSendToPipeline }:
   const [snapshotNote, setSnapshotNote] = useState('')
   const [budgetMode, setBudgetMode] = useState<ContextBudgetMode>(data.settings.defaultPromptMode)
   const [budgetMaxTokens, setBudgetMaxTokens] = useState(data.settings.defaultTokenBudget)
+  const previousProjectIdRef = useRef(project.id)
+  const restoringHistoryRef = useRef(false)
+  const [activeTab, setActiveTab] = useState<PromptWorkspaceTab>('task')
+  const [workspaceMessage, setWorkspaceMessage] = useState('')
+  const [promptBinding, setPromptBinding] = useState<PromptBuilderSnapshotBinding | null>(null)
+  const [promptVersionSource, setPromptVersionSource] = useState<PromptVersion | null>(null)
+  const [needsRebuild, setNeedsRebuild] = useState(false)
+  const [promptManuallyEdited, setPromptManuallyEdited] = useState(false)
 
   const tokenEstimate = TokenEstimator.estimate(prompt)
-  const advice = TokenEstimator.compressionAdvice(tokenEstimate, budgetMaxTokens)
+  const advice = prompt.trim() ? TokenEstimator.compressionAdvice(tokenEstimate, budgetMaxTokens) : []
   const budgetProfile = useMemo(
     () => createContextBudgetProfile(project.id, budgetMode, budgetMaxTokens, 'Prompt 构建器预算'),
     [project.id, budgetMode, budgetMaxTokens]
@@ -116,7 +103,8 @@ export function PromptBuilderView({ data, project, saveData, onSendToPipeline }:
         foreshadowingIds: selectedForeshadowingIds,
         chapterTask: task,
         foreshadowingTreatmentOverrides,
-        contextNeedPlan
+        contextNeedPlan,
+        selectionMode: 'explicit'
       }),
     [project, data, targetChapterOrder, budgetProfile, selectedCharacterIds, selectedForeshadowingIds, task, foreshadowingTreatmentOverrides, contextNeedPlan]
   )
@@ -124,14 +112,16 @@ export function PromptBuilderView({ data, project, saveData, onSendToPipeline }:
     () => recommendedForeshadowings(scoped.foreshadowings, targetChapterOrder),
     [scoped.foreshadowings, targetChapterOrder]
   )
+  const autoForeshadowingIds = useMemo(() => new Set(autoForeshadowings.map((item) => item.id)), [autoForeshadowings])
   const autoCharacters = useMemo(
     () => recommendedCharacters(scoped.characters, autoForeshadowings),
     [scoped.characters, autoForeshadowings]
   )
   const sortedForeshadowings = useMemo(
-    () => [...scoped.foreshadowings].sort(compareForeshadowingForPrompt),
+    () => [...scoped.foreshadowings].sort(compareForeshadowingByStatusWeightUpdatedAt),
     [scoped.foreshadowings]
   )
+  const autoCharacterIds = useMemo(() => new Set(autoCharacters.map((item) => item.id)), [autoCharacters])
   const continuity = useMemo(
     () =>
       resolveContinuityBridge({
@@ -158,9 +148,48 @@ export function PromptBuilderView({ data, project, saveData, onSendToPipeline }:
   }
 
   useEffect(() => {
+    if (previousProjectIdRef.current === project.id) return
+    previousProjectIdRef.current = project.id
+    setTargetChapterOrder(nextChapter)
+    setMode(data.settings.defaultPromptMode)
+    setModules(defaultModulesForMode(data.settings.defaultPromptMode))
+    setTask(createEmptyChapterTask())
+    setSelectedCharacterIds([])
+    setSelectedForeshadowingIds([])
+    setForeshadowingTreatmentOverrides({})
+    setContextNeedPlan(null)
+    setPrompt('')
+    setActiveTab('task')
+    setWorkspaceMessage('')
+    setPromptBinding(null)
+    setPromptVersionSource(null)
+    setNeedsRebuild(false)
+    setPromptManuallyEdited(false)
+    setSnapshotNote('')
+    setBudgetMode(data.settings.defaultPromptMode)
+    setBudgetMaxTokens(data.settings.defaultTokenBudget)
+    setUseContinuityBridge(true)
+    setContinuityInstructions('')
+  }, [data.settings.defaultPromptMode, data.settings.defaultTokenBudget, nextChapter, project.id])
+
+  useEffect(() => {
+    if (restoringHistoryRef.current) {
+      restoringHistoryRef.current = false
+      return
+    }
     resetAutomaticSelection()
     setContextNeedPlan(null)
   }, [project.id, targetChapterOrder])
+
+  useEffect(() => {
+    const characterIds = new Set(scoped.characters.map((character) => character.id))
+    const foreshadowingIds = new Set(scoped.foreshadowings.map((item) => item.id))
+    setSelectedCharacterIds((ids) => ids.filter((id) => characterIds.has(id)))
+    setSelectedForeshadowingIds((ids) => ids.filter((id) => foreshadowingIds.has(id)))
+    setForeshadowingTreatmentOverrides((overrides) =>
+      Object.fromEntries(Object.entries(overrides).filter(([id]) => foreshadowingIds.has(id)))
+    )
+  }, [scoped.characters, scoped.foreshadowings])
 
   function changeMode(nextMode: PromptMode) {
     setMode(nextMode)
@@ -203,12 +232,29 @@ export function PromptBuilderView({ data, project, saveData, onSendToPipeline }:
     })
   }
 
-  function generatePrompt() {
+  async function generatePrompt() {
+    if (promptManuallyEdited && !await confirmAction({
+      title: '重新构建 Prompt',
+      message: '编辑区包含手动修改。重新构建会替换这些文字，已保存的版本和快照不受影响。',
+      confirmLabel: '重新构建'
+    })) return
+    clearHistoryFeedback()
     const result = buildPromptResult()
     setPrompt(result.finalPrompt)
+    setPromptVersionSource(null)
+    setPromptBinding(createPromptBuilderSnapshotBinding({
+      projectId: project.id, targetChapterOrder, budgetMode, promptMode: mode,
+      moduleSelection: modules, continuityInstructions, useContinuityBridge,
+      budgetProfile, budgetSelection, result
+    }))
+    setNeedsRebuild(false)
+    setPromptManuallyEdited(false)
+    setActiveTab('editor')
+    setWorkspaceMessage('Prompt 已构建')
   }
 
   async function generateContextNeedPlan() {
+    setNeedsRebuild(Boolean(prompt.trim()))
     const plan = ContextNeedPlannerService.buildFromChapterIntent({
       project,
       storyBible: scoped.bible,
@@ -237,107 +283,95 @@ export function PromptBuilderView({ data, project, saveData, onSendToPipeline }:
 
   async function copyPrompt() {
     if (!prompt.trim()) return
-    await window.novelDirector.clipboard.writeText(prompt)
-  }
-
-  async function savePromptVersion() {
-    if (!prompt.trim()) return
-    const guardedPrompt = PromptLintService.guardWritingPrompt(prompt).guardedPrompt
-    await saveData((current) => ({
-      ...current,
-      promptVersions: [
-        {
-          id: newId(),
-          projectId: project.id,
-          targetChapterOrder,
-          title: `第 ${targetChapterOrder} 章 ${modeLabel(mode)} ${formatDate(now())}`,
-          mode,
-          content: guardedPrompt,
-          tokenEstimate: TokenEstimator.estimate(guardedPrompt),
-          moduleSelection: modules,
-          task,
-          createdAt: now()
-        },
-        ...current.promptVersions
-      ]
-    }))
-  }
-
-  async function saveContextSnapshot(source: PromptContextSnapshotSource = 'manual'): Promise<PromptContextSnapshot | null> {
-    const result = buildPromptResult()
-    const finalPrompt = PromptLintService.guardWritingPrompt(prompt.trim() ? prompt : result.finalPrompt).guardedPrompt
-    if (!finalPrompt.trim()) return null
-    const timestamp = now()
-    const snapshot: PromptContextSnapshot = {
-      id: newId(),
-      projectId: project.id,
-      targetChapterOrder,
-      mode: budgetMode,
-      budgetProfileId: budgetProfile.id,
-      budgetProfile,
-      contextSelectionResult: result.contextSelectionResult ?? budgetSelection,
-      selectedCharacterIds: result.selectedCharacterIds,
-      selectedForeshadowingIds: result.selectedForeshadowingIds,
-      foreshadowingTreatmentOverrides: result.foreshadowingTreatmentOverrides,
-      chapterTask: result.chapterTask,
-      contextNeedPlan: result.contextNeedPlan,
-      storyDirectionGuide: result.storyDirectionGuide,
-      finalPrompt,
-      estimatedTokens: TokenEstimator.estimate(finalPrompt),
-      source,
-      note: snapshotNote,
-      createdAt: timestamp,
-      updatedAt: timestamp
+    try {
+      await getNovelDirectorClipboardApi().writeText(prompt)
+      setWorkspaceMessage('已复制 Prompt')
+    } catch {
+      setWorkspaceMessage('复制失败，请重试')
     }
-    await saveData((current) => ({
-      ...current,
-      promptContextSnapshots: [snapshot, ...current.promptContextSnapshots],
-      contextNeedPlans: snapshot.contextNeedPlan
-        ? [snapshot.contextNeedPlan, ...current.contextNeedPlans.filter((plan) => plan.id !== snapshot.contextNeedPlan?.id)]
-        : current.contextNeedPlans,
-      contextBudgetProfiles: current.contextBudgetProfiles.some((profile) => profile.id === budgetProfile.id)
-        ? current.contextBudgetProfiles
-        : [budgetProfile, ...current.contextBudgetProfiles]
-    }))
-    if (!prompt.trim() || finalPrompt !== prompt) setPrompt(finalPrompt)
-    return snapshot
   }
 
-  async function sendToPipeline() {
-    const snapshot = await saveContextSnapshot('manual')
-    if (snapshot) onSendToPipeline?.(snapshot.id)
-  }
-
-  async function deleteContextSnapshot(id: ID) {
-    const confirmed = await confirmAction({
-      title: '删除上下文快照',
-      message: '确定删除这个上下文快照吗？依赖它的流水线任务会提示快照已丢失。',
-      confirmLabel: '删除快照',
-      tone: 'danger'
-    })
-    if (!confirmed) return
-    await saveData((current) => ({
-      ...current,
-      promptContextSnapshots: current.promptContextSnapshots.filter((snapshot) => snapshot.id !== id)
-    }))
-  }
-
-  async function deletePromptVersion(id: ID) {
-    const confirmed = await confirmAction({
-      title: '删除 Prompt 版本',
-      message: '确定删除这个 Prompt 版本吗？',
-      confirmLabel: '删除版本',
-      tone: 'danger'
-    })
-    if (!confirmed) return
-    await saveData((current) => ({
-      ...current,
-      promptVersions: current.promptVersions.filter((version) => version.id !== id)
-    }))
-  }
+  const {
+    deleteContextSnapshot,
+    deletePromptVersion,
+    saveContextSnapshot,
+    savePromptVersion,
+    sendToPipeline,
+    isSaving,
+    historyMessage,
+    historyError,
+    clearHistoryFeedback
+  } = usePromptBuilderHistoryActions({
+    projectId: project.id,
+    targetChapterOrder,
+    promptMode: mode,
+    budgetMode,
+    budgetProfile,
+    modules,
+    task,
+    continuityInstructions,
+    useContinuityBridge,
+    prompt,
+    promptBinding,
+    promptVersionSource,
+    snapshotNote,
+    budgetSelection,
+    buildPromptResult,
+    saveData,
+    onPromptNormalized: setPrompt,
+    onPromptBindingChange: (binding) => { setPromptBinding(binding); setPromptVersionSource(null) },
+    onSendToPipeline
+  })
 
   function updateForeshadowingTreatmentOverride(id: ID, nextMode: ForeshadowingTreatmentMode) {
-    setForeshadowingTreatmentOverrides((current) => ({ ...current, [id]: nextMode }))
+    setForeshadowingTreatmentOverrides((current) => updateForeshadowingTreatmentOverrides(current, id, nextMode))
+  }
+
+  function loadContextSnapshot(snapshot: PromptContextSnapshot) {
+    clearHistoryFeedback()
+    setWorkspaceMessage('已载入上下文快照')
+    const restored = restorePromptBuilderFromSnapshot(snapshot, mode)
+    restoringHistoryRef.current = restored.targetChapterOrder !== targetChapterOrder
+    setTargetChapterOrder(restored.targetChapterOrder)
+    setMode(restored.promptMode)
+    setBudgetMode(restored.budgetMode)
+    setBudgetMaxTokens(restored.budgetMaxTokens)
+    setModules(restored.modules)
+    setTask(restored.task)
+    setSelectedCharacterIds(restored.selectedCharacterIds)
+    setSelectedForeshadowingIds(restored.selectedForeshadowingIds)
+    setForeshadowingTreatmentOverrides(restored.foreshadowingTreatmentOverrides)
+    setContextNeedPlan(restored.contextNeedPlan)
+    setContinuityInstructions(restored.continuityInstructions)
+    setUseContinuityBridge(restored.useContinuityBridge)
+    setPrompt(restored.prompt)
+    setSnapshotNote(restored.snapshotNote)
+    setPromptBinding(restored.promptBinding)
+    setPromptVersionSource(null)
+    setNeedsRebuild(false)
+    setPromptManuallyEdited(false)
+    setActiveTab('editor')
+  }
+
+  function loadPromptVersion(version: PromptVersion) {
+    clearHistoryFeedback()
+    setWorkspaceMessage('已载入 Prompt 版本')
+    const restored = restorePromptBuilderFromVersion(version)
+    const targetChanged = restored.targetChapterOrder !== targetChapterOrder
+    setTargetChapterOrder(restored.targetChapterOrder)
+    setMode(restored.promptMode)
+    setBudgetMode(restored.budgetMode)
+    setModules(restored.modules)
+    setTask(restored.task)
+    setPrompt(restored.prompt)
+    setActiveTab('editor')
+    setPromptBinding(restored.promptBinding)
+    setPromptVersionSource(version)
+    setNeedsRebuild(false)
+    setPromptManuallyEdited(false)
+    setContextNeedPlan(null)
+    setForeshadowingTreatmentOverrides({})
+    if (!targetChanged) resetAutomaticSelection()
   }
 
   async function saveForeshadowingTreatmentMode(id: ID) {
@@ -355,387 +389,124 @@ export function PromptBuilderView({ data, project, saveData, onSendToPipeline }:
     if (!contextNeedPlan) return
     const character = scoped.characters.find((item) => item.id === characterId)
     if (!character) return
-    if (!checked) {
-      setContextNeedPlan({
-        ...contextNeedPlan,
-        expectedCharacters: contextNeedPlan.expectedCharacters.filter((item) => item.characterId !== characterId),
-        requiredCharacterCardFields: Object.fromEntries(
-          Object.entries(contextNeedPlan.requiredCharacterCardFields).filter(([id]) => id !== characterId)
-        ),
-        requiredStateFactCategories: Object.fromEntries(
-          Object.entries(contextNeedPlan.requiredStateFactCategories).filter(([id]) => id !== characterId)
-        ),
-        updatedAt: now()
-      })
-      return
-    }
-
-    setContextNeedPlan({
-      ...contextNeedPlan,
-      expectedCharacters: [
-        ...contextNeedPlan.expectedCharacters.filter((item) => item.characterId !== characterId),
-        {
-          characterId,
-          roleInChapter: character.isMain ? 'protagonist' : 'support',
-          expectedPresence: 'onstage',
-          reason: '用户在 Prompt 构建器中手动加入。'
-        }
-      ],
-      requiredCharacterCardFields: {
-        ...contextNeedPlan.requiredCharacterCardFields,
-        [characterId]: ContextNeedPlannerService.inferRequiredCharacterFields(character, task, contextNeedPlan.expectedSceneType)
-      },
-      requiredStateFactCategories: {
-        ...contextNeedPlan.requiredStateFactCategories,
-        [characterId]: ContextNeedPlannerService.inferRequiredStateCategories(character, task, contextNeedPlan.expectedSceneType)
-      },
-      updatedAt: now()
-    })
+    setContextNeedPlan(toggleNeedPlanCharacter(contextNeedPlan, character, task, checked))
+    setSelectedCharacterIds((current) => toggleId(current, characterId, checked))
   }
 
   function updateNeedPlanForeshadowing(id: ID, role: 'required' | 'forbidden', checked: boolean) {
     if (!contextNeedPlan) return
-    const required = new Set(contextNeedPlan.requiredForeshadowingIds)
-    const forbidden = new Set(contextNeedPlan.forbiddenForeshadowingIds)
-    if (role === 'required') {
-      checked ? required.add(id) : required.delete(id)
-      if (checked) forbidden.delete(id)
-    } else {
-      checked ? forbidden.add(id) : forbidden.delete(id)
-      if (checked) required.delete(id)
+    setContextNeedPlan(toggleNeedPlanForeshadowing(contextNeedPlan, id, role, checked))
+    if (role === 'required' && checked) {
+      setSelectedForeshadowingIds((current) => toggleId(current, id, true))
     }
-    setContextNeedPlan({
-      ...contextNeedPlan,
-      requiredForeshadowingIds: [...required],
-      forbiddenForeshadowingIds: [...forbidden],
-      exclusionRules: [...forbidden].map((foreshadowingId) => ({
-        type: 'foreshadowing',
-        id: foreshadowingId,
-        reason: '用户在上下文需求计划中标记为禁止。'
-      })),
-      updatedAt: now()
-    })
-  }
-
-  function renderManualForeshadowingPanel() {
-    return (
-      <section className="panel">
-        <h2>手动选择本章相关伏笔</h2>
-        <div className="stack-list">
-          {sortedForeshadowings.map((item) => {
-            const isAuto = autoForeshadowings.some((auto) => auto.id === item.id)
-            const effectiveMode = effectiveTreatmentMode(item, foreshadowingTreatmentOverrides)
-            return (
-              <div key={item.id} className="context-item">
-                <Toggle
-                  label={`${item.title || '未命名伏笔'}${isAuto ? '（自动推荐）' : ''}`}
-                  checked={selectedForeshadowingIds.includes(item.id)}
-                  onChange={(checked) => setSelectedForeshadowingIds(toggleId(selectedForeshadowingIds, item.id, checked))}
-                />
-                <p className="muted">
-                  状态：{statusLabel(item.status)} · 权重：{weightLabel(item.weight)} · 预计回收：{item.expectedPayoff || '未设置'} · 本章处理：{treatmentModeLabel(effectiveMode)}
-                </p>
-                <div className="inline-controls">
-                  <SelectField<ForeshadowingTreatmentMode>
-                    label="临时处理方式"
-                    value={effectiveMode}
-                    onChange={(nextMode) => updateForeshadowingTreatmentOverride(item.id, nextMode)}
-                    options={FORESHADOWING_TREATMENT_OPTIONS}
-                  />
-                  <button className="ghost-button" onClick={() => saveForeshadowingTreatmentMode(item.id)}>保存为当前处理方式</button>
-                </div>
-                <p className="muted">{treatmentDescription(effectiveMode)}</p>
-              </div>
-            )
-          })}
-        </div>
-      </section>
-    )
+    if (role === 'forbidden' && checked) {
+      setSelectedForeshadowingIds((current) => toggleId(current, id, false))
+    }
   }
 
   return (
     <div className="prompt-view">
-      <Header title="Prompt 构建器" description="把上下文选择、预算、伏笔调度和章节衔接整理成可执行的写作 Prompt。" />
+      <Header title="Prompt 构建器" />
+      <div className="prompt-command-bar">
+        <span className="prompt-command-target">第 {targetChapterOrder} 章</span>
+        <div className="row-actions">
+          <button className={prompt.trim() ? 'secondary-button' : 'primary-button'} disabled={isSaving} onClick={generatePrompt}><WandSparkles size={16} aria-hidden="true" />构建 Prompt</button>
+          <button className="ghost-button" aria-label="复制 Prompt" title="复制 Prompt" disabled={!prompt.trim()} onClick={() => void copyPrompt()}><Copy size={16} aria-hidden="true" /></button>
+          <button className="ghost-button" title="保存版本" disabled={isSaving || !prompt.trim()} onClick={() => { setWorkspaceMessage(''); void savePromptVersion() }}><Save size={16} aria-hidden="true" />保存版本</button>
+          <button className="ghost-button" title="保存上下文快照" disabled={isSaving} onClick={() => { setWorkspaceMessage(''); void saveContextSnapshot() }}><Layers size={16} aria-hidden="true" />保存快照</button>
+          {onSendToPipeline && <button disabled={isSaving} className={prompt.trim() ? 'primary-button' : 'secondary-button'} onClick={() => { setWorkspaceMessage(''); void sendToPipeline() }}>发送到生产流水线<ArrowRight size={16} aria-hidden="true" /></button>}
+        </div>
+      </div>
+      <p className="prompt-workspace-message" role="status">{isSaving ? '正在保存...' : workspaceMessage || historyMessage}</p>
+      {historyError && <p className="notice danger" role="alert">{historyError}</p>}
+      {needsRebuild && prompt.trim() && <p className="notice">任务或上下文已调整，当前 Prompt 尚未更新{promptBinding ? `，仍对应第 ${promptBinding.targetChapterOrder} 章` : ''}。重新构建会替换编辑区中的文本。</p>}
       <section className="prompt-layout prompt-workbench">
-        <aside className="panel prompt-controls">
-          <div className="prompt-controls-head">
-            <span className="chapter-kicker">Context Console</span>
-            <h2>上下文控制</h2>
-          </div>
-          <NumberInput label="准备写第 N 章" value={targetChapterOrder} min={1} onChange={(value) => setTargetChapterOrder(value ?? 1)} />
-          <SelectField<PromptMode>
-            label="Prompt 模式"
-            value={mode}
-            onChange={changeMode}
-            options={[
-              { value: 'light', label: '轻量模式' },
-              { value: 'standard', label: '标准模式' },
-              { value: 'full', label: '完整模式' }
-            ]}
-          />
-          <SelectField<ContextBudgetMode>
-            label="记忆预算模式"
-            value={budgetMode}
-            onChange={setBudgetMode}
-            options={[
-              { value: 'light', label: '轻量' },
-              { value: 'standard', label: '标准' },
-              { value: 'full', label: '完整' },
-              { value: 'custom', label: '自定义' }
-            ]}
-          />
-          <NumberInput
-            label="上下文预算 token"
-            min={1000}
-            value={budgetMaxTokens}
-            onChange={(value) => setBudgetMaxTokens(value ?? data.settings.defaultTokenBudget)}
-          />
-          <div className="module-box">
-            <h3>上下文模块</h3>
-            {(Object.keys(modules) as Array<keyof PromptModuleSelection>).map((key) => (
-              <Toggle key={key} label={moduleLabels[key]} checked={modules[key]} onChange={(checked) => setModules({ ...modules, [key]: checked })} />
-            ))}
-          </div>
-          <button className="ghost-button" onClick={resetAutomaticSelection}>恢复自动推荐</button>
-          <TokenBudgetMeter value={tokenEstimate} max={budgetMaxTokens} label="最终 Prompt" />
-          <ul className="advice-list">
-            {advice.map((item) => <li key={item}>{item}</li>)}
-          </ul>
-        </aside>
+        <fieldset className="prompt-control-fieldset" disabled={isSaving} onChangeCapture={() => setNeedsRebuild(Boolean(prompt.trim()))}>
+        <PromptControlPanel
+          targetChapterOrder={targetChapterOrder}
+          mode={mode}
+          budgetMode={budgetMode}
+          budgetMaxTokens={budgetMaxTokens}
+          tokenEstimate={tokenEstimate}
+          modules={modules}
+          advice={advice}
+          onTargetChapterOrderChange={(value) => setTargetChapterOrder(value ?? 1)}
+          onModeChange={changeMode}
+          onBudgetModeChange={setBudgetMode}
+          onBudgetMaxTokensChange={(value) => setBudgetMaxTokens(value ?? data.settings.defaultTokenBudget)}
+          onModulesChange={setModules}
+          onResetAutomaticSelection={() => { resetAutomaticSelection(); setNeedsRebuild(Boolean(prompt.trim())) }}
+        />
+        </fieldset>
 
         <div className="prompt-main">
-          <section className="panel prompt-budget-panel">
-            <h2>记忆预算调度</h2>
-            <p className="muted">{ContextBudgetManager.explainSelection(budgetSelection)}</p>
-            <TokenBudgetMeter value={budgetSelection.estimatedTokens} max={budgetProfile.maxTokens} label="上下文选择" />
-            <div className="metric-grid prompt-budget-stats">
-              <StatCard label="纳入章节" value={budgetSelection.selectedChapterIds.length} tone="accent" />
-              <StatCard label="纳入角色" value={budgetSelection.selectedCharacterIds.length} tone="success" />
-              <StatCard label="纳入伏笔" value={budgetSelection.selectedForeshadowingIds.length} tone="warning" />
-              <StatCard label="省略项目" value={budgetSelection.omittedItems.length} tone="info" />
-            </div>
-            <div className="budget-columns">
-              <div>
-                <h3>已选择内容</h3>
-                <ul className="advice-list">
-                  <li>章节：{scoped.chapters.filter((chapter) => budgetSelection.selectedChapterIds.includes(chapter.id)).map((chapter) => `第 ${chapter.order} 章`).join('、') || '无'}</li>
-                  <li>角色：{scoped.characters.filter((character) => budgetSelection.selectedCharacterIds.includes(character.id)).map((character) => character.name).join('、') || '无'}</li>
-                  <li>伏笔：{scoped.foreshadowings.filter((item) => budgetSelection.selectedForeshadowingIds.includes(item.id)).map((item) => item.title).join('、') || '无'}</li>
-                </ul>
-              </div>
-              <div>
-                <h3>省略与风险</h3>
-                <ul className="advice-list">
-                  {budgetSelection.omittedItems.slice(0, 6).map((item, index) => (
-                    <li key={`${item.type}-${item.id ?? index}`}>{item.type}：{item.reason}</li>
-                  ))}
-                  {budgetSelection.warnings.map((warning) => <li key={warning}>{warning}</li>)}
-                </ul>
-              </div>
-            </div>
-          </section>
+          <PromptWorkspaceTabs activeTab={activeTab} onChange={setActiveTab} />
+          <fieldset className="prompt-content-fieldset" disabled={isSaving}>
+          <div id="prompt-workspace-panel-task" role="tabpanel" aria-labelledby="prompt-workspace-tab-task" hidden={activeTab !== 'task'}>
+            <PromptChapterTaskPanel task={task} onTaskChange={(value) => { setTask(value); setNeedsRebuild(Boolean(prompt.trim())) }} />
+          </div>
+          <div id="prompt-workspace-panel-editor" role="tabpanel" aria-labelledby="prompt-workspace-tab-editor" hidden={activeTab !== 'editor'}>
+            <PromptEditorPanel prompt={prompt} snapshotNote={snapshotNote} onPromptChange={(value) => { setPrompt(value); setPromptManuallyEdited(true) }} onSnapshotNoteChange={setSnapshotNote} />
+          </div>
+          <div id="prompt-workspace-panel-history" role="tabpanel" aria-labelledby="prompt-workspace-tab-history" hidden={activeTab !== 'history'}>
+            <PromptHistoryPanels
+              promptContextSnapshots={scoped.promptContextSnapshots}
+              promptVersions={scoped.promptVersions}
+              onLoadSnapshot={loadContextSnapshot}
+              onSendSnapshotToPipeline={onSendToPipeline}
+              onDeleteSnapshot={(id) => void deleteContextSnapshot(id)}
+              onLoadPromptVersion={loadPromptVersion}
+              onDeletePromptVersion={(id) => void deletePromptVersion(id)}
+            />
+          </div>
+          <div id="prompt-workspace-panel-context" role="tabpanel" aria-labelledby="prompt-workspace-tab-context" hidden={activeTab !== 'context'} onChangeCapture={() => setNeedsRebuild(Boolean(prompt.trim()))}>
+          <PromptBudgetPanel
+            budgetProfile={budgetProfile}
+            budgetSelection={budgetSelection}
+            chapters={scoped.chapters}
+            characters={scoped.characters}
+            foreshadowings={scoped.foreshadowings}
+          />
 
-          <section className="panel context-need-panel">
-            <div className="panel-title-row">
-              <h2>上下文需求计划</h2>
-              <button className="secondary-button" onClick={generateContextNeedPlan}>生成上下文需求计划</button>
-            </div>
-            {!contextNeedPlan ? (
-              <p className="muted">先判断本章需要检索哪些角色卡字段、状态事实、伏笔、时间线和设定，再交给预算调度器筛选上下文。</p>
-            ) : (
-              <div className="stack-list">
-                <p><strong>场景类型：</strong>{contextNeedPlan.expectedSceneType}</p>
-                <TextArea
-                  label="本章意图"
-                  value={contextNeedPlan.chapterIntent}
-                  rows={3}
-                  onChange={(chapterIntent) => setContextNeedPlan({ ...contextNeedPlan, chapterIntent, updatedAt: now() })}
-                />
-                <div className="budget-columns">
-                  <div>
-                    <h3>预计出场角色</h3>
-                    <ul className="advice-list">
-                      {contextNeedPlan.expectedCharacters.map((item) => {
-                        const character = scoped.characters.find((candidate) => candidate.id === item.characterId)
-                        const fields = contextNeedPlan.requiredCharacterCardFields[item.characterId] ?? []
-                        const categories = contextNeedPlan.requiredStateFactCategories[item.characterId] ?? []
-                        return (
-                          <li key={item.characterId}>
-                            {character?.name ?? item.characterId}：{item.expectedPresence} / {item.roleInChapter}
-                            <br />
-                            <span className="muted">字段 {fields.join('、') || '-'}；状态 {categories.join('、') || '-'}</span>
-                          </li>
-                        )
-                      })}
-                      {contextNeedPlan.expectedCharacters.length === 0 ? <li>暂无预计角色。</li> : null}
-                    </ul>
-                  </div>
-                  <div>
-                    <h3>伏笔与连续性</h3>
-                    <ul className="advice-list">
-                      <li>需要伏笔：{contextNeedPlan.requiredForeshadowingIds.length}</li>
-                      <li>禁止伏笔：{contextNeedPlan.forbiddenForeshadowingIds.length}</li>
-                      <li>必须检查：{contextNeedPlan.mustCheckContinuity.join('、') || '-'}</li>
-                      {contextNeedPlan.warnings.map((warning) => <li key={warning}>{warning}</li>)}
-                    </ul>
-                  </div>
-                </div>
-                <details className="context-item">
-                  <summary>手动微调需求计划</summary>
-                  <div className="budget-columns">
-                    <div>
-                      <h3>出场角色</h3>
-                      <div className="checkbox-grid">
-                        {scoped.characters.map((character) => (
-                          <Toggle
-                            key={character.id}
-                            label={character.name}
-                            checked={contextNeedPlan.expectedCharacters.some((item) => item.characterId === character.id)}
-                            onChange={(checked) => updateNeedPlanCharacter(character.id, checked)}
-                          />
-                        ))}
-                      </div>
-                    </div>
-                    <div>
-                      <h3>伏笔需求</h3>
-                      <div className="stack-list">
-                        {sortedForeshadowings.slice(0, 12).map((item) => (
-                          <div key={item.id} className="context-item">
-                            <strong>{item.title}</strong>
-                            <Toggle
-                              label="本章需要检索"
-                              checked={contextNeedPlan.requiredForeshadowingIds.includes(item.id)}
-                              onChange={(checked) => updateNeedPlanForeshadowing(item.id, 'required', checked)}
-                            />
-                            <Toggle
-                              label="本章禁止提及/推进"
-                              checked={contextNeedPlan.forbiddenForeshadowingIds.includes(item.id)}
-                              onChange={(checked) => updateNeedPlanForeshadowing(item.id, 'forbidden', checked)}
-                            />
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-                  </div>
-                </details>
-              </div>
-            )}
-          </section>
+          <PromptContextNeedPanel
+            contextNeedPlan={contextNeedPlan}
+            characters={scoped.characters}
+            foreshadowings={sortedForeshadowings}
+            onGenerate={() => void generateContextNeedPlan()}
+            onChange={setContextNeedPlan}
+            onToggleCharacter={updateNeedPlanCharacter}
+            onToggleForeshadowing={updateNeedPlanForeshadowing}
+          />
 
-          <section className="panel">
-            <div className="panel-title-row">
-              <h2>章节衔接</h2>
-              <Toggle label="使用衔接桥" checked={useContinuityBridge} onChange={setUseContinuityBridge} />
-            </div>
-            <p className="muted">
-              上一章：{previousChapter ? `第 ${previousChapter.order} 章 ${previousChapter.title || '未命名'}` : '暂无上一章'} · 来源：
-              {continuity.source === 'saved_bridge' ? '已保存衔接桥' : continuity.source === 'auto_from_previous_ending' ? '上一章结尾片段兜底' : '暂无'}
-            </p>
-            {previousChapter ? (
-              <div className="context-item">
-                <strong>上一章结尾片段</strong>
-                <p className="muted">{endingExcerpt(previousChapter, 500) || '暂无正文片段'}</p>
-              </div>
-            ) : null}
-            {continuity.bridge ? (
-              <div className="stack-list">
-                <p><strong>下一章开头必须接住：</strong>{continuity.bridge.immediateNextBeat || continuity.bridge.mustContinueFrom || '待补充'}</p>
-                <p><strong>禁止重置：</strong>{continuity.bridge.mustNotReset || '不要重新介绍已有环境、机关和设定。'}</p>
-                <p><strong>开放小张力：</strong>{continuity.bridge.openMicroTensions || '待补充'}</p>
-              </div>
-            ) : null}
-            <TextArea label="本章衔接补充指令" value={continuityInstructions} rows={4} onChange={setContinuityInstructions} />
-          </section>
+          <PromptContinuityPanel
+            previousChapter={previousChapter}
+            continuity={continuity}
+            useContinuityBridge={useContinuityBridge}
+            continuityInstructions={continuityInstructions}
+            onUseContinuityBridgeChange={setUseContinuityBridge}
+            onContinuityInstructionsChange={setContinuityInstructions}
+          />
 
-          <section className="panel">
-            <h2>手动选择本章相关角色</h2>
-            <div className="checkbox-grid">
-              {scoped.characters.map((character) => (
-                <Toggle
-                  key={character.id}
-                  label={`${character.name}${autoCharacters.some((item) => item.id === character.id) ? '（自动推荐）' : ''}`}
-                  checked={selectedCharacterIds.includes(character.id)}
-                  onChange={(checked) => setSelectedCharacterIds(toggleId(selectedCharacterIds, character.id, checked))}
-                />
-              ))}
-            </div>
-          </section>
+          <PromptCharacterSelectionPanel
+            characters={scoped.characters}
+            automaticallyRecommendedIds={autoCharacterIds}
+            selectedCharacterIds={selectedCharacterIds}
+            onToggleCharacter={(id, checked) =>
+              setSelectedCharacterIds((current) => toggleId(current, id, checked))
+            }
+          />
 
-          <section className="panel">
-            <h2>当前章节任务书</h2>
-            <div className="form-grid">
-              <TextArea label="本章目标" value={task.goal} onChange={(goal) => setTask({ ...task, goal })} />
-              <TextArea label="本章必须推进的冲突" value={task.conflict} onChange={(conflict) => setTask({ ...task, conflict })} />
-              <TextArea label="本章必须保留的悬念" value={task.suspenseToKeep} onChange={(suspenseToKeep) => setTask({ ...task, suspenseToKeep })} />
-              <TextArea label="本章允许回收的伏笔" value={task.allowedPayoffs} onChange={(allowedPayoffs) => setTask({ ...task, allowedPayoffs })} />
-              <TextArea label="本章禁止回收的伏笔" value={task.forbiddenPayoffs} onChange={(forbiddenPayoffs) => setTask({ ...task, forbiddenPayoffs })} />
-              <TextArea label="本章结尾钩子" value={task.endingHook} onChange={(endingHook) => setTask({ ...task, endingHook })} />
-              <TextArea label="本章读者应该产生的情绪" value={task.readerEmotion} onChange={(readerEmotion) => setTask({ ...task, readerEmotion })} />
-              <TextInput label="本章预计字数" value={task.targetWordCount} onChange={(targetWordCount) => setTask({ ...task, targetWordCount })} />
-              <TextArea label="文风要求" value={task.styleRequirement} onChange={(styleRequirement) => setTask({ ...task, styleRequirement })} />
-            </div>
-            <div className="row-actions">
-              <button className="primary-button" onClick={generatePrompt}>生成 Prompt</button>
-              <button className="ghost-button" onClick={copyPrompt}>复制 Prompt</button>
-              <button className="ghost-button" onClick={savePromptVersion}>保存版本</button>
-              <button className="ghost-button" onClick={() => saveContextSnapshot()}>保存上下文快照</button>
-              <button className="primary-button" onClick={sendToPipeline}>发送到生产流水线</button>
-            </div>
-          </section>
-
-          <section className="panel prompt-editor-panel">
-            <div className="panel-title-row sticky-title-row">
-              <h2>最终 Prompt</h2>
-              <div className="row-actions">
-                <button className="primary-button" onClick={copyPrompt}>复制 Prompt</button>
-                <button className="ghost-button" onClick={savePromptVersion}>保存版本</button>
-                <button className="ghost-button" onClick={() => saveContextSnapshot()}>保存快照</button>
-              </div>
-            </div>
-            <TextInput label="快照备注" value={snapshotNote} onChange={setSnapshotNote} />
-            <textarea className="prompt-editor" value={prompt} onChange={(event) => setPrompt(event.target.value)} />
-          </section>
-
-          <section className="panel">
-            <h2>上下文快照</h2>
-            <p className="muted">快照保存的是上下文选择、预算、任务书和最终 Prompt；生产流水线可以直接使用它作为执行输入。</p>
-            <div className="version-list">
-              {scoped.promptContextSnapshots.length === 0 ? (
-                <p className="muted">暂无上下文快照。</p>
-              ) : (
-                scoped.promptContextSnapshots.map((snapshot) => (
-                  <div key={snapshot.id} className="version-row">
-                    <button onClick={() => setPrompt(snapshot.finalPrompt)}>
-                      <strong>第 {snapshot.targetChapterOrder} 章 · {safeModeLabel(snapshot.mode)}</strong>
-                      <span>
-                        {snapshot.estimatedTokens} token · 角色 {snapshot.selectedCharacterIds.length} · 伏笔 {snapshot.selectedForeshadowingIds.length} · {formatDate(snapshot.createdAt)}
-                      </span>
-                      {snapshot.note ? <span>{snapshot.note}</span> : null}
-                    </button>
-                    <button className="ghost-button" onClick={() => onSendToPipeline?.(snapshot.id)}>发送到流水线</button>
-                    <button className="danger-button" onClick={() => deleteContextSnapshot(snapshot.id)}>删除快照</button>
-                  </div>
-                ))
-              )}
-            </div>
-          </section>
-
-          <section className="panel">
-            <h2>已保存版本</h2>
-            <div className="version-list">
-              {scoped.promptVersions.map((version) => (
-                <div key={version.id} className="version-row">
-                  <button onClick={() => setPrompt(version.content)}>
-                    <strong>{version.title}</strong>
-                    <span>{version.tokenEstimate} token · {formatDate(version.createdAt)}</span>
-                  </button>
-                  <button className="danger-button" onClick={() => deletePromptVersion(version.id)}>删除版本</button>
-                </div>
-              ))}
-            </div>
-          </section>
-
-          {renderManualForeshadowingPanel()}
+          <PromptManualForeshadowingPanel
+            foreshadowings={sortedForeshadowings}
+            autoForeshadowingIds={autoForeshadowingIds}
+            selectedForeshadowingIds={selectedForeshadowingIds}
+            treatmentOverrides={foreshadowingTreatmentOverrides}
+            onToggleForeshadowing={(id, checked) => setSelectedForeshadowingIds(toggleId(selectedForeshadowingIds, id, checked))}
+            onTreatmentOverrideChange={updateForeshadowingTreatmentOverride}
+            onSaveTreatmentMode={(id) => void saveForeshadowingTreatmentMode(id)}
+          />
+          </div>
+          </fieldset>
         </div>
       </section>
     </div>

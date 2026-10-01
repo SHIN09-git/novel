@@ -1,26 +1,14 @@
 import { defaultModulesForMode } from '../../../shared/defaults'
-import { shouldRecommendForeshadowing } from '../../../shared/foreshadowingTreatment'
-import type { AppData, BuildPromptResult, ChapterTask, Character, ContextBudgetProfile, ContextNeedPlan, ContextSelectionResult, Foreshadowing, ForeshadowingTreatmentMode, ID, Project, StoryDirectionGuide } from '../../../shared/types'
+import type { AppData, BuildPromptResult, ChapterTask, ContextBudgetProfile, ContextNeedPlan, ContextSelectionMode, ContextSelectionResult, ForeshadowingTreatmentMode, ID, Project, StoryDirectionGuide } from '../../../shared/types'
 import { ContextBudgetManager } from '../../../services/ContextBudgetManager'
-import { parseChapterNumbersFromText, PromptBuilderService } from '../../../services/PromptBuilderService'
+import { PromptBuilderService } from '../../../services/PromptBuilderService'
+import { isolateOpeningCharacterCards, shouldIsolateOpeningLegacyContext } from '../../../services/OpeningChapterContextPolicy'
 import { createPipelinePromptConfigFromSelection } from './contextSelectionConfig'
+import { recommendedCharacters, recommendedForeshadowings } from './foreshadowingRecommendations'
 import { projectData } from './projectData'
 
 export { createContextBudgetProfile } from './contextBudgetProfile'
-
-export function expectedPayoffNearText(text: string, targetChapterOrder: number): boolean {
-  const numbers = parseChapterNumbersFromText(text)
-  return numbers.some((num) => Math.abs(num - targetChapterOrder) <= 3)
-}
-
-export function recommendedForeshadowings(items: Foreshadowing[], targetChapterOrder: number): Foreshadowing[] {
-  return items.filter((item) => shouldRecommendForeshadowing(item, expectedPayoffNearText(item.expectedPayoff, targetChapterOrder)))
-}
-
-export function recommendedCharacters(characters: Character[], foreshadowings: Foreshadowing[]): Character[] {
-  const relatedIds = new Set(foreshadowings.flatMap((item) => item.relatedCharacterIds))
-  return characters.filter((character) => character.isMain || relatedIds.has(character.id))
-}
+export { recommendedCharacters, recommendedForeshadowings } from './foreshadowingRecommendations'
 
 export function selectBudgetContext(
   project: Project,
@@ -33,6 +21,8 @@ export function selectBudgetContext(
     chapterTask?: Partial<ChapterTask> | null
     foreshadowingTreatmentOverrides?: Record<ID, ForeshadowingTreatmentMode>
     contextNeedPlan?: ContextNeedPlan | null
+    selectionMode?: ContextSelectionMode
+    isolateOpeningLegacyContext?: boolean
   } = {}
 ): ContextSelectionResult {
   const scoped = projectData(data, project.id)
@@ -60,10 +50,12 @@ export function buildPipelineContext(
   wordCount: string,
   budgetProfile?: ContextBudgetProfile,
   explicitSelection?: ContextSelectionResult,
-  storyDirectionGuide?: StoryDirectionGuide | null
+  storyDirectionGuide?: StoryDirectionGuide | null,
+  chapterTask?: ChapterTask | null,
+  omitStyleSample = false
 ): string {
   if (budgetProfile && explicitSelection) {
-    return buildPipelineContextFromSelection(project, data, targetChapterOrder, emotion, wordCount, budgetProfile, explicitSelection, null, storyDirectionGuide)
+    return buildPipelineContextFromSelection(project, data, targetChapterOrder, emotion, wordCount, budgetProfile, explicitSelection, null, storyDirectionGuide, chapterTask, omitStyleSample)
   }
 
   const scoped = projectData(data, project.id)
@@ -114,9 +106,11 @@ export function buildPipelineContextFromSelection(
   budgetProfile: ContextBudgetProfile,
   selection: ContextSelectionResult,
   contextNeedPlan?: ContextNeedPlan | null,
-  storyDirectionGuide?: StoryDirectionGuide | null
+  storyDirectionGuide?: StoryDirectionGuide | null,
+  chapterTask?: ChapterTask | null,
+  isolateLegacyCreativeContext = false
 ): string {
-  return buildPipelineContextResultFromSelection(project, data, targetChapterOrder, emotion, wordCount, budgetProfile, selection, contextNeedPlan, storyDirectionGuide).finalPrompt
+  return buildPipelineContextResultFromSelection(project, data, targetChapterOrder, emotion, wordCount, budgetProfile, selection, contextNeedPlan, storyDirectionGuide, chapterTask, isolateLegacyCreativeContext).finalPrompt
 }
 
 export function buildPipelineContextResultFromSelection(
@@ -128,9 +122,25 @@ export function buildPipelineContextResultFromSelection(
   budgetProfile: ContextBudgetProfile,
   selection: ContextSelectionResult,
   contextNeedPlan?: ContextNeedPlan | null,
-  storyDirectionGuide?: StoryDirectionGuide | null
+  storyDirectionGuide?: StoryDirectionGuide | null,
+  chapterTask?: ChapterTask | null,
+  isolateLegacyCreativeContext = false
 ): BuildPromptResult {
   const scoped = projectData(data, project.id)
+  const isolateOpeningLegacyContext = shouldIsolateOpeningLegacyContext(targetChapterOrder, isolateLegacyCreativeContext)
+  const promptProject = isolateOpeningLegacyContext
+    ? { ...project, genre: '', description: '', targetReaders: '', coreAppeal: '', style: '' }
+    : project
+  const promptBible = isolateOpeningLegacyContext && scoped.bible
+    ? {
+        ...scoped.bible,
+        styleSample: '',
+        ...(isolateOpeningLegacyContext
+          ? { narrativeTone: '', bannedTropes: '', immutableFacts: '' }
+          : {})
+      }
+    : scoped.bible
+  const promptCharacters = isolateOpeningLegacyContext ? isolateOpeningCharacterCards(scoped.characters) : scoped.characters
   const config = createPipelinePromptConfigFromSelection({
     projectId: project.id,
     targetChapterOrder,
@@ -138,23 +148,24 @@ export function buildPipelineContextResultFromSelection(
     wordCount,
     projectStyle: project.style,
     modules: defaultModulesForMode('standard'),
-    selection
+    selection,
+    chapterTask
   })
 
   return PromptBuilderService.buildResult({
-    project,
-    bible: scoped.bible,
-    chapters: scoped.chapters,
-    characters: scoped.characters,
-    characterStateLogs: scoped.characterStateLogs,
-    characterStateFacts: scoped.characterStateFacts,
-    foreshadowings: scoped.foreshadowings,
-    timelineEvents: scoped.timelineEvents,
-    stageSummaries: scoped.stageSummaries,
-    chapterContinuityBridges: scoped.chapterContinuityBridges,
-    contextNeedPlan: contextNeedPlan ?? null,
-    storyDirectionGuide: storyDirectionGuide ?? null,
-    hardCanonPack: scoped.hardCanonPacks[0] ?? null,
+    project: promptProject,
+    bible: promptBible,
+    chapters: isolateOpeningLegacyContext ? [] : scoped.chapters,
+    characters: promptCharacters,
+    characterStateLogs: isolateOpeningLegacyContext ? [] : scoped.characterStateLogs,
+    characterStateFacts: isolateOpeningLegacyContext ? [] : scoped.characterStateFacts,
+    foreshadowings: isolateOpeningLegacyContext ? [] : scoped.foreshadowings,
+    timelineEvents: isolateOpeningLegacyContext ? [] : scoped.timelineEvents,
+    stageSummaries: isolateOpeningLegacyContext ? [] : scoped.stageSummaries,
+    chapterContinuityBridges: isolateOpeningLegacyContext ? [] : scoped.chapterContinuityBridges,
+    contextNeedPlan: isolateOpeningLegacyContext ? null : contextNeedPlan ?? null,
+    storyDirectionGuide: isolateOpeningLegacyContext ? null : storyDirectionGuide ?? null,
+    hardCanonPack: isolateOpeningLegacyContext ? null : scoped.hardCanonPacks[0] ?? null,
     config,
     budgetProfile,
     explicitContextSelection: selection

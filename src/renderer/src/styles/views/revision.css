@@ -13,8 +13,8 @@
 
 .chapters-view .version-history-item {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  gap: var(--space-3);
+  grid-template-columns: minmax(0, 1fr);
+  gap: var(--space-2);
   align-items: center;
   padding: var(--space-3);
   border: 1px solid var(--line);
@@ -31,7 +31,7 @@
 }
 
 .chapters-view .version-history-item.active {
-  border-color: rgba(40, 118, 111, 0.42);
+  border-color: color-mix(in srgb, var(--color-accent) 42%, transparent);
   background: var(--color-accent-soft);
 }
 
@@ -56,9 +56,10 @@
   padding: var(--space-4);
   border: 1px solid var(--line);
   border-radius: var(--radius);
-  background: var(--surface);
-  color: var(--ink);
-  line-height: 1.8;
+  background: var(--paper);
+  color: var(--paper-ink);
+  font-family: var(--font-prose);
+  line-height: 1.9;
 }
 
 .chapters-view .version-links-grid {
@@ -81,16 +82,88 @@
 
 .revision-view .revision-studio-layout {
   display: grid;
-  grid-template-columns: 330px minmax(0, 1fr);
-  gap: var(--space-4);
+  grid-template-columns: minmax(250px, 292px) minmax(0, 1fr);
+  gap: clamp(18px, 2vw, 32px);
   align-items: start;
+}
+
+.revision-view .revision-workflow-strip {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 1px;
+  margin-bottom: var(--space-4);
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  background: var(--line);
+}
+
+.revision-view .revision-workflow-strip span {
+  padding: 10px 14px;
+  background: var(--surface);
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 700;
+  text-align: center;
+}
+
+.revision-view .revision-workflow-strip span.active {
+  background: var(--color-accent-soft);
+  color: var(--accent);
+}
+
+.revision-view .revision-workflow-strip span.complete {
+  color: var(--color-text-secondary);
 }
 
 .revision-view .revision-sidebar {
   position: sticky;
-  top: 22px;
+  top: var(--workspace-sticky-offset);
   display: grid;
-  gap: var(--space-4);
+  gap: 16px;
+  min-width: 0;
+}
+
+.revision-view .revision-sidebar .section-card {
+  padding: 0 0 16px;
+  border: 0;
+  border-bottom: 1px solid var(--line);
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+}
+
+.revision-view .revision-sidebar .section-card + .section-card {
+  margin-top: 0;
+}
+
+.revision-view .revision-sidebar .section-card-header {
+  margin-bottom: 12px;
+}
+
+.revision-view .revision-sidebar .section-card-header h2,
+.revision-view .revision-reader-heading h2 {
+  font-size: 15px;
+}
+
+.revision-view .revision-linked-chapter {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 8px;
+  margin: 8px 0 0;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.revision-view .revision-linked-chapter strong {
+  color: var(--ink);
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
+.revision-view .revision-linked-chapter.muted {
+  display: block;
 }
 
 .revision-view .segmented-control {
@@ -111,14 +184,89 @@
 }
 
 .revision-view .segmented-control button.active {
-  background: var(--surface);
-  color: var(--accent);
-  box-shadow: var(--shadow-soft);
+  background: var(--color-surface-elevated);
+  color: var(--color-accent-strong);
+  box-shadow: 0 1px 2px rgba(23, 27, 36, 0.12), 0 0 0 1px var(--line);
 }
 
 .revision-view .quality-issue-list {
   display: grid;
   gap: var(--space-2);
+}
+
+.revision-view .revision-quick-presets {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.revision-view .revision-quick-presets button {
+  min-height: 40px;
+  border-color: var(--line);
+  background: var(--surface-strong);
+  color: var(--ink);
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+  white-space: normal;
+}
+
+.revision-view .revision-quick-presets button.active {
+  border-color: color-mix(in srgb, var(--color-accent) 42%, transparent);
+  background: var(--color-accent-soft);
+  color: var(--accent);
+}
+
+.revision-view .revision-quick-presets-details,
+.revision-view .revision-advanced-options {
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px solid var(--line);
+}
+
+.revision-view .revision-quick-presets-details summary,
+.revision-view .revision-advanced-options summary {
+  cursor: pointer;
+  color: var(--muted);
+  font-weight: 700;
+  font-size: 12px;
+}
+
+.revision-view .revision-quick-presets-details[open] summary,
+.revision-view .revision-advanced-options[open] summary {
+  margin-bottom: 10px;
+  color: var(--accent);
+}
+
+.revision-view .revision-generation-actions {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1.45fr);
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.revision-view .revision-generation-actions button {
+  min-width: 0;
+  padding-inline: 10px;
+  white-space: nowrap;
+}
+
+.revision-view .revision-sidebar-details {
+  padding-top: 2px;
+}
+
+.revision-view .revision-sidebar-details summary,
+.revision-view .revision-version-meta summary {
+  cursor: pointer;
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.revision-view .revision-sidebar-details[open] summary,
+.revision-view .revision-version-meta[open] summary {
+  margin-bottom: 10px;
+  color: var(--accent);
 }
 
 .revision-view .quality-issue {
@@ -135,50 +283,171 @@
   color: var(--muted);
   font-size: 13px;
   line-height: 1.5;
+  overflow-wrap: anywhere;
 }
 
 .revision-view .quality-issue.high {
-  border-color: rgba(182, 83, 83, 0.38);
+  border-color: color-mix(in srgb, var(--color-danger) 38%, transparent);
   background: var(--color-danger-soft);
 }
 
 .revision-view .quality-issue.medium {
-  border-color: rgba(201, 129, 34, 0.38);
+  border-color: color-mix(in srgb, var(--color-warning) 38%, transparent);
   background: var(--color-warning-soft);
 }
 
 .revision-view .revision-compare {
   display: grid;
   grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
-  gap: var(--space-4);
+  gap: 18px;
+  min-width: 0;
+}
+
+.revision-view .revision-compare.no-versions {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.revision-view .revision-compare.has-versions {
+  grid-template-columns: minmax(0, 1fr);
 }
 
 .revision-view .revision-textarea {
-  min-height: 62vh;
+  min-height: 64vh;
   resize: vertical;
   border: 0;
-  border-radius: 0;
-  background:
-    linear-gradient(90deg, rgba(40, 118, 111, 0.05), transparent 34%),
-    var(--surface);
+  border-radius: var(--radius-md);
+  background: var(--paper);
+  color: var(--paper-ink);
+  box-shadow: none;
+  font-family: var(--font-prose);
   font-size: 16px;
-  line-height: 1.9;
-  padding: var(--space-6);
+  line-height: 2;
+  letter-spacing: 0.01em;
+  padding: var(--space-6) max(var(--space-6), calc((100% - var(--prose-measure)) / 2));
+}
+
+.revision-view .revision-textarea:focus {
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--color-accent) 40%, transparent);
 }
 
 .revision-view .revision-textarea.original {
   color: var(--color-text-secondary);
 }
 
+.revision-view .revision-compare.no-versions .revision-textarea.original {
+  min-height: clamp(380px, 62vh, 760px);
+  padding: clamp(18px, 2.5vw, 34px);
+}
+
+.revision-view .revision-source-reader {
+  min-width: 0;
+}
+
+.revision-view .revision-reader-heading {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-3);
+  margin-bottom: 10px;
+}
+
+.revision-view .revision-reader-heading h2 {
+  margin: 0;
+}
+
+.revision-view .revision-reader-heading span {
+  color: var(--muted);
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.revision-view .revision-source-disclosure {
+  border-top: 1px solid var(--line);
+}
+
+.revision-view .revision-source-disclosure summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  padding: 11px 0;
+  color: var(--muted);
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.revision-view .revision-source-disclosure summary span {
+  color: var(--ink);
+}
+
+.revision-view .revision-source-disclosure summary small {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 500;
+}
+
+.revision-view .revision-source-disclosure[open] summary {
+  border-bottom: 1px solid var(--line);
+}
+
+.revision-view .revision-source-disclosure .revision-textarea.original {
+  min-height: clamp(180px, 36vh, 300px);
+  padding: var(--space-4);
+}
+
 .revision-view .revision-textarea.revised {
   color: var(--ink);
+}
+
+.revision-view .revision-candidate-panel .section-card-header {
+  align-items: center;
+  position: sticky;
+  top: var(--workspace-sticky-offset);
+  z-index: 2;
+  margin: 0;
+  padding: 12px 0;
+  border-bottom: 1px solid var(--line);
+  background: var(--surface);
+}
+
+.revision-view .revision-candidate-panel {
+  min-width: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  box-shadow: none;
+}
+
+.revision-view .revision-candidate-primary-actions,
+.revision-view .revision-utility-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.revision-view .revision-candidate-primary-actions {
+  justify-content: flex-end;
+}
+
+.revision-view .revision-utility-actions {
+  justify-content: flex-end;
+  margin: 12px 0;
+}
+
+.revision-view .revision-candidate-panel .revision-textarea.revised {
+  min-height: clamp(220px, 36vh, 360px);
+  padding: var(--space-4);
 }
 
 .revision-view .version-tabs {
   display: flex;
   gap: var(--space-2);
   overflow-x: auto;
+  overflow-y: hidden;
+  max-height: 76px;
   padding-bottom: var(--space-2);
+  scrollbar-gutter: stable;
 }
 
 .revision-view .version-tabs button {
@@ -187,13 +456,15 @@
   min-width: 122px;
   text-align: left;
   border-color: var(--line);
-  background: var(--surface-strong);
+  background: var(--color-surface-soft);
+  box-shadow: none;
 }
 
 .revision-view .version-tabs button.active {
-  border-color: rgba(40, 118, 111, 0.42);
+  border-color: color-mix(in srgb, var(--color-accent) 42%, transparent);
   background: var(--color-accent-soft);
-  color: var(--accent);
+  color: var(--color-accent-strong);
+  box-shadow: inset 0 -2px 0 var(--color-accent);
 }
 
 .revision-view .version-tabs small {
@@ -201,23 +472,89 @@
 }
 
 .revision-view .revision-version-meta {
-  display: grid;
-  gap: var(--space-2);
-  margin: var(--space-3) 0;
-  padding: var(--space-3);
-  border: 1px solid var(--line);
-  border-radius: var(--radius);
-  background: var(--surface-strong);
+  margin: 18px 0 0;
+  padding: 14px 0 0;
+  border: 0;
+  border-top: 1px solid var(--line);
+  background: transparent;
 }
 
 .revision-view .revision-version-meta p {
   margin: 0;
   color: var(--muted);
   line-height: 1.55;
+  overflow-wrap: anywhere;
+}
+
+.revision-view .revision-version-meta[open] {
+  display: grid;
+  gap: var(--space-2);
 }
 
 .revision-view .revision-view-switch {
   margin-bottom: var(--space-3);
+}
+
+.revision-view .revision-sidebar :is(.field, select, textarea) {
+  min-width: 0;
+}
+
+@media (max-width: 1180px) {
+  .revision-view .revision-studio-layout {
+    grid-template-columns: 1fr;
+    grid-template-areas:
+      'sidebar'
+      'comparison';
+  }
+
+  .revision-view .revision-studio-layout.has-versions {
+    grid-template-areas:
+      'comparison'
+      'sidebar';
+  }
+
+  .revision-view .revision-sidebar {
+    grid-area: sidebar;
+    position: static;
+    display: grid;
+    grid-template-columns: minmax(0, 0.8fr) minmax(0, 1.2fr);
+    column-gap: var(--space-4);
+  }
+
+  .revision-view .revision-sidebar-details {
+    grid-column: 1 / -1;
+  }
+
+  .revision-view .revision-compare {
+    grid-area: comparison;
+  }
+}
+
+@media (max-width: 720px) {
+  .revision-view .revision-quick-presets,
+  .revision-view .revision-sidebar {
+    grid-template-columns: 1fr;
+  }
+
+  .revision-view .revision-candidate-panel .section-card-header {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .revision-view .revision-candidate-primary-actions,
+  .revision-view .revision-utility-actions {
+    justify-content: stretch;
+  }
+
+  .revision-view .revision-candidate-primary-actions button,
+  .revision-view .revision-utility-actions button {
+    flex: 1 1 140px;
+  }
+
+  .revision-view .revision-generation-actions {
+    grid-template-columns: 1fr;
+  }
+
 }
 
 

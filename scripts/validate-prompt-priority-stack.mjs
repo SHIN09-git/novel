@@ -2,8 +2,9 @@ import { mkdir, readFile, rm, writeFile } from 'node:fs/promises'
 import { dirname, join, resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import ts from 'typescript'
+import { repoRoot } from './utils/repo-root.mjs'
 
-const root = resolve('.')
+const root = repoRoot
 const outDir = join(root, 'tmp', 'prompt-priority-stack-test')
 
 function assert(condition, message, details = {}) {
@@ -37,16 +38,24 @@ async function compileTsTree(files) {
 
 async function loadPromptBuilder() {
   await compileTsTree([
+    'src/shared/chapterText.ts',
     'src/shared/foreshadowingTreatment.ts',
     'src/services/TokenEstimator.ts',
     'src/services/ContinuityService.ts',
     'src/services/CharacterStateService.ts',
+    'src/services/characterState/logInference.ts',
+    'src/services/characterState/stateMutations.ts',
+    'src/services/characterState/stateSelection.ts',
+    'src/services/characterState/stateValidation.ts',
+    'src/services/characterState/stateValue.ts',
     'src/services/StageSummaryService.ts',
     'src/services/ContextCompressionService.ts',
     'src/services/contextBudget/types.ts',
     'src/services/contextBudget/scoringEngine.ts',
     'src/services/contextBudget/selectionEngine.ts',
+    'src/services/contextBudget/selectionFinalizer.ts',
     'src/services/contextBudget/traceBuilder.ts',
+    'src/services/ChapterLifecycleService.ts',
     'src/services/ContextBudgetManager.ts',
     'src/services/StoryDirectionService.ts',
     'src/services/HardCanonPackService.ts',
@@ -298,7 +307,6 @@ function makeInput(PromptBuilderService) {
 }
 
 function indexOfSection(prompt, title) {
-  if (title.includes('HardCanonPack')) return prompt.indexOf('HardCanonPack')
   return prompt.indexOf(`## ${title}`)
 }
 
@@ -309,18 +317,24 @@ async function main() {
   const prompt = result.finalPrompt
   const frontHalf = prompt.slice(0, Math.floor(prompt.length / 2))
 
-  checks.push(assert(prompt.includes('如果上下文之间存在冲突，必须按以下优先级处理'), 'final prose prompt begins with conflict priority declaration'))
-  checks.push(assert(indexOfSection(prompt, '不可违背设定 HardCanonPack') > indexOfSection(prompt, '0.'), 'HardCanonPack appears immediately after priority rules as a high-priority hard-canon block'))
-  checks.push(assert(indexOfSection(prompt, '不可违背设定 HardCanonPack') < indexOfSection(prompt, '7. 最近章节详细回顾'), 'HardCanonPack appears before ordinary chapter recaps'))
-  checks.push(assert(indexOfSection(prompt, '4. 当前角色硬状态') < indexOfSection(prompt, '7. 最近章节详细回顾'), 'character hard state appears before recent chapter recap'))
-  checks.push(assert(indexOfSection(prompt, '5. 本章伏笔操作规则') < indexOfSection(prompt, '7. 最近章节详细回顾'), 'foreshadowing operation rules appear before recent chapter recap'))
-  checks.push(assert(indexOfSection(prompt, '11. 风格要求 StyleEnvelope') > Math.floor(prompt.length / 2), 'style envelope is placed in the latter half of the prompt'))
+  checks.push(assert(prompt.includes('若事实或指令之间存在冲突，必须按以下优先级处理'), 'final prose prompt begins with conflict priority declaration'))
+  checks.push(assert(indexOfSection(prompt, '4. 不可违背设定 HardCanonPack') > indexOfSection(prompt, '3. 本章任务契约'), 'HardCanonPack follows Bridge and chapter task instead of silently overriding them'))
+  checks.push(assert(indexOfSection(prompt, '4. 不可违背设定 HardCanonPack') < indexOfSection(prompt, '9. 最近章节详细回顾'), 'HardCanonPack appears before ordinary chapter recaps'))
+  checks.push(assert(indexOfSection(prompt, '5. 当前角色硬状态') < indexOfSection(prompt, '9. 最近章节详细回顾'), 'character hard state appears before recent chapter recap'))
+  checks.push(assert(indexOfSection(prompt, '6. 本章伏笔操作规则') < indexOfSection(prompt, '9. 最近章节详细回顾'), 'foreshadowing operation rules appear before recent chapter recap'))
+  checks.push(assert(indexOfSection(prompt, '12. 风格要求 StyleEnvelope') > indexOfSection(prompt, '11. 时间线事件'), 'style envelope is placed after factual context'))
   checks.push(assert(!frontHalf.includes('目标读者：') && !frontHalf.includes('核心爽点/情绪体验：'), 'target readers and core appeal are not long front-half context blocks'))
   checks.push(assert(prompt.includes('允许暗示 hint') && prompt.includes('允许回收 payoff') && prompt.includes('禁止提及 hidden / pause'), 'foreshadowing entries are grouped by treatmentMode operation table'))
   checks.push(assert(prompt.includes('管理员真实身份') && prompt.includes('不得主动出现'), 'hidden/payoff-weight foreshadowing is placed in a forbidden mention group'))
   checks.push(assert(prompt.includes('黑票副作用') && prompt.includes('允许回收 payoff'), 'payoff foreshadowing is placed in allowed payoff group'))
   checks.push(assert(prompt.includes('不得让角色使用未持有物品') && prompt.includes('不得让角色知道尚未记录为已知的信息'), 'character hard-state constraints are present'))
-  checks.push(assert(prompt.includes('NoveltyPolicy') && prompt.includes('不得新增未授权命名角色') && prompt.includes('系统面板补充条款'), 'NoveltyPolicy hard constraints are present in forbidden block'))
+  checks.push(
+    assert(
+      prompt.includes('NoveltyPolicy：不得新增任务未授权的人物、地点、组织、规则、机制或关键道具。') &&
+        prompt.includes('不得为了让角色脱困而临时新增刚好可用的设定'),
+      'genre-neutral NoveltyPolicy hard constraints are present in forbidden block'
+    )
+  )
   checks.push(assert(Array.isArray(result.promptBlockOrder) && result.promptBlockOrder.length >= 13, 'BuildPromptResult includes promptBlockOrder'))
   const styleBlock = result.promptBlockOrder.find((block) => block.kind === 'style')
   const noveltyBlock = result.promptBlockOrder.find((block) => block.kind === 'forbidden_and_novelty')

@@ -2,10 +2,28 @@ import type {
   AppData,
   Chapter,
   ChapterCommitBundle,
+  ChapterAcceptanceReview,
   ChapterVersion,
+  CharacterStateTransaction,
   GeneratedChapterDraft,
   ID
 } from '../shared/types'
+import { isChapterArchived } from './ChapterLifecycleService'
+import {
+  normalizeConsistencyReviewReport,
+  normalizeQualityGateReport,
+  normalizeRedundancyReport
+} from '../shared/normalizers/reports'
+import { normalizeGenerationRunTrace } from '../shared/normalizers/runTrace'
+import {
+  consistencyReportMatchesDraft,
+  noveltyAuditMatchesDraft,
+  qualityReportMatchesDraft,
+  redundancyReportMatchesDraft
+} from './DraftDiagnosticBindingService'
+import { validateChapterCommitBundleData } from './commitBundles/chapterCommitValidation'
+import { requireCommitText, upsertCommitEntities, upsertCommitEntity } from './commitBundles/commitBundleUtils'
+import { buildChapterAcceptanceReview } from './ChapterAcceptanceReviewService'
 
 export const CHAPTER_COMMIT_BUNDLE_SCHEMA_VERSION = 1
 
@@ -19,28 +37,46 @@ export interface BuildAcceptedDraftCommitBundleInput {
   acceptedAt: string
   chapterVersionId?: ID | null
   commitNote?: string
+  acceptanceMode?: ChapterAcceptanceReview['mode']
+  requireEditorialVerdict?: boolean
 }
 
-function upsertById<T extends { id: ID }>(items: T[], item: T): T[] {
-  const exists = items.some((current) => current.id === item.id)
-  return exists ? items.map((current) => (current.id === item.id ? item : current)) : [item, ...items]
-}
-
-function upsertManyById<T extends { id: ID }>(items: T[], nextItems: T[] = []): T[] {
-  return nextItems.reduce((next, item) => upsertById(next, item), items)
-}
-
-function requireText(value: unknown, message: string): asserts value is string {
-  if (typeof value !== 'string' || !value.trim()) throw new Error(message)
+function normalizeAppliedStateTransactions(bundle: ChapterCommitBundle): CharacterStateTransaction[] {
+  return (bundle.appliedCharacterStateTransactions ?? []).map((transaction) => ({
+    ...transaction,
+    chapterId: transaction.chapterId ?? bundle.chapterId
+  }))
 }
 
 function findDraft(appData: AppData, draftId: ID): GeneratedChapterDraft {
   const draft = appData.generatedChapterDrafts.find((item) => item.id === draftId)
   if (!draft) throw new Error(`ChapterCommitBundle cannot find draft ${draftId}.`)
+  if (draft.status !== 'draft') {
+    throw new Error(`ChapterCommitBundle can only accept a draft in draft status; ${draftId} is ${draft.status}.`)
+  }
   return draft
 }
 
-function createChapterVersionBeforeCommit(chapter: Chapter, projectId: ID, versionId: ID, acceptedAt: string): ChapterVersion {
+function matchingChapterVersion(appData: AppData, chapter: Chapter): ChapterVersion | null {
+  return (
+    [...appData.chapterVersions]
+      .filter(
+        (version) =>
+          version.chapterId === chapter.id &&
+          version.projectId === chapter.projectId &&
+          version.title === chapter.title &&
+          version.body === chapter.body
+      )
+      .sort((a, b) => b.createdAt.localeCompare(a.createdAt))[0] ?? null
+  )
+}
+
+function createChapterVersionBeforeCommit(
+  chapter: Chapter,
+  projectId: ID,
+  versionId: ID,
+  acceptedAt: string
+): ChapterVersion {
   return {
     id: versionId,
     projectId,
@@ -53,17 +89,48 @@ function createChapterVersionBeforeCommit(chapter: Chapter, projectId: ID, versi
   }
 }
 
+function createAcceptedDraftChapterVersion(input: {
+  chapter: Chapter
+  draft: GeneratedChapterDraft
+  versionId: ID
+  commitId: ID
+  acceptedAt: string
+  baseChapterVersionId: ID | null
+  generationRunTraceId: ID | null
+  note: string
+}): ChapterVersion {
+  return {
+    id: input.versionId,
+    projectId: input.chapter.projectId,
+    chapterId: input.chapter.id,
+    source: 'generated_draft',
+    title: input.draft.title,
+    body: input.draft.body,
+    note: input.note,
+    createdAt: input.acceptedAt,
+    linkedChapterCommitId: input.commitId,
+    linkedGenerationRunTraceId: input.generationRunTraceId,
+    baseChapterVersionId: input.baseChapterVersionId
+  }
+}
+
 export function buildAcceptedDraftCommitBundle(input: BuildAcceptedDraftCommitBundleInput): ChapterCommitBundle {
   const draft = findDraft(input.appData, input.draftId)
   if (draft.projectId !== input.projectId) {
     throw new Error('ChapterCommitBundle draft projectId does not match projectId.')
   }
+  const acceptanceReview = input.acceptanceMode !== undefined
+    ? buildChapterAcceptanceReview(input.appData, draft, input.acceptanceMode, input.requireEditorialVerdict)
+    : undefined
 
   const existingChapter = input.appData.chapters.find(
     (chapter) => chapter.projectId === input.projectId && chapter.order === input.targetChapterOrder
   )
+  if (existingChapter && isChapterArchived(existingChapter)) {
+    throw new Error(`第 ${input.targetChapterOrder} 章已归档，请先恢复该章节再接受草稿。`)
+  }
   const chapterId = existingChapter?.id ?? input.chapterId
-  requireText(chapterId, 'ChapterCommitBundle requires chapterId.')
+  requireCommitText(chapterId, 'ChapterCommitBundle requires chapterId.')
 
   const chapter: Chapter = existingChapter
     ? {
@@ -87,6 +154,7 @@ export function buildAcceptedDraftCommitBundle(input: BuildAcceptedDraftCommitBu
         endingHook: '',
         riskWarnings: '',
         includedInStageSummary: false,
+        archivedAt: null,
         createdAt: input.acceptedAt,
         updatedAt: input.acceptedAt
       }
@@ -98,15 +166,61 @@ export function buildAcceptedDraftCommitBundle(input: BuildAcceptedDraftCommitBu
     updatedAt: input.acceptedAt
   }
   const qualityReports = input.appData.qualityGateReports
-    .filter((report) => report.jobId === draft.jobId)
-    .map((report) => ({ ...report, chapterId, draftId: draft.id }))
+    .filter((report) => report.projectId === input.projectId && report.jobId === draft.jobId && qualityReportMatchesDraft(report, draft))
+    .sort((a, b) => b.createdAt.localeCompare(a.createdAt) || b.id.localeCompare(a.id))
+    .map((report) => normalizeQualityGateReport({ ...report, chapterId, draftId: draft.id }))
   const consistencyReports = input.appData.consistencyReviewReports
-    .filter((report) => report.jobId === draft.jobId)
-    .map((report) => ({ ...report, chapterId }))
+    .filter((report) => report.projectId === input.projectId && report.jobId === draft.jobId && consistencyReportMatchesDraft(report, draft))
+    .sort((a, b) => b.createdAt.localeCompare(a.createdAt) || b.id.localeCompare(a.id))
+    .map((report) => normalizeConsistencyReviewReport({ ...report, chapterId }))
   const redundancyReports = input.appData.redundancyReports
-    .filter((report) => report.draftId === draft.id)
-    .map((report) => ({ ...report, chapterId, jobId: report.jobId ?? draft.jobId, updatedAt: report.updatedAt ?? input.acceptedAt }))
-  const runTrace = input.appData.generationRunTraces.find((trace) => trace.jobId === draft.jobId) ?? null
+    .filter((report) => report.projectId === input.projectId && redundancyReportMatchesDraft(report, draft))
+    .sort((a, b) => b.createdAt.localeCompare(a.createdAt) || b.id.localeCompare(a.id))
+    .map((report) => normalizeRedundancyReport({
+      ...report,
+      chapterId,
+      jobId: report.jobId ?? draft.jobId,
+      updatedAt: report.updatedAt ?? input.acceptedAt
+    }))
+  const storedRunTrace =
+    input.appData.generationRunTraces.find(
+      (trace) => trace.projectId === input.projectId && trace.jobId === draft.jobId
+    ) ?? null
+  // Match the storage read representation before building an immutable receipt.
+  // Runtime traces may omit optional defaults that normalizeAppData fills on load.
+  const runTrace = storedRunTrace
+    ? normalizeGenerationRunTrace({
+        ...storedRunTrace,
+        qualityGateReportId: qualityReports[0]?.id ?? null,
+        consistencyReviewReportId: consistencyReports[0]?.id ?? null,
+        redundancyReportId: redundancyReports[0]?.id ?? null,
+        noveltyAuditResult: noveltyAuditMatchesDraft(storedRunTrace.noveltyAuditResult, draft)
+          ? storedRunTrace.noveltyAuditResult
+          : null,
+        updatedAt: input.acceptedAt
+      })
+    : null
+  const chapterVersionId = input.chapterVersionId ?? `${input.commitId}:version`
+  const matchingBaseVersion = existingChapter ? matchingChapterVersion(input.appData, existingChapter) : null
+  const previousChapterVersion =
+    existingChapter && !matchingBaseVersion
+      ? createChapterVersionBeforeCommit(
+          existingChapter,
+          input.projectId,
+          `${chapterVersionId}:before`,
+          input.acceptedAt
+        )
+      : undefined
+  const chapterVersion = createAcceptedDraftChapterVersion({
+    chapter,
+    draft,
+    versionId: chapterVersionId,
+    commitId: input.commitId,
+    acceptedAt: input.acceptedAt,
+    baseChapterVersionId: matchingBaseVersion?.id ?? previousChapterVersion?.id ?? null,
+    generationRunTraceId: runTrace?.id ?? null,
+    note: input.commitNote || '接受 AI 草稿为正式章节。'
+  })
 
   return {
     schemaVersion: CHAPTER_COMMIT_BUNDLE_SCHEMA_VERSION,
@@ -118,14 +232,15 @@ export function buildAcceptedDraftCommitBundle(input: BuildAcceptedDraftCommitBu
     generatedDraftId: draft.id,
     acceptedAt: input.acceptedAt,
     acceptedBy: 'user',
+    ...(acceptanceReview ? { acceptanceReview } : {}),
     chapter,
-    chapterVersion: existingChapter && input.chapterVersionId
-      ? createChapterVersionBeforeCommit(existingChapter, input.projectId, input.chapterVersionId, input.acceptedAt)
-      : undefined,
+    chapterVersion,
+    previousChapterVersion,
     generatedDraft,
     acceptedMemoryUpdateCandidates: [],
     acceptedCharacterStateChangeCandidates: [],
     appliedCharacterStateFacts: [],
+    appliedCharacterStateTransactions: [],
     appliedForeshadowingUpdates: [],
     appliedTimelineEvents: [],
     qualityGateReportId: qualityReports[0]?.id ?? null,
@@ -140,64 +255,23 @@ export function buildAcceptedDraftCommitBundle(input: BuildAcceptedDraftCommitBu
 }
 
 export function validateChapterCommitBundle(bundle: ChapterCommitBundle, existingData?: AppData): void {
-  if (!bundle || typeof bundle !== 'object') throw new Error('ChapterCommitBundle is required.')
-  requireText(bundle.commitId, 'ChapterCommitBundle requires commitId.')
-  requireText(bundle.id, 'ChapterCommitBundle requires id.')
-  if (bundle.id !== bundle.commitId) throw new Error('ChapterCommitBundle id must match commitId.')
-  requireText(bundle.projectId, 'ChapterCommitBundle requires projectId.')
-  requireText(bundle.chapterId, 'ChapterCommitBundle requires chapterId.')
-  requireText(bundle.acceptedAt, 'ChapterCommitBundle requires acceptedAt.')
-  if (bundle.acceptedBy !== 'user') throw new Error('ChapterCommitBundle acceptedBy must be user.')
-  if (bundle.schemaVersion !== CHAPTER_COMMIT_BUNDLE_SCHEMA_VERSION) {
-    throw new Error(`Unsupported ChapterCommitBundle schemaVersion: ${bundle.schemaVersion}.`)
-  }
-  if (!bundle.chapter || bundle.chapter.id !== bundle.chapterId) throw new Error('ChapterCommitBundle chapter id mismatch.')
-  if (bundle.chapter.projectId !== bundle.projectId) throw new Error('ChapterCommitBundle chapter projectId mismatch.')
-
-  if (bundle.generatedDraft) {
-    if (bundle.generatedDraftId && bundle.generatedDraft.id !== bundle.generatedDraftId) {
-      throw new Error('ChapterCommitBundle generatedDraftId mismatch.')
-    }
-    if (bundle.generatedDraft.projectId !== bundle.projectId) throw new Error('ChapterCommitBundle draft projectId mismatch.')
-    if (bundle.jobId && bundle.generatedDraft.jobId !== bundle.jobId) throw new Error('ChapterCommitBundle draft jobId mismatch.')
-    if (bundle.generatedDraft.chapterId !== bundle.chapterId) throw new Error('ChapterCommitBundle draft chapterId mismatch.')
-  }
-
-  if (bundle.chapterVersion) {
-    if (bundle.chapterVersion.projectId !== bundle.projectId) throw new Error('ChapterCommitBundle chapterVersion projectId mismatch.')
-    if (bundle.chapterVersion.chapterId !== bundle.chapterId) throw new Error('ChapterCommitBundle chapterVersion chapterId mismatch.')
-  }
-
-  for (const report of bundle.qualityGateReports ?? []) {
-    if (report.projectId !== bundle.projectId) throw new Error(`QualityGateReport ${report.id} projectId mismatch.`)
-    if (bundle.jobId && report.jobId !== bundle.jobId) throw new Error(`QualityGateReport ${report.id} jobId mismatch.`)
-    if (report.chapterId !== bundle.chapterId) throw new Error(`QualityGateReport ${report.id} chapterId mismatch.`)
-  }
-
-  for (const report of bundle.consistencyReviewReports ?? []) {
-    if (report.projectId !== bundle.projectId) throw new Error(`ConsistencyReviewReport ${report.id} projectId mismatch.`)
-    if (bundle.jobId && report.jobId !== bundle.jobId) throw new Error(`ConsistencyReviewReport ${report.id} jobId mismatch.`)
-    if (report.chapterId !== bundle.chapterId) throw new Error(`ConsistencyReviewReport ${report.id} chapterId mismatch.`)
-  }
-
-  for (const report of bundle.redundancyReports ?? []) {
-    if (report.projectId !== bundle.projectId) throw new Error(`RedundancyReport ${report.id} projectId mismatch.`)
-    if (report.chapterId !== bundle.chapterId) throw new Error(`RedundancyReport ${report.id} chapterId mismatch.`)
-  }
-
-  if (bundle.generatedDraftId) {
-    const draftExists =
-      bundle.generatedDraft?.id === bundle.generatedDraftId ||
-      Boolean(existingData?.generatedChapterDrafts.some((draft) => draft.id === bundle.generatedDraftId))
-    if (!draftExists) throw new Error(`ChapterCommitBundle references missing generatedDraftId ${bundle.generatedDraftId}.`)
-  }
+  validateChapterCommitBundleData(bundle, existingData, CHAPTER_COMMIT_BUNDLE_SCHEMA_VERSION)
 }
 
 export function applyChapterCommitBundleToAppData(appData: AppData, bundle: ChapterCommitBundle): AppData {
   validateChapterCommitBundle(bundle, appData)
+  const existingCommit = appData.chapterCommitBundles.find(
+    (commit) => commit.commitId === bundle.commitId || commit.id === bundle.id
+  )
+  // A transport retry may replay an already committed bundle after a newer
+  // revision has been applied. Immutable validation above proves that this is
+  // the same commit; returning current state prevents the old chapter snapshot
+  // from overwriting later work.
+  if (existingCommit) return appData
 
+  const appliedCharacterStateTransactions = normalizeAppliedStateTransactions(bundle)
   const generatedDrafts = bundle.generatedDraft
-    ? upsertById(appData.generatedChapterDrafts, bundle.generatedDraft)
+    ? upsertCommitEntity(appData.generatedChapterDrafts, bundle.generatedDraft)
     : appData.generatedChapterDrafts.map((draft) =>
         draft.id === bundle.generatedDraftId
           ? { ...draft, chapterId: bundle.chapterId, status: 'accepted' as const, updatedAt: bundle.acceptedAt }
@@ -209,18 +283,30 @@ export function applyChapterCommitBundleToAppData(appData: AppData, bundle: Chap
     projects: appData.projects.map((project) =>
       project.id === bundle.projectId ? { ...project, updatedAt: bundle.acceptedAt } : project
     ),
-    chapters: upsertById(appData.chapters, bundle.chapter),
-    chapterVersions: bundle.chapterVersion ? upsertById(appData.chapterVersions, bundle.chapterVersion) : appData.chapterVersions,
+    chapters: upsertCommitEntity(appData.chapters, bundle.chapter),
+    chapterVersions: upsertCommitEntities(
+      appData.chapterVersions,
+      [bundle.previousChapterVersion, bundle.chapterVersion].filter((item): item is ChapterVersion => Boolean(item))
+    ),
     generatedChapterDrafts: generatedDrafts,
-    qualityGateReports: upsertManyById(appData.qualityGateReports, bundle.qualityGateReports),
-    consistencyReviewReports: upsertManyById(appData.consistencyReviewReports, bundle.consistencyReviewReports),
-    redundancyReports: upsertManyById(appData.redundancyReports, bundle.redundancyReports),
-    memoryUpdateCandidates: upsertManyById(appData.memoryUpdateCandidates, bundle.acceptedMemoryUpdateCandidates),
-    characterStateChangeCandidates: upsertManyById(appData.characterStateChangeCandidates, bundle.acceptedCharacterStateChangeCandidates),
-    characterStateFacts: upsertManyById(appData.characterStateFacts, bundle.appliedCharacterStateFacts),
-    foreshadowings: upsertManyById(appData.foreshadowings, bundle.appliedForeshadowingUpdates),
-    timelineEvents: upsertManyById(appData.timelineEvents, bundle.appliedTimelineEvents),
-    generationRunTraces: bundle.generationRunTrace ? upsertById(appData.generationRunTraces, bundle.generationRunTrace) : appData.generationRunTraces,
-    chapterCommitBundles: upsertById(appData.chapterCommitBundles, bundle)
+    qualityGateReports: upsertCommitEntities(appData.qualityGateReports, bundle.qualityGateReports),
+    consistencyReviewReports: upsertCommitEntities(appData.consistencyReviewReports, bundle.consistencyReviewReports),
+    redundancyReports: upsertCommitEntities(appData.redundancyReports, bundle.redundancyReports),
+    memoryUpdateCandidates: upsertCommitEntities(appData.memoryUpdateCandidates, bundle.acceptedMemoryUpdateCandidates),
+    characterStateChangeCandidates: upsertCommitEntities(
+      appData.characterStateChangeCandidates,
+      bundle.acceptedCharacterStateChangeCandidates
+    ),
+    characterStateFacts: upsertCommitEntities(appData.characterStateFacts, bundle.appliedCharacterStateFacts),
+    characterStateTransactions: upsertCommitEntities(
+      appData.characterStateTransactions,
+      appliedCharacterStateTransactions
+    ),
+    foreshadowings: upsertCommitEntities(appData.foreshadowings, bundle.appliedForeshadowingUpdates),
+    timelineEvents: upsertCommitEntities(appData.timelineEvents, bundle.appliedTimelineEvents),
+    generationRunTraces: bundle.generationRunTrace
+      ? upsertCommitEntity(appData.generationRunTraces, bundle.generationRunTrace)
+      : appData.generationRunTraces,
+    chapterCommitBundles: upsertCommitEntity(appData.chapterCommitBundles, bundle)
   }
 }

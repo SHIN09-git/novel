@@ -1,4 +1,5 @@
-import { mkdir, readdir, readFile, stat, unlink, writeFile } from 'node:fs/promises'
+import { randomUUID } from 'node:crypto'
+import { mkdir, readdir, readFile, rename, stat, unlink, writeFile } from 'node:fs/promises'
 import { isAbsolute, join, relative, resolve } from 'node:path'
 import { normalizeAppData, sanitizeAppDataForPersistence } from '../shared/defaults'
 import type { AppData } from '../shared/types'
@@ -27,6 +28,7 @@ function backupTimestamp(fileName: string, fallback: number): number {
 
 export class BackupService {
   private readonly backupDir: string
+  private readonly automaticBackupsPending = new Map<object, Promise<string | null>>()
 
   constructor(userDataPath: string) {
     this.backupDir = join(userDataPath, 'backups')
@@ -43,23 +45,44 @@ export class BackupService {
   async createBackup(data: AppData, isAutomatic = true): Promise<string> {
     await this.ensureBackupDir()
     const timestamp = Date.now()
-    const backupName = `novel-director-${timestamp}${isAutomatic ? '-auto' : '-manual'}.json`
+    const backupName = `novel-director-${timestamp}${isAutomatic ? '-auto' : '-manual'}-${randomUUID()}.json`
     const backupPath = join(this.backupDir, backupName)
     const safeData = sanitizeAppDataForPersistence(normalizeAppData(data))
-    await writeFile(backupPath, JSON.stringify(safeData, null, 2), 'utf-8')
+    const temporaryPath = `${backupPath}.tmp`
+    // Publish only complete JSON; partial writes must not satisfy the daily schedule.
+    try {
+      await writeFile(temporaryPath, JSON.stringify(safeData, null, 2), { encoding: 'utf-8', flag: 'wx' })
+      await rename(temporaryPath, backupPath)
+    } finally {
+      await unlink(temporaryPath).catch(() => undefined)
+    }
     if (isAutomatic) {
       await this.cleanupOldAutomaticBackups()
     }
     return backupPath
   }
 
-  async maybeCreateAutomaticBackup(data: AppData): Promise<string | null> {
+  async maybeCreateAutomaticBackup(data: AppData | (() => Promise<AppData>), source: object = this): Promise<string | null> {
+    // Check the schedule before materializing AppData. Most checkpoints need no backup.
+    // Share a due backup across concurrent saves, but never cache a failed attempt.
+    const existing = this.automaticBackupsPending.get(source)
+    if (existing) return existing
+    const pending = this.createAutomaticBackupIfDue(data)
+    this.automaticBackupsPending.set(source, pending)
+    try {
+      return await pending
+    } finally {
+      if (this.automaticBackupsPending.get(source) === pending) this.automaticBackupsPending.delete(source)
+    }
+  }
+
+  private async createAutomaticBackupIfDue(data: AppData | (() => Promise<AppData>)): Promise<string | null> {
     const backups = await this.listBackups()
     const latestAuto = backups.find((backup) => backup.isAutomatic)
     if (latestAuto && Date.now() - latestAuto.timestamp < BACKUP_INTERVAL_MS) {
       return null
     }
-    return this.createBackup(data, true)
+    return this.createBackup(typeof data === 'function' ? await data() : data, true)
   }
 
   async listBackups(): Promise<BackupInfo[]> {

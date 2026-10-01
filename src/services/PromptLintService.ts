@@ -123,6 +123,19 @@ function compactBlankLines(lines: string[]): string[] {
   return compacted
 }
 
+function removeEmptySections(lines: string[]): { lines: string[]; removedHeadings: string[] } {
+  const removedHeadings: string[] = []
+  const nextLines = lines.filter((line, index) => {
+    if (!/^##\s+/.test(line.trim())) return true
+    let nextIndex = index + 1
+    while (nextIndex < lines.length && !lines[nextIndex].trim()) nextIndex += 1
+    if (nextIndex < lines.length && !/^##\s+/.test(lines[nextIndex].trim())) return true
+    removedHeadings.push(line)
+    return false
+  })
+  return { lines: compactBlankLines(nextLines), removedHeadings }
+}
+
 export class PromptLintService {
   static guardWritingPrompt(rawPrompt: string): PromptLintGuardResult {
     const originalTokenEstimate = TokenEstimator.estimate(rawPrompt)
@@ -189,7 +202,13 @@ export class PromptLintService {
       keptLines.push(line)
     })
 
-    const guardedPrompt = compactBlankLines(keptLines).join('\n').trim()
+    const compacted = compactBlankLines(keptLines)
+    const withoutEmptySections = removeEmptySections(compacted)
+    for (const heading of withoutEmptySections.removedHeadings) {
+      removedLineCount += 1
+      issues.push(issue('empty_label', null, heading, '已移除运行时清理后没有正文内容的空区块。', 'removed'))
+    }
+    const guardedPrompt = withoutEmptySections.lines.join('\n').trim()
     const guardedTokenEstimate = TokenEstimator.estimate(guardedPrompt)
     const warnings = issues.map((item) => `${item.message}${item.excerpt ? `（${item.excerpt}）` : ''}`)
 

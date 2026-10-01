@@ -1,0 +1,588 @@
+{
+  "schemaVersion": 1,
+  "benchmark": "agent-project-overview-read",
+  "measuredAt": "2026-09-07T10:48:20.082Z",
+  "fixtureVersion": 1,
+  "sizes": [
+    10,
+    100,
+    500
+  ],
+  "iterations": 9,
+  "warmups": 2,
+  "environment": {
+    "platform": "win32",
+    "release": "10.0.26100",
+    "arch": "x64",
+    "cpu": "AMD Ryzen 7 7800X3D 8-Core Processor           ",
+    "logicalCpus": 16,
+    "totalMemoryBytes": 33397133312,
+    "node": "v24.14.0",
+    "nodeAbi": "137",
+    "appVersion": "0.1.6-preview.9",
+    "sqliteVersion": "3.53.0",
+    "gitHead": "47457ca0b29c723d6031d958bda7f9adb07eb0a8",
+    "dirty": true
+  },
+  "methodology": {
+    "clock": "performance.now()",
+    "warmup": "2 untimed calls per implementation before 9 timed calls per implementation.",
+    "order": "Baseline and new alternate first position for each formal pair.",
+    "baseline": "loadAgentRuntimeData followed by handleAgentReadTool and construction of the AgentToolService response shape.",
+    "newPath": "AgentToolService.callTool using loadAgentProjectOverview and the 12-collection SQLite projection.",
+    "equality": "Every baseline/new response pair is checked with assert.deepEqual.",
+    "cache": "No benchmark cache; each call opens a fresh read-only SQLite connection.",
+    "boundaries": "Node service latency, excluding MCP process startup, transport and Electron UI. No OS cache flush or forced GC; not a cross-machine hard latency gate.",
+    "outputPolicy": "JSON output is restricted to the repository tmp directory.",
+    "contentPolicy": "Synthetic fixture only; output omits prose, full AppData, and complete tool payloads."
+  },
+  "sourceHashes": {
+    "src/agent/AgentProjectOverviewRuntime.ts": "d91890f765298e61e800f6c02a60335e5fb925558603855cff2f876f6c6b8a2f",
+    "src/agent/AgentRuntime.ts": "76fc9adb4c505ee9a03de77151244b9f3187f1c618e2d1040b860be3beef19dc",
+    "src/agent/agentProjectOverviewData.ts": "13ab6566efd5ee5ada1da043c87c7182b3d02e90ca185cab09b42be60438cc16",
+    "src/agent/agentProjectSummaries.ts": "8fac95b5739d35cb9f08303102a5de0e74742473709671704dc28bf81d0e6c77",
+    "src/agent/tools/AgentToolService.ts": "17a422e5c12280f2745d487c8ea8ca9275e0b53e5ad9e66718b90c372dc5056e",
+    "src/agent/tools/agentOverviewReadHandlers.ts": "1b0ebde5b6cbca869f2ef14d90ce620a525a425b30d37c96f31994a20a98c00d",
+    "src/agent/tools/agentToolReadHandlers.ts": "226dd67d6dfa84dacfc966d2f9f65f90089c9d3a7276e44b6570b5441d58ca5f",
+    "src/storage/SqliteStorageService.ts": "5f7076e846d35b4e30d69264c93efe5367a1cc338901c39a00e4bfe4c060c640",
+    "src/storage/sqlite/sqliteSnapshot.ts": "275d79531e2cdba985d353a53be5c68462398021e7a02a0071dd4f45f18282bc",
+    "src/shared/normalizers/appData.ts": "40bb2cb9ba678b90c519ad6ab23b0434e490c9a6964418c6b3b68a21cf896714",
+    "scripts/fixtures/long-novel-performance.mjs": "dffa0356ebe546c5257f5ed6b08d603e0def24d490108fffab13040088a4d835",
+    "scripts/benchmark-agent-overview.mjs": "798b8592323bdcd827962cab627137574c1a2191f6d716fe14a4ceda2618bcb7"
+  },
+  "scenarios": [
+    {
+      "chapters": 10,
+      "fixture": {
+        "synthetic": true,
+        "version": 1,
+        "appDataJsonBytes": 1595273
+      },
+      "sqlPayload": {
+        "baseline": {
+          "rows": 336,
+          "jsonBytes": 1593543
+        },
+        "new": {
+          "rows": 116,
+          "jsonBytes": 158369
+        },
+        "ratios": {
+          "rows": 0.345,
+          "jsonBytes": 0.099
+        }
+      },
+      "tools": {
+        "agent.listProjects": {
+          "before": {
+            "method": "baseline",
+            "p50Ms": 9.968,
+            "p95Ms": 13.187,
+            "rawSamplesMs": [
+              10.118,
+              9.968,
+              9.242,
+              9.106,
+              10.229,
+              9.514,
+              10.568,
+              9.66,
+              13.187
+            ],
+            "responseBytes": 945
+          },
+          "after": {
+            "method": "new",
+            "p50Ms": 2.69,
+            "p95Ms": 3.11,
+            "rawSamplesMs": [
+              2.69,
+              3.11,
+              2.686,
+              2.773,
+              2.531,
+              2.378,
+              2.701,
+              2.607,
+              2.972
+            ],
+            "responseBytes": 945
+          },
+          "outputsDeepEqual": true
+        },
+        "agent.getProjectDigest": {
+          "before": {
+            "method": "baseline",
+            "p50Ms": 9.507,
+            "p95Ms": 11.714,
+            "rawSamplesMs": [
+              9.211,
+              9.466,
+              8.922,
+              9.042,
+              10.864,
+              11.281,
+              9.507,
+              10.501,
+              11.714
+            ],
+            "responseBytes": 5347
+          },
+          "after": {
+            "method": "new",
+            "p50Ms": 2.497,
+            "p95Ms": 3.307,
+            "rawSamplesMs": [
+              2.534,
+              2.372,
+              2.471,
+              2.79,
+              2.439,
+              2.407,
+              3.307,
+              2.912,
+              2.497
+            ],
+            "responseBytes": 5347
+          },
+          "outputsDeepEqual": true
+        },
+        "agent.getNextChapterTarget": {
+          "before": {
+            "method": "baseline",
+            "p50Ms": 10.231,
+            "p95Ms": 12.854,
+            "rawSamplesMs": [
+              10.348,
+              10.152,
+              10.731,
+              10.231,
+              12.854,
+              9.328,
+              9.401,
+              11.184,
+              10.046
+            ],
+            "responseBytes": 467
+          },
+          "after": {
+            "method": "new",
+            "p50Ms": 2.707,
+            "p95Ms": 3.19,
+            "rawSamplesMs": [
+              3.19,
+              3.016,
+              2.643,
+              3,
+              2.738,
+              2.508,
+              2.707,
+              2.248,
+              2.48
+            ],
+            "responseBytes": 467
+          },
+          "outputsDeepEqual": true
+        },
+        "agent.getPendingHumanReviewItems": {
+          "before": {
+            "method": "baseline",
+            "p50Ms": 8.643,
+            "p95Ms": 11.45,
+            "rawSamplesMs": [
+              8.491,
+              11.45,
+              8.825,
+              8.559,
+              8.637,
+              9.333,
+              8.335,
+              8.643,
+              8.839
+            ],
+            "responseBytes": 521
+          },
+          "after": {
+            "method": "new",
+            "p50Ms": 2.663,
+            "p95Ms": 2.911,
+            "rawSamplesMs": [
+              2.7,
+              2.911,
+              2.385,
+              2.235,
+              2.42,
+              2.507,
+              2.768,
+              2.683,
+              2.663
+            ],
+            "responseBytes": 521
+          },
+          "outputsDeepEqual": true
+        }
+      },
+      "diskBytes": {
+        "sqlite": 4096,
+        "wal": 1928192,
+        "shm": 32768
+      }
+    },
+    {
+      "chapters": 100,
+      "fixture": {
+        "synthetic": true,
+        "version": 1,
+        "appDataJsonBytes": 15562399
+      },
+      "sqlPayload": {
+        "baseline": {
+          "rows": 2634,
+          "jsonBytes": 15558371
+        },
+        "new": {
+          "rows": 434,
+          "jsonBytes": 1226277
+        },
+        "ratios": {
+          "rows": 0.165,
+          "jsonBytes": 0.079
+        }
+      },
+      "tools": {
+        "agent.listProjects": {
+          "before": {
+            "method": "baseline",
+            "p50Ms": 76.755,
+            "p95Ms": 94.244,
+            "rawSamplesMs": [
+              77.531,
+              83.376,
+              74.473,
+              94.244,
+              77.151,
+              72.831,
+              76.755,
+              73.659,
+              72.657
+            ],
+            "responseBytes": 950
+          },
+          "after": {
+            "method": "new",
+            "p50Ms": 7.573,
+            "p95Ms": 10.162,
+            "rawSamplesMs": [
+              10.079,
+              7.483,
+              7.497,
+              7.107,
+              8.695,
+              7.658,
+              7.465,
+              7.573,
+              10.162
+            ],
+            "responseBytes": 950
+          },
+          "outputsDeepEqual": true
+        },
+        "agent.getProjectDigest": {
+          "before": {
+            "method": "baseline",
+            "p50Ms": 73.636,
+            "p95Ms": 79.728,
+            "rawSamplesMs": [
+              72.857,
+              79.728,
+              73.783,
+              73.636,
+              73.342,
+              75.143,
+              75.331,
+              72.138,
+              71.764
+            ],
+            "responseBytes": 5360
+          },
+          "after": {
+            "method": "new",
+            "p50Ms": 7.766,
+            "p95Ms": 8.341,
+            "rawSamplesMs": [
+              7.427,
+              8.341,
+              7.47,
+              7.273,
+              8.08,
+              8.019,
+              7.801,
+              7.597,
+              7.766
+            ],
+            "responseBytes": 5360
+          },
+          "outputsDeepEqual": true
+        },
+        "agent.getNextChapterTarget": {
+          "before": {
+            "method": "baseline",
+            "p50Ms": 77.086,
+            "p95Ms": 81.597,
+            "rawSamplesMs": [
+              80.283,
+              77.457,
+              80.471,
+              77.086,
+              74.161,
+              71.23,
+              74.122,
+              81.597,
+              74.249
+            ],
+            "responseBytes": 470
+          },
+          "after": {
+            "method": "new",
+            "p50Ms": 7.297,
+            "p95Ms": 10.935,
+            "rawSamplesMs": [
+              7.825,
+              7.352,
+              10.935,
+              7.242,
+              7.286,
+              7.283,
+              7.313,
+              6.927,
+              7.297
+            ],
+            "responseBytes": 470
+          },
+          "outputsDeepEqual": true
+        },
+        "agent.getPendingHumanReviewItems": {
+          "before": {
+            "method": "baseline",
+            "p50Ms": 74.271,
+            "p95Ms": 87.776,
+            "rawSamplesMs": [
+              72.932,
+              72.53,
+              74.271,
+              73.195,
+              73.488,
+              87.776,
+              79.63,
+              76.413,
+              74.686
+            ],
+            "responseBytes": 522
+          },
+          "after": {
+            "method": "new",
+            "p50Ms": 7.566,
+            "p95Ms": 10.04,
+            "rawSamplesMs": [
+              7.671,
+              7.103,
+              7.499,
+              8.064,
+              7.268,
+              10.04,
+              7.856,
+              7.233,
+              7.566
+            ],
+            "responseBytes": 522
+          },
+          "outputsDeepEqual": true
+        }
+      },
+      "diskBytes": {
+        "sqlite": 17117184,
+        "wal": 17304032,
+        "shm": 65536
+      }
+    },
+    {
+      "chapters": 500,
+      "fixture": {
+        "synthetic": true,
+        "version": 1,
+        "appDataJsonBytes": 77553852
+      },
+      "sqlPayload": {
+        "baseline": {
+          "rows": 12914,
+          "jsonBytes": 77539544
+        },
+        "new": {
+          "rows": 1914,
+          "jsonBytes": 5990650
+        },
+        "ratios": {
+          "rows": 0.148,
+          "jsonBytes": 0.077
+        }
+      },
+      "tools": {
+        "agent.listProjects": {
+          "before": {
+            "method": "baseline",
+            "p50Ms": 419.297,
+            "p95Ms": 431.915,
+            "rawSamplesMs": [
+              424.558,
+              429.727,
+              419.297,
+              417.988,
+              404.937,
+              431.915,
+              415.259,
+              400.053,
+              427.456
+            ],
+            "responseBytes": 951
+          },
+          "after": {
+            "method": "new",
+            "p50Ms": 31.676,
+            "p95Ms": 35.789,
+            "rawSamplesMs": [
+              29.641,
+              28.779,
+              31.18,
+              33.793,
+              33.762,
+              35.789,
+              31.676,
+              29.232,
+              34.568
+            ],
+            "responseBytes": 951
+          },
+          "outputsDeepEqual": true
+        },
+        "agent.getProjectDigest": {
+          "before": {
+            "method": "baseline",
+            "p50Ms": 397.374,
+            "p95Ms": 422.4,
+            "rawSamplesMs": [
+              404.144,
+              416.468,
+              408.679,
+              422.4,
+              395.52,
+              396.657,
+              397.186,
+              397.374,
+              396.503
+            ],
+            "responseBytes": 5365
+          },
+          "after": {
+            "method": "new",
+            "p50Ms": 32.039,
+            "p95Ms": 33.29,
+            "rawSamplesMs": [
+              29.79,
+              29.269,
+              32.596,
+              28.812,
+              29.288,
+              32.314,
+              32.039,
+              33.29,
+              33.233
+            ],
+            "responseBytes": 5365
+          },
+          "outputsDeepEqual": true
+        },
+        "agent.getNextChapterTarget": {
+          "before": {
+            "method": "baseline",
+            "p50Ms": 404.755,
+            "p95Ms": 434.836,
+            "rawSamplesMs": [
+              400.897,
+              423.503,
+              412.751,
+              404.755,
+              390.796,
+              398.18,
+              434.836,
+              407.962,
+              393.507
+            ],
+            "responseBytes": 470
+          },
+          "after": {
+            "method": "new",
+            "p50Ms": 29.462,
+            "p95Ms": 40.075,
+            "rawSamplesMs": [
+              32.061,
+              28.727,
+              29.462,
+              28.5,
+              29.204,
+              28.681,
+              31.465,
+              33.623,
+              40.075
+            ],
+            "responseBytes": 470
+          },
+          "outputsDeepEqual": true
+        },
+        "agent.getPendingHumanReviewItems": {
+          "before": {
+            "method": "baseline",
+            "p50Ms": 396.441,
+            "p95Ms": 422.667,
+            "rawSamplesMs": [
+              386.487,
+              422.667,
+              396.441,
+              390.191,
+              393.945,
+              398.488,
+              407.935,
+              395.47,
+              409.897
+            ],
+            "responseBytes": 522
+          },
+          "after": {
+            "method": "new",
+            "p50Ms": 29.737,
+            "p95Ms": 46.756,
+            "rawSamplesMs": [
+              29.811,
+              30.158,
+              29.26,
+              28.637,
+              29.737,
+              29.229,
+              46.756,
+              29.707,
+              38.921
+            ],
+            "responseBytes": 522
+          },
+          "outputsDeepEqual": true
+        }
+      },
+      "diskBytes": {
+        "sqlite": 84963328,
+        "wal": 85547712,
+        "shm": 196608
+      }
+    }
+  ],
+  "status": "passed",
+  "finishedAt": "2026-09-07T10:48:45.263Z"
+}

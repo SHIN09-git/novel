@@ -45,7 +45,11 @@ export class StageSummaryService {
     const chapterStart = sorted[0]?.order ?? 1
     const chapterEnd = sorted[sorted.length - 1]?.order ?? chapterStart
     const summaries = sorted
-      .map((chapter) => `第 ${chapter.order} 章《${chapter.title || '未命名'}》：${chapter.summary || chapter.endingHook || '暂无复盘摘要'}`)
+      .map((chapter) => {
+        const recap = clean(chapter.summary) || clean(chapter.endingHook)
+        return recap ? `第 ${chapter.order} 章《${chapter.title || '未命名'}》：${recap}` : ''
+      })
+      .filter(Boolean)
       .join('\n')
     return {
       chapterStart,

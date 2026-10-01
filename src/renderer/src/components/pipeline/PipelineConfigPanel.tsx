@@ -32,7 +32,10 @@ export function PipelineConfigPanel({
   onContextSourceChange,
   onSnapshotChange,
   onUseAutoContext,
-  onStart
+  onStart,
+  onEditNewTask,
+  startDisabled = false,
+  taskEditingLocked = false
 }: {
   targetChapterOrder: number
   nextChapter: number
@@ -62,9 +65,21 @@ export function PipelineConfigPanel({
   onSnapshotChange: (value: ID | '') => void
   onUseAutoContext: () => void
   onStart: () => void
+  onEditNewTask?: () => void
+  startDisabled?: boolean
+  taskEditingLocked?: boolean
 }) {
   return (
-    <div className="pipeline-config-stack">
+    <details className="pipeline-tool-details pipeline-config-tools">
+      <summary className="pipeline-tool-summary">
+        <span>
+          <strong>生成配置</strong>
+          <small>第 {targetChapterOrder} 章 · {pipelineMode === 'conservative' ? '保守' : pipelineMode === 'aggressive' ? '激进' : '标准'}模式</small>
+        </span>
+        <span className="pipeline-tool-summary-action">配置</span>
+      </summary>
+      <div className="pipeline-config-stack">
+      <fieldset className="pipeline-config-fields" disabled={isRunning || taskEditingLocked}>
       <section className="pipeline-card">
         <div className="pipeline-card-title">
           <h3>生成配置</h3>
@@ -162,11 +177,14 @@ export function PipelineConfigPanel({
           onUseAutoContext={onUseAutoContext}
         />
         <PipelineActionBar>
-          <button className="ghost-button pipeline-config-start" type="button" disabled={isRunning} onClick={onStart}>
+          {onEditNewTask ? <button className="ghost-button" type="button" disabled={isRunning} onClick={onEditNewTask}>编辑新章节任务</button> : null}
+          <button className="ghost-button pipeline-config-start" type="button" disabled={isRunning || startDisabled} onClick={onStart}>
             {isRunning ? '流水线正在运行' : '开始生成'}
           </button>
         </PipelineActionBar>
       </section>
-    </div>
+      </fieldset>
+      </div>
+    </details>
   )
 }

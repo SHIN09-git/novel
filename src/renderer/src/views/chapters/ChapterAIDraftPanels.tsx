@@ -203,7 +203,7 @@ export function ChapterAIDraftPanels({
                   </p>
                   <p>
                     <strong>原情绪状态：</strong>
-                    {character.emotionalState || '待补充'}
+                    {character.emotionalState || '未记录'}
                   </p>
                   <p>
                     <strong>建议情绪状态：</strong>
@@ -211,7 +211,7 @@ export function ChapterAIDraftPanels({
                   </p>
                   <p>
                     <strong>原关系状态：</strong>
-                    {character.protagonistRelationship || '待补充'}
+                    {character.protagonistRelationship || '未记录'}
                   </p>
                   <p>
                     <strong>建议关系状态：</strong>
@@ -251,7 +251,7 @@ export function ChapterAIDraftPanels({
                 </p>
                 <p>
                   <strong>预计回收：</strong>
-                  {candidate.expectedPayoff || '待补充'}
+                  {candidate.expectedPayoff || '未填写'}
                 </p>
                 <p>
                   <strong>注意事项：</strong>
@@ -287,7 +287,7 @@ export function ChapterAIDraftPanels({
                   </p>
                   <p>
                     <strong>证据文本：</strong>
-                    {change.evidenceText || '待补充'}
+                    {change.evidenceText || '未填写'}
                   </p>
                   <p>
                     <strong>置信度：</strong>

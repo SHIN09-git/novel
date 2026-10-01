@@ -1,50 +1,39 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useState } from 'react'
 import type {
   AppData,
+  CandidateDecisionCommand,
   ChapterCommitBundle,
-  ConsistencyReviewIssue,
-  ConsistencyReviewReport,
-  ContextBudgetMode,
+  ChapterGenerationJob,
+  ChapterGenerationStep,
+  ChapterGenerationStepType,
   GenerationRunBundle,
-  GeneratedChapterDraft,
-  GenerationRunTrace,
   ID,
-  PipelineContextSource,
-  PipelineMode,
-  Project,
-  PromptContextSnapshot,
-  QualityGateIssue,
-  QualityGateReport,
-  RevisionCandidate,
-  RevisionRequest,
-  RevisionRequestType,
-  RevisionSession
+  Project
 } from '../../../shared/types'
-import { AIService } from '../../../services/AIService'
-import { buildRunTraceAuthorSummary, upsertRunTraceAuthorSummaryToAppData } from '../../../services/RunTraceAuthorSummaryService'
-import { TokenEstimator } from '../../../services/TokenEstimator'
+import { getEditorialVerdictForDraft } from '../../../services/EditorialVerdictService'
+import { hasCompleteChapterReview } from '../../../services/ChapterAcceptanceReviewService'
 import { useConfirm } from '../components/ConfirmDialog'
+import { PipelineTaskEditor } from '../components/pipeline/PipelineTaskEditor'
 import type { PipelineArtifactTab } from '../components/pipeline/PipelineCurrentArtifactPanel'
-import { newId, now } from '../utils/format'
-import { projectData } from '../utils/projectData'
-import { addReaderEmotionPreset, loadReaderEmotionState, rememberReaderEmotionTarget } from '../utils/readerEmotionPresets'
-import { appendGenerationRunTraceForcedContextBlocks, appendGenerationRunTraceIds, upsertGenerationRunTraceByJobId } from '../utils/runTrace'
-import type { SaveDataInput } from '../utils/saveDataState'
-import { buildRunTraceSummary } from './generation/RunTracePanel'
+import { useProjectData } from '../hooks/useProjectData'
+import { getNovelDirectorClipboardApi } from '../platform/novelDirectorBridge'
+import type { SaveDataHandler, SaveDataInput } from '../utils/saveDataState'
 import { GenerationPipelineConsole } from './generation/GenerationPipelineConsole'
-import {
-  consistencyIssueToRevisionType,
-  consistencyRevisionInstruction,
-  updateProjectTimestamp
-} from './generation/generationPipelineHelpers'
+import { usePipelineConfigState } from './generation/usePipelineConfigState'
 import { useDraftAcceptance } from './generation/useDraftAcceptance'
 import { useMemoryCandidates } from './generation/useMemoryCandidates'
-import { PIPELINE_STEP_LABELS, PIPELINE_STEP_ORDER, usePipelineRunner } from './generation/usePipelineRunner'
+import { canSkipPipelineStep, PIPELINE_STEP_LABELS, usePipelineRunner } from './generation/usePipelineRunner'
+import { usePipelinePrimaryAction } from './generation/usePipelinePrimaryAction'
+import { usePipelineRevisionActions } from './generation/usePipelineRevisionActions'
+import { useSelectedPipelineJob } from './generation/useSelectedPipelineJob'
+import { usePipelineTraceActions } from './generation/usePipelineTraceActions'
+import { useChapterTaskEditing } from './generation/useChapterTaskEditing'
 
 interface ProjectProps {
   data: AppData
   project: Project
-  saveData: (next: SaveDataInput) => Promise<void>
+  saveData: SaveDataHandler
+  executeCandidateDecision?: (command: CandidateDecisionCommand) => Promise<void>
   saveGenerationRunBundle?: (next: SaveDataInput, bundle: GenerationRunBundle) => Promise<void>
   saveChapterCommitBundle?: (buildCommit: (currentData: AppData) => { next: AppData; bundle: ChapterCommitBundle }) => Promise<void>
   onOpenRevision?: (prefill: { chapterId: ID | null; draftId: ID | null; requestId: ID }) => void
@@ -56,6 +45,7 @@ export function GenerationPipelineView({
   data,
   project,
   saveData,
+  executeCandidateDecision,
   saveGenerationRunBundle,
   saveChapterCommitBundle,
   onOpenRevision,
@@ -63,95 +53,76 @@ export function GenerationPipelineView({
   onInitialSnapshotConsumed
 }: ProjectProps) {
   const confirmAction = useConfirm()
-  const scoped = projectData(data, project.id)
-  const nextChapter = Math.max(0, ...scoped.chapters.map((chapter) => chapter.order)) + 1
-  const [targetChapterOrder, setTargetChapterOrder] = useState(nextChapter)
-  const [pipelineMode, setPipelineMode] = useState<PipelineMode>('standard')
-  const [estimatedWordCount, setEstimatedWordCount] = useState('3000-5000')
-  const [readerEmotionTarget, setReaderEmotionTarget] = useState(() => {
-    const emotionState = loadReaderEmotionState(project.id)
-    return emotionState.lastTarget || project.coreAppeal || ''
-  })
-  const [readerEmotionPresets, setReaderEmotionPresets] = useState(() => loadReaderEmotionState(project.id).presets)
-  const [newReaderEmotionPreset, setNewReaderEmotionPreset] = useState('')
-  const [budgetMode, setBudgetMode] = useState<ContextBudgetMode>(data.settings.defaultPromptMode)
-  const [budgetMaxTokens, setBudgetMaxTokens] = useState(data.settings.defaultTokenBudget)
-  const [contextSource, setContextSource] = useState<PipelineContextSource>(initialSnapshotId ? 'prompt_snapshot' : 'auto')
-  const [selectedSnapshotId, setSelectedSnapshotId] = useState<ID | null>(initialSnapshotId ?? null)
-  const [selectedJobId, setSelectedJobId] = useState<ID | null>(scoped.chapterGenerationJobs[0]?.id ?? null)
+  const scoped = useProjectData(data, project.id)
   const [activeArtifactTab, setActiveArtifactTab] = useState<PipelineArtifactTab>('steps')
-  const aiService = useMemo(() => new AIService(data.settings), [data.settings])
+  const [preparingNewTask, setPreparingNewTask] = useState(Boolean(initialSnapshotId))
+  const [taskDirty, setTaskDirty] = useState(false)
+  const pipelineConfig = usePipelineConfigState({
+    project,
+    settings: data.settings,
+    scoped,
+    initialSnapshotId,
+    onInitialSnapshotConsumed
+  })
+  const {
+    nextChapter,
+    targetChapterOrder,
+    setTargetChapterOrder,
+    pipelineMode,
+    setPipelineMode,
+    estimatedWordCount,
+    setEstimatedWordCount,
+    readerEmotionTarget,
+    setReaderEmotionTarget,
+    readerEmotionPresets,
+    newReaderEmotionPreset,
+    setNewReaderEmotionPreset,
+    budgetMode,
+    setBudgetMode,
+    budgetMaxTokens,
+    setBudgetMaxTokens,
+    contextSource,
+    setContextSource,
+    selectedSnapshotId,
+    selectedSnapshot,
+    snapshots,
+    selectedJobId,
+    setSelectedJobId,
+    rememberCurrentReaderEmotionTarget,
+    applyReaderEmotionPreset,
+    addReaderEmotionPresetFromInput,
+    useAutoContext,
+    handleSnapshotChange
+  } = pipelineConfig
 
-  const snapshots = [...scoped.promptContextSnapshots].sort((a, b) => b.createdAt.localeCompare(a.createdAt))
-  const selectedSnapshot = selectedSnapshotId ? snapshots.find((snapshot) => snapshot.id === selectedSnapshotId) ?? null : null
+  const {
+    jobs,
+    selectedJob,
+    selectedSteps,
+    selectedCandidates,
+    selectedReports,
+    selectedRevisionCandidates,
+    selectedTrace,
+    selectedAuthorSummary,
+    selectedTraceSnapshot,
+    consistencyIssueById,
+    latestDraft,
+    latestQualityReport,
+    traceConsistencyReport,
+    traceQualityReport,
+    traceContinuityBridge,
+    traceRedundancyReport,
+    selectedStepsKey
+  } = useSelectedPipelineJob(scoped, selectedJobId, preparingNewTask)
+  const editorialVerdict = latestDraft ? getEditorialVerdictForDraft(data, latestDraft.id) : null
+  const acceptanceVerdicts = selectedJob?.pipelineRecipe || editorialVerdict ? data.editorialVerdicts : undefined
+  const incompleteReview = !hasCompleteChapterReview(latestQualityReport, editorialVerdict, Boolean(acceptanceVerdicts))
+  const draftAcceptanceReview = latestDraft ? scoped.chapterCommitBundles.find((commit) =>
+    commit.generatedDraftId === latestDraft.id && commit.jobId === latestDraft.jobId)?.acceptanceReview : undefined
 
   useEffect(() => {
-    const emotionState = loadReaderEmotionState(project.id)
-    setReaderEmotionPresets(emotionState.presets)
-    setReaderEmotionTarget(emotionState.lastTarget || project.coreAppeal || '')
-    setNewReaderEmotionPreset('')
-  }, [project.id, project.coreAppeal])
-
-  useEffect(() => {
-    if (!initialSnapshotId) return
-    const snapshot = scoped.promptContextSnapshots.find((item) => item.id === initialSnapshotId)
-    setContextSource('prompt_snapshot')
-    setSelectedSnapshotId(initialSnapshotId)
-    if (snapshot) {
-      setTargetChapterOrder(snapshot.targetChapterOrder)
-      setBudgetMode(snapshot.mode)
-      setBudgetMaxTokens(snapshot.budgetProfile.maxTokens)
-      if (snapshot.chapterTask.targetWordCount) setEstimatedWordCount(snapshot.chapterTask.targetWordCount)
-      if (snapshot.chapterTask.readerEmotion) {
-        const nextEmotionState = rememberReaderEmotionTarget(project.id, snapshot.chapterTask.readerEmotion)
-        setReaderEmotionTarget(snapshot.chapterTask.readerEmotion)
-        setReaderEmotionPresets(nextEmotionState.presets)
-      }
-    }
-    onInitialSnapshotConsumed?.()
-  }, [initialSnapshotId, onInitialSnapshotConsumed, project.id, scoped.promptContextSnapshots])
-
-  const jobs = [...scoped.chapterGenerationJobs].sort((a, b) => b.createdAt.localeCompare(a.createdAt))
-  const selectedJob = jobs.find((job) => job.id === selectedJobId) ?? jobs[0] ?? null
-  const selectedSteps = selectedJob
-    ? data.chapterGenerationSteps
-        .filter((step) => step.jobId === selectedJob.id)
-        .sort((a, b) => PIPELINE_STEP_ORDER.indexOf(a.type) - PIPELINE_STEP_ORDER.indexOf(b.type))
-    : []
-  const selectedDrafts = selectedJob ? scoped.generatedChapterDrafts.filter((draft) => draft.jobId === selectedJob.id) : []
-  const selectedCandidates = selectedJob ? scoped.memoryUpdateCandidates.filter((candidate) => candidate.jobId === selectedJob.id) : []
-  const selectedReports = selectedJob ? scoped.consistencyReviewReports.filter((report) => report.jobId === selectedJob.id) : []
-  const selectedQualityReports = selectedJob ? scoped.qualityGateReports.filter((report) => report.jobId === selectedJob.id) : []
-  const selectedRevisionCandidates = selectedJob ? scoped.revisionCandidates.filter((candidate) => candidate.jobId === selectedJob.id) : []
-  const selectedTrace = selectedJob ? scoped.generationRunTraces.find((trace) => trace.jobId === selectedJob.id) ?? null : null
-  const selectedAuthorSummary = selectedTrace
-    ? scoped.runTraceAuthorSummaries.find((summary) => summary.traceId === selectedTrace.id) ??
-      scoped.runTraceAuthorSummaries.find((summary) => summary.jobId === selectedTrace.jobId) ??
-      null
-    : null
-  const selectedTraceSnapshot = selectedTrace?.promptContextSnapshotId
-    ? scoped.promptContextSnapshots.find((snapshot) => snapshot.id === selectedTrace.promptContextSnapshotId) ?? null
-    : null
-  const consistencyIssueById = useMemo(() => {
-    return new Map(selectedReports.flatMap((report) => report.issues.map((issue) => [issue.id, issue] as const)))
-  }, [selectedReports])
-  const latestDraft = selectedDrafts[0] ?? null
-  const latestQualityReport = latestDraft
-    ? selectedQualityReports.find((report) => report.draftId === latestDraft.id) ?? selectedQualityReports[0] ?? null
-    : selectedQualityReports[0] ?? null
-  const traceConsistencyReport = selectedTrace?.consistencyReviewReportId
-    ? selectedReports.find((report) => report.id === selectedTrace.consistencyReviewReportId) ?? selectedReports[0] ?? null
-    : selectedReports[0] ?? null
-  const traceQualityReport = selectedTrace?.qualityGateReportId
-    ? selectedQualityReports.find((report) => report.id === selectedTrace.qualityGateReportId) ?? latestQualityReport
-    : latestQualityReport
-  const traceContinuityBridge = selectedTrace?.continuityBridgeId
-    ? scoped.chapterContinuityBridges.find((bridge) => bridge.id === selectedTrace.continuityBridgeId) ?? null
-    : null
-  const traceRedundancyReport = selectedTrace?.redundancyReportId
-    ? scoped.redundancyReports.find((report) => report.id === selectedTrace.redundancyReportId) ?? null
-    : null
-  const selectedStepsKey = selectedSteps.map((step) => `${step.id}:${step.status}:${step.output.length}`).join('|')
+    if (initialSnapshotId) { setPreparingNewTask(true); setActiveArtifactTab('plan') }
+  }, [initialSnapshotId])
 
   useEffect(() => {
     if (latestDraft) {
@@ -162,10 +133,74 @@ export function GenerationPipelineView({
       setActiveArtifactTab('steps')
       return
     }
-    if (selectedSteps.some((step) => step.type === 'generate_chapter_plan' && step.output.trim())) {
+    if (selectedJob?.taskEdit || selectedSteps.some((step) => step.type === 'generate_chapter_plan' && step.output.trim())) {
       setActiveArtifactTab('plan')
     }
   }, [latestDraft?.id, selectedJob?.id, selectedStepsKey])
+
+  const {
+    pipelineMessage,
+    setPipelineMessage,
+    isPipelineRunning,
+    runPipeline,
+    retryStep,
+    skipStep,
+    cancelPipeline
+  } = usePipelineRunner({
+    data,
+    project,
+    scoped,
+    saveData,
+    saveGenerationRunBundle,
+    targetChapterOrder,
+    pipelineMode,
+    estimatedWordCount,
+    readerEmotionTarget,
+    budgetMode,
+    budgetMaxTokens,
+    contextSource,
+    selectedSnapshot,
+    setSelectedJobId: selectPreparedJob
+  })
+
+  function selectPreparedJob(id: ID) {
+    setPreparingNewTask(false)
+    setTaskDirty(false)
+    setSelectedJobId(id)
+  }
+
+  const taskEditor = useChapterTaskEditing({
+    data, project, selectedJob, targetChapterOrder, estimatedWordCount, readerEmotionTarget,
+    budgetMode, budgetMaxTokens, pipelineMode, isRunning: isPipelineRunning, saveData, saveGenerationRunBundle,
+    selectedSnapshot: contextSource === 'prompt_snapshot' ? selectedSnapshot : null,
+    selectJob: (id) => { selectPreparedJob(id); setTargetChapterOrder(selectedJob?.targetChapterOrder ?? targetChapterOrder); useAutoContext(); setActiveArtifactTab('plan') },
+    onGenerate: (job) => { void retryTaskStep(job, job.taskEdit!.resumeStep) },
+    confirmSnapshotRefresh: () => confirmAction({ title: '另建章节任务', message: '手动快照不会被改写。保存后将根据新任务和当前资料另建上下文，原快照和旧草稿仍可查看。', confirmLabel: '另建任务' })
+  })
+
+  async function selectTaskSource(id: ID | null) {
+    if (taskEditor.busy) return
+    if (taskDirty && !await confirmAction({ title: '保留当前任务？', message: '任务还有未保存修改。切换后将放弃这些输入，已保存任务和正文不受影响。', confirmLabel: '放弃修改并切换', cancelLabel: '继续编辑' })) return
+    setTaskDirty(false)
+    setPreparingNewTask(id === null)
+    if (id !== null) setSelectedJobId(id)
+    setActiveArtifactTab('plan')
+  }
+
+  function taskReadyToRun() {
+    if (!taskDirty && !taskEditor.busy) return true
+    setPipelineMessage('请先保存任务，或重置未保存更改。')
+    setActiveArtifactTab('plan')
+    return false
+  }
+
+  async function retryTaskStep(job: ChapterGenerationJob, step: ChapterGenerationStepType) {
+    if (taskReadyToRun()) await retryStep(job, step)
+  }
+
+  async function skipTaskStep(job: ChapterGenerationJob, step: ChapterGenerationStep) {
+    if (taskReadyToRun()) await skipStep(job, step)
+  }
 
   const draftAcceptance = useDraftAcceptance({
     project,
@@ -175,287 +210,77 @@ export function GenerationPipelineView({
     targetChapterOrder,
     chapters: scoped.chapters,
     qualityGateReports: scoped.qualityGateReports,
-    confirmAction
+    editorialVerdicts: acceptanceVerdicts,
+    confirmAction,
+    setPipelineMessage
   })
   const memoryCandidates = useMemoryCandidates({
+    data,
+    executeCandidateDecision,
     project,
     selectedJob,
-    qualityGateReports: scoped.qualityGateReports,
+    qualityGateReports: latestQualityReport ? [latestQualityReport] : [],
     saveData,
-    confirmAction
+    confirmAction,
+    setPipelineMessage
   })
 
-  const {
-    pipelineMessage,
-    setPipelineMessage,
-    isPipelineRunning,
-    runPipeline,
-    retryStep,
-    skipStep
-  } = usePipelineRunner({
+  const revisionActions = usePipelineRevisionActions({
     data,
     project,
     scoped,
-    saveData,
+    selectedJob,
+    selectedSteps,
+    selectedTraceSnapshot,
+    latestDraft,
     targetChapterOrder,
-    pipelineMode,
-    estimatedWordCount,
     readerEmotionTarget,
+    estimatedWordCount,
     budgetMode,
     budgetMaxTokens,
-    contextSource,
-    selectedSnapshot,
-    setSelectedJobId
+    saveData,
+    setPipelineMessage,
+    onOpenRevision
+  })
+  const traceActions = usePipelineTraceActions({
+    consistencyReport: traceConsistencyReport,
+    qualityReport: traceQualityReport,
+    saveData,
+    setPipelineMessage
   })
 
-  function applyReaderEmotionPreset(preset: string) {
-    const nextEmotionState = rememberReaderEmotionTarget(project.id, preset)
-    setReaderEmotionTarget(preset)
-    setReaderEmotionPresets(nextEmotionState.presets)
-  }
-
-  function addReaderEmotionPresetFromInput() {
-    const value = newReaderEmotionPreset.trim()
-    if (!value) {
-      setPipelineMessage('请输入要保存的读者情绪预设。')
+  function startPipeline() {
+    if (!taskReadyToRun()) return
+    if (contextSource === 'auto' && selectedJob?.contextSource === 'auto' && selectedJob.status === 'idle' && selectedJob.taskEdit && selectedJob.targetChapterOrder === targetChapterOrder) {
+      void retryStep(selectedJob, selectedJob.taskEdit.resumeStep)
       return
     }
-    const nextEmotionState = addReaderEmotionPreset(project.id, value)
-    setReaderEmotionTarget(value)
-    setReaderEmotionPresets(nextEmotionState.presets)
-    setNewReaderEmotionPreset('')
-    setPipelineMessage('已保存读者情绪预设。')
-  }
-
-  function startPipeline() {
-    if (readerEmotionTarget.trim()) {
-      const nextEmotionState = rememberReaderEmotionTarget(project.id, readerEmotionTarget)
-      setReaderEmotionPresets(nextEmotionState.presets)
-    }
+    rememberCurrentReaderEmotionTarget()
     void runPipeline()
   }
 
-  async function updateConsistencyIssueStatus(
-    report: ConsistencyReviewReport,
-    issue: ConsistencyReviewIssue,
-    status: ConsistencyReviewIssue['status']
-  ) {
-    await saveData((current) => ({
-      ...current,
-      consistencyReviewReports: current.consistencyReviewReports.map((item) =>
-        item.id === report.id
-          ? {
-              ...item,
-              issues: item.issues.map((current) => (current.id === issue.id ? { ...current, status } : current))
-            }
-          : item
-      )
-    }))
+  function startNextChapter() {
+    if (!taskReadyToRun()) return
+    const nextOrder = Math.max(nextChapter, (selectedJob?.targetChapterOrder ?? targetChapterOrder) + 1)
+    setTargetChapterOrder(nextOrder)
+    useAutoContext()
+    rememberCurrentReaderEmotionTarget()
+    setPipelineMessage(`第 ${selectedJob?.targetChapterOrder ?? targetChapterOrder} 章已完成，正在开始生成第 ${nextOrder} 章。`)
+    void runPipeline({ targetChapterOrder: nextOrder, forceAutoContext: true })
   }
 
-  async function startRevisionFromConsistencyIssue(report: ConsistencyReviewReport, issue: ConsistencyReviewIssue) {
-    const draft = scoped.generatedChapterDrafts.find((item) => item.jobId === report.jobId) ?? latestDraft
-    if (!draft) {
-      setPipelineMessage('请先生成章节草稿，再进入修订工作台。')
-      return
-    }
-    const targetChapter = draft.chapterId ? scoped.chapters.find((chapter) => chapter.id === draft.chapterId) ?? null : null
-    const timestamp = now()
-    const session: RevisionSession = {
-      id: newId(),
-      projectId: project.id,
-      chapterId: targetChapter?.id ?? '',
-      sourceDraftId: draft.id,
-      status: 'active',
-      createdAt: timestamp,
-      updatedAt: timestamp
-    }
-    const request: RevisionRequest = {
-      id: newId(),
-      sessionId: session.id,
-      type: consistencyIssueToRevisionType(issue),
-      targetRange: issue.evidence,
-      instruction: `${consistencyRevisionInstruction(issue)}\n\n约束：只修复该一致性问题，不得擅自改动无关剧情，不得引入新设定，不得破坏角色状态和伏笔 treatmentMode。`,
-      createdAt: timestamp
-    }
-    await saveData((current) => {
-      const nextData: AppData = {
-        ...current,
-        revisionSessions: [session, ...current.revisionSessions],
-        revisionRequests: [request, ...current.revisionRequests],
-        consistencyReviewReports: current.consistencyReviewReports.map((item) =>
-          item.id === report.id
-            ? {
-                ...item,
-                issues: item.issues.map((currentIssue) =>
-                  currentIssue.id === issue.id ? { ...currentIssue, status: 'converted_to_revision' } : currentIssue
-                )
-              }
-            : item
-        )
-      }
-      return appendGenerationRunTraceIds(nextData, report.jobId, 'revisionSessionIds', [session.id])
-    })
-    setPipelineMessage(targetChapter ? '已创建修订请求，正在进入修订工作台。' : '已创建草稿修订请求。该草稿尚未关联章节，修订接受后不会写入任何已有章节。')
-    onOpenRevision?.({ chapterId: targetChapter?.id ?? null, draftId: draft.id, requestId: request.id })
-  }
-
-  async function generateRevisionCandidate(issue: QualityGateIssue, report: QualityGateReport, draft: GeneratedChapterDraft) {
-    setPipelineMessage('')
-    const { resolveRevisionCandidateContext } = await import('./generation/revisionCandidateContext')
-    const revisionContext = resolveRevisionCandidateContext({
-      project,
-      data,
-      selectedJob,
-      selectedSteps,
-      selectedTraceSnapshot,
-      targetChapterOrder,
-      readerEmotionTarget,
-      estimatedWordCount,
-      budgetMode,
-      budgetMaxTokens,
-      issue,
-      report
-    })
-    const context = revisionContext.context
-    const result = await aiService.generateRevisionCandidate({ title: draft.title, body: draft.body }, issue, context)
-    if (!result.data) {
-      setPipelineMessage(result.error || result.parseError || '修订候选生成失败')
-      return
-    }
-    const timestamp = now()
-    const candidate: RevisionCandidate = {
-      id: newId(),
-      projectId: project.id,
-      jobId: draft.jobId,
-      draftId: draft.id,
-      sourceReportId: report.id,
-      targetIssue: issue.description || issue.type,
-      revisionInstruction: result.data.revisionInstruction || issue.suggestedFix,
-      revisedText: result.data.revisedText,
-      status: 'pending',
-      contextSource: revisionContext.contextSource,
-      contextWarnings: revisionContext.contextWarnings,
-      createdAt: timestamp,
-      updatedAt: timestamp
-    }
-    await saveData((current) => {
-      const withCandidate = { ...current, revisionCandidates: [candidate, ...current.revisionCandidates] }
-      const withForcedBlock = appendGenerationRunTraceForcedContextBlocks(withCandidate, report.jobId, [revisionContext.forcedBlock])
-      return revisionContext.compressionRecords?.length
-        ? upsertGenerationRunTraceByJobId(withForcedBlock, report.jobId, { compressionRecords: revisionContext.compressionRecords })
-        : withForcedBlock
-    })
-    setPipelineMessage('修订候选已生成，请在下方候选区确认后再应用。')
-  }
-
-  async function acceptRevisionCandidate(candidate: RevisionCandidate) {
-    if (candidate.status !== 'pending') return
-    const timestamp = now()
-    await saveData((current) => ({
-      ...current,
-      generatedChapterDrafts: current.generatedChapterDrafts.map((draft) =>
-        draft.id === candidate.draftId && candidate.revisedText.trim()
-          ? { ...draft, body: candidate.revisedText, tokenEstimate: TokenEstimator.estimate(candidate.revisedText), updatedAt: timestamp }
-          : draft
-      ),
-      revisionCandidates: current.revisionCandidates.map((item) =>
-        item.id === candidate.id ? { ...item, status: 'accepted', updatedAt: timestamp } : item
-      )
-    }))
-  }
-
-  async function rejectRevisionCandidate(candidate: RevisionCandidate) {
-    if (candidate.status !== 'pending') return
-    await saveData((current) => ({
-      ...current,
-      revisionCandidates: current.revisionCandidates.map((item) =>
-        item.id === candidate.id ? { ...item, status: 'rejected', updatedAt: now() } : item
-      )
-    }))
-  }
-
-  async function copyRunTrace(trace: GenerationRunTrace) {
-    await window.novelDirector.clipboard.writeText(JSON.stringify(buildRunTraceSummary(trace, traceConsistencyReport, traceQualityReport), null, 2))
-    setPipelineMessage('已复制生成追踪摘要。')
-  }
-
-  async function generateAuthorSummary(trace: GenerationRunTrace) {
-    await saveData((current) => {
-      const summary = buildRunTraceAuthorSummary(current, { traceId: trace.id })
-      return upsertRunTraceAuthorSummaryToAppData(current, summary)
-    })
-    setPipelineMessage('已生成章节诊断摘要。')
-  }
-
-  function useAutoContext() {
-    setContextSource('auto')
-    setSelectedSnapshotId(null)
-  }
-
-  function handleSnapshotChange(value: ID | '') {
-    setSelectedSnapshotId(value || null)
-    const snapshot = snapshots.find((item) => item.id === value)
-    if (!snapshot) return
-    setTargetChapterOrder(snapshot.targetChapterOrder)
-    setBudgetMode(snapshot.mode)
-    setBudgetMaxTokens(snapshot.budgetProfile.maxTokens)
-    if (snapshot.chapterTask.targetWordCount) setEstimatedWordCount(snapshot.chapterTask.targetWordCount)
-    if (snapshot.chapterTask.readerEmotion) {
-      const nextEmotionState = rememberReaderEmotionTarget(project.id, snapshot.chapterTask.readerEmotion)
-      setReaderEmotionTarget(snapshot.chapterTask.readerEmotion)
-      setReaderEmotionPresets(nextEmotionState.presets)
-    }
-  }
-
-  function firstFailedStep() {
-    return selectedSteps.find((step) => step.status === 'failed') ?? null
-  }
-
-  function pendingMemoryCandidateCount() {
-    return selectedCandidates.filter((candidate) => candidate.status === 'pending').length
-  }
-
-  function primaryActionLabel() {
-    if (!selectedJob) return '开始生成'
-    if (selectedJob.status === 'running' || isPipelineRunning) return '流水线运行中'
-    if (selectedJob.status === 'failed' && firstFailedStep()) return '重试失败步骤'
-    if (latestQualityReport && !latestQualityReport.pass && latestDraft) return '生成修订候选'
-    if (latestQualityReport?.pass && latestDraft && latestDraft.status !== 'accepted') return '接受草稿'
-    if (latestDraft && !latestQualityReport) return '查看草稿'
-    if (latestDraft?.status === 'accepted' && pendingMemoryCandidateCount() > 0) return '处理记忆候选'
-    return selectedJob.status === 'completed' ? '查看结果' : '查看步骤'
-  }
-
-  function runPrimaryAction() {
-    if (!selectedJob) {
-      startPipeline()
-      return
-    }
-    const failed = firstFailedStep()
-    if (selectedJob.status === 'failed' && failed) {
-      retryStep(selectedJob, failed.type)
-      return
-    }
-    if (latestQualityReport && !latestQualityReport.pass && latestDraft) {
-      const issue = latestQualityReport.issues[0]
-      if (issue) {
-        void generateRevisionCandidate(issue, latestQualityReport, latestDraft)
-      } else {
-        setActiveArtifactTab('draft')
-      }
-      return
-    }
-    if (latestQualityReport?.pass && latestDraft && latestDraft.status !== 'accepted') {
-      draftAcceptance.acceptDraft(latestDraft)
-      return
-    }
-    if (latestDraft) {
-      setActiveArtifactTab('draft')
-      return
-    }
-    setActiveArtifactTab('steps')
-  }
+  const primaryAction = usePipelinePrimaryAction({
+    selectedJob,
+    selectedSteps,
+    latestDraft,
+    latestQualityReport,
+    isPipelineRunning,
+    onStartPipeline: startPipeline,
+    onStartNextChapter: startNextChapter,
+    onRetryStep: retryTaskStep,
+    onAcceptDraft: draftAcceptance.acceptDraft,
+    onActiveArtifactTabChange: setActiveArtifactTab
+  })
 
   function linkedConsistencyIssueTitle(issueId: string | undefined) {
     if (!issueId) return null
@@ -465,6 +290,7 @@ export function GenerationPipelineView({
   return (
     <div className="generation-view">
       <GenerationPipelineConsole
+        taskEditor={<PipelineTaskEditor key={`${project.id}:${selectedJob?.id ?? `new-${targetChapterOrder}`}`} {...taskEditor} onDirtyChange={setTaskDirty} />}
         selectedJob={selectedJob}
         headerTitle="章节生产流水线"
         headerDescription="把上下文构建、任务书、正文草稿、复盘、记忆候选和一致性审稿串成可见流程。"
@@ -476,9 +302,9 @@ export function GenerationPipelineView({
           qualityReport: latestQualityReport,
           draft: latestDraft,
           isRunning: isPipelineRunning,
-          primaryActionLabel: primaryActionLabel(),
-          primaryActionDisabled: contextSource === 'prompt_snapshot' && !selectedSnapshot && !selectedJob,
-          onPrimaryAction: runPrimaryAction
+          primaryActionLabel: primaryAction.primaryActionLabel,
+          primaryActionDisabled: taskDirty || taskEditor.busy || (contextSource === 'prompt_snapshot' && !selectedSnapshot && !selectedJob),
+          onPrimaryAction: () => { if (taskReadyToRun()) primaryAction.runPrimaryAction() }
         }}
         configPanel={{
           targetChapterOrder,
@@ -496,48 +322,57 @@ export function GenerationPipelineView({
           selectedSnapshot,
           selectedSnapshotId,
           isRunning: isPipelineRunning,
-          onTargetChapterOrderChange: setTargetChapterOrder,
+          onTargetChapterOrderChange: (order) => { setTargetChapterOrder(order); setPreparingNewTask(true); setActiveArtifactTab('plan') },
           onPipelineModeChange: setPipelineMode,
           onEstimatedWordCountChange: setEstimatedWordCount,
           onReaderEmotionTargetChange: setReaderEmotionTarget,
           onReaderEmotionPreset: applyReaderEmotionPreset,
           onNewReaderEmotionPresetChange: setNewReaderEmotionPreset,
-          onAddReaderEmotionPreset: addReaderEmotionPresetFromInput,
+          onAddReaderEmotionPreset: () => setPipelineMessage(addReaderEmotionPresetFromInput()),
           onBudgetModeChange: setBudgetMode,
           onBudgetMaxTokensChange: setBudgetMaxTokens,
-          onContextSourceChange: setContextSource,
-          onSnapshotChange: handleSnapshotChange,
-          onUseAutoContext: useAutoContext,
-          onStart: startPipeline
+          onContextSourceChange: (source) => { setContextSource(source); setPreparingNewTask(true); setActiveArtifactTab('plan') },
+          onSnapshotChange: (id) => { handleSnapshotChange(id); setPreparingNewTask(true); setActiveArtifactTab('plan') },
+          onUseAutoContext: () => { useAutoContext(); setPreparingNewTask(true); setActiveArtifactTab('plan') },
+          onStart: startPipeline,
+          onEditNewTask: () => { void selectTaskSource(null) },
+          startDisabled: taskDirty || taskEditor.busy,
+          taskEditingLocked: taskDirty || taskEditor.busy
         }}
         jobList={{
           jobs,
           selectedJobId: selectedJob?.id ?? null,
           labels: PIPELINE_STEP_LABELS,
-          onSelectJob: setSelectedJobId
+          onSelectJob: (id) => { void selectTaskSource(id) }
         }}
         currentArtifactPanel={{
           activeTab: activeArtifactTab,
           onActiveTabChange: setActiveArtifactTab,
           job: selectedJob,
+          isRunning: isPipelineRunning,
           draft: latestDraft,
           steps: selectedSteps,
           labels: PIPELINE_STEP_LABELS,
           onAcceptDraft: draftAcceptance.acceptDraft,
+          onAcceptUnreviewedDraft: incompleteReview ? draftAcceptance.acceptDraftUnreviewed : undefined,
+          acceptanceReview: draftAcceptanceReview,
           onRejectDraft: draftAcceptance.rejectDraft,
-          onRetryDraft: (job) => retryStep(job, 'generate_chapter_draft'),
+          onRetryDraft: (job) => retryTaskStep(job, 'generate_chapter_draft'),
           onCopyDraft: (draft) => {
-            void window.novelDirector.clipboard.writeText(draft.body).then(() => setPipelineMessage('已复制草稿正文。'))
+            void getNovelDirectorClipboardApi().writeText(draft.body).then(() => setPipelineMessage('已复制草稿正文。'))
           },
-          onRetryStep: retryStep,
-          onSkipStep: skipStep
+          onOpenDraftRevision: onOpenRevision ? revisionActions.startDraftRevision : undefined,
+          onRetryStep: retryTaskStep,
+          onSkipStep: skipTaskStep,
+          canSkipStep: canSkipPipelineStep
         }}
         memoryCandidatesPanel={{
           candidates: selectedCandidates,
           scoped,
           onAccept: memoryCandidates.applyCandidate,
           onAcceptAll: memoryCandidates.applyAllPendingCandidates,
-          onReject: memoryCandidates.rejectCandidate
+          onReject: memoryCandidates.rejectCandidate,
+          disabled: isPipelineRunning
         }}
         riskBanner={{
           job: selectedJob,
@@ -553,20 +388,26 @@ export function GenerationPipelineView({
           job: selectedJob,
           steps: selectedSteps,
           labels: PIPELINE_STEP_LABELS,
-          onRetry: retryStep,
-          onSkip: skipStep
+          isRunning: isPipelineRunning,
+          canSkipFailedStep: Boolean(selectedSteps.find((step) => step.status === 'failed' && canSkipPipelineStep(step.type))),
+          onRetry: retryTaskStep,
+          onSkip: skipTaskStep,
+          onCancel: cancelPipeline
         }}
         diagnosticsPanel={{
+          editorialVerdict,
           qualityReport: latestQualityReport,
           consistencyReports: selectedReports,
           revisionCandidates: selectedRevisionCandidates,
           latestDraft,
+          chapterCommitBundles: scoped.chapterCommitBundles,
           linkedConsistencyIssueTitle,
-          onGenerateRevisionCandidate: generateRevisionCandidate,
-          onAcceptRevisionCandidate: acceptRevisionCandidate,
-          onRejectRevisionCandidate: rejectRevisionCandidate,
-          onStartRevisionFromConsistencyIssue: startRevisionFromConsistencyIssue,
-          onUpdateConsistencyIssueStatus: updateConsistencyIssueStatus
+          onGenerateRevisionCandidate: revisionActions.generateRevisionCandidate,
+          onAcceptRevisionCandidate: revisionActions.acceptRevisionCandidate,
+          onRejectRevisionCandidate: revisionActions.rejectRevisionCandidate,
+          onStartRevisionFromConsistencyIssue: revisionActions.startRevisionFromConsistencyIssue,
+          onStartRevisionFromEditorialIssue: onOpenRevision ? revisionActions.startRevisionFromEditorialIssue : undefined,
+          onUpdateConsistencyIssueStatus: revisionActions.updateConsistencyIssueStatus
         }}
         tracePanel={{
           trace: selectedTrace,
@@ -576,8 +417,8 @@ export function GenerationPipelineView({
           qualityReport: traceQualityReport,
           continuityBridge: traceContinuityBridge,
           redundancyReport: traceRedundancyReport,
-          onCopy: copyRunTrace,
-          onGenerateAuthorSummary: generateAuthorSummary
+          onCopy: traceActions.copyRunTrace,
+          onGenerateAuthorSummary: traceActions.generateAuthorSummary
         }}
       />
     </div>

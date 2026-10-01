@@ -3,8 +3,9 @@ import { join, resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { build } from 'esbuild'
 import Database from 'better-sqlite3'
+import { repoRoot } from './utils/repo-root.mjs'
 
-const root = resolve('.')
+const root = repoRoot
 const outDir = join(root, 'tmp', 'run-trace-author-summary-test')
 
 function assert(condition, message, details = {}) {
@@ -147,17 +148,49 @@ async function main() {
   await mkdir(outDir, { recursive: true })
   const checks = []
   const serviceModule = await bundle('src/services/RunTraceAuthorSummaryService.ts', 'summary-service.mjs')
+  const diagnosticBinding = await bundle('src/services/DraftDiagnosticBindingService.ts', 'diagnostic-binding.mjs')
   const defaultsModule = await bundle('src/shared/defaults.ts', 'defaults.mjs')
   const sqliteModule = await bundle('src/storage/SqliteStorageService.ts', 'sqlite-storage.mjs')
   const jsonModule = await bundle('src/storage/JsonStorageService.ts', 'json-storage.mjs')
   const panelSource = await read('src/renderer/src/components/pipeline/PipelineTracePanel.tsx')
-  const fullPanelSource = [
-    await read('src/renderer/src/views/generation/RunTracePanel.tsx'),
-    await read('src/renderer/src/views/generation/RunTraceAuthorSummaryCard.tsx')
-  ].join('\n')
   const runTests = await read('scripts/run-tests.mjs')
 
-  const data = defaultsModule.normalizeAppData(makeData())
+  const bindCurrentDiagnostics = (input) => {
+    const draft = input.generatedChapterDrafts.find((item) => item.id === 'draft-1')
+    if (!draft) return input
+    const draftContentHash = diagnosticBinding.draftContentHash(draft.body)
+    return {
+      ...input,
+      qualityGateReports: input.qualityGateReports.map((report) => ({
+        ...report,
+        draftId: draft.id,
+        draftContentHash
+      })),
+      consistencyReviewReports: input.consistencyReviewReports.map((report) => ({
+        ...report,
+        draftId: draft.id,
+        draftContentHash
+      })),
+      redundancyReports: input.redundancyReports.map((report) => ({
+        ...report,
+        draftId: draft.id,
+        draftContentHash
+      })),
+      generationRunTraces: input.generationRunTraces.map((trace) => ({
+        ...trace,
+        noveltyAuditResult: trace.noveltyAuditResult
+          ? {
+              ...trace.noveltyAuditResult,
+              sourceDraftId: draft.id,
+              sourceContentHash: draftContentHash,
+              auditedAt: now()
+            }
+          : null
+      }))
+    }
+  }
+
+  const data = bindCurrentDiagnostics(defaultsModule.normalizeAppData(makeData()))
   const summary = serviceModule.buildRunTraceAuthorSummary(data, { traceId: 'trace-1', createdAt: now() })
   checks.push(assert(summary.overallStatus === 'risky', 'high-risk reports produce risky author summary', summary))
   checks.push(assert(summary.likelyProblemSources.some((item) => item.source === 'quality_gate'), 'quality gate failure becomes a quality_gate source'))
@@ -165,8 +198,47 @@ async function main() {
   checks.push(assert(summary.likelyProblemSources.some((item) => item.source === 'novelty_drift'), 'novelty audit becomes a novelty_drift source'))
   checks.push(assert(summary.likelyProblemSources.some((item) => item.source === 'redundancy'), 'high redundancy report becomes a redundancy source'))
   checks.push(assert(summary.likelyProblemSources.some((item) => item.source === 'context_missing'), 'unmet context need becomes a context_missing source'))
+  checks.push(assert(!summary.oneLineDiagnosis.includes('quality_gate'), 'author diagnosis uses readable Chinese labels instead of internal source enums'))
   checks.push(assert(!JSON.stringify(summary).includes('这是一段很长的正文'), 'summary does not copy full draft body'))
   checks.push(assert(!JSON.stringify(summary).includes('TEST_PLAINTEXT_KEY_SHOULD_NOT_PERSIST'), 'summary does not contain API keys'))
+
+  const changedDraftData = {
+    ...data,
+    generatedChapterDrafts: data.generatedChapterDrafts.map((draft) =>
+      draft.id === 'draft-1' ? { ...draft, body: `${draft.body}\n正文已经修订。`, updatedAt: '2026-05-10T01:00:00.000Z' } : draft
+    )
+  }
+  const changedDraftSummary = serviceModule.buildRunTraceAuthorSummary(changedDraftData, { traceId: 'trace-1', createdAt: now() })
+  checks.push(assert(
+    !changedDraftSummary.likelyProblemSources.some((item) =>
+      ['quality_gate', 'consistency', 'novelty_drift', 'redundancy'].includes(item.source)
+    ),
+    'author summary does not revive diagnostics bound to an older draft body',
+    changedDraftSummary
+  ))
+
+  const regeneratedDraftData = {
+    ...data,
+    generatedChapterDrafts: [
+      ...data.generatedChapterDrafts,
+      {
+        ...data.generatedChapterDrafts[0],
+        id: 'draft-2',
+        body: '同一运行重新生成的较新正文。',
+        createdAt: '2026-05-10T01:00:00.000Z',
+        updatedAt: '2026-05-10T01:00:00.000Z'
+      }
+    ]
+  }
+  const regeneratedDraftSummary = serviceModule.buildRunTraceAuthorSummary(regeneratedDraftData, { traceId: 'trace-1', createdAt: now() })
+  checks.push(assert(
+    regeneratedDraftSummary.generatedDraftId === 'draft-2' &&
+      !regeneratedDraftSummary.likelyProblemSources.some((item) =>
+        ['quality_gate', 'consistency', 'novelty_drift', 'redundancy'].includes(item.source)
+      ),
+    'author summary follows the newest draft when trace metadata lags behind regeneration',
+    regeneratedDraftSummary
+  ))
 
   const failedData = defaultsModule.normalizeAppData({
     ...makeData({ generationRunTraces: [baseTrace({ id: 'trace-failed', generatedDraftId: null, qualityGateReportId: null, consistencyReviewReportId: null, redundancyReportId: null, noveltyAuditResult: null })] }),
@@ -183,6 +255,134 @@ async function main() {
   })
   const partialSummary = serviceModule.buildRunTraceAuthorSummary(partialData, { traceId: 'trace-1', createdAt: now() })
   checks.push(assert(Boolean(partialSummary.oneLineDiagnosis), 'missing reports do not crash summary generation'))
+
+  const advisoryContextData = defaultsModule.normalizeAppData({
+    ...makeData({
+      qualityGateReports: [],
+      consistencyReviewReports: [],
+      redundancyReports: [],
+      generationRunTraces: [baseTrace({
+        id: 'trace-advisory-context',
+        qualityGateReportId: null,
+        consistencyReviewReportId: null,
+        redundancyReportId: null,
+        noveltyAuditResult: null,
+        omittedContextItems: [],
+        contextWarnings: [],
+        contextNeedPlanId: null,
+        requiredStateFactCategories: {},
+        contextNeedPlanWarnings: [],
+        contextNeedPlanOmittedItems: [],
+        characterStateWarnings: [],
+        characterStateIssueIds: [],
+        contextSelectionTrace: {
+          projectId: 'project-1',
+          chapterId: 'chapter-1',
+          selectedBlocks: [],
+          droppedBlocks: [{
+            blockType: 'character',
+            sourceId: 'character-advisory',
+            priority: 'medium',
+            uncertain: true,
+            tokenEstimate: 80,
+            dropReason: '角色只在中期导向中被提及。'
+          }],
+          unmetNeeds: [{
+            needType: 'character_card',
+            sourceId: 'character-advisory',
+            priority: 'medium',
+            uncertain: true,
+            reason: '该角色是否在场尚未确认。'
+          }],
+          budgetSummary: { totalBudget: 12000, usedTokens: 3000, reservedTokens: 9000, pressure: 'low' }
+        }
+      })]
+    }),
+    chapterGenerationSteps: [{ id: 'advisory-step', jobId: 'job-1', type: 'quality_gate', status: 'completed', startedAt: now(), completedAt: now(), input: '', output: '', error: '' }]
+  })
+  const advisoryContextSummary = serviceModule.buildRunTraceAuthorSummary(advisoryContextData, {
+    traceId: 'trace-advisory-context',
+    createdAt: now()
+  })
+  checks.push(assert(
+    !advisoryContextSummary.likelyProblemSources.some((item) => item.source === 'context_missing'),
+    'uncertain advisory needs remain traceable without becoming a confirmed context failure',
+    advisoryContextSummary.likelyProblemSources
+  ))
+
+  const allowedFinding = {
+    kind: 'new_world_rule',
+    text: '新副本门禁公告',
+    evidenceExcerpt: '入口公告公开了门禁限制',
+    reason: '本章任务书明确允许的新副本规则',
+    severity: 'info',
+    allowedByTask: true,
+    hasPriorForeshadowing: false,
+    sourceHint: 'chapter_allowed_novelty',
+    suggestedAction: '保留审计记录'
+  }
+  const allowedNoveltyData = bindCurrentDiagnostics(defaultsModule.normalizeAppData({
+    ...makeData({
+      qualityGateReports: [],
+      consistencyReviewReports: [],
+      redundancyReports: [],
+      generationRunTraces: [baseTrace({
+        id: 'trace-allowed-novelty',
+        qualityGateReportId: null,
+        consistencyReviewReportId: null,
+        redundancyReportId: null,
+        omittedContextItems: [],
+        contextWarnings: [],
+        contextNeedPlanId: null,
+        requiredStateFactCategories: {},
+        contextNeedPlanWarnings: [],
+        contextNeedPlanOmittedItems: [],
+        characterStateWarnings: [],
+        characterStateIssueIds: [],
+        noveltyAuditResult: {
+          newNamedCharacters: [],
+          newWorldRules: [allowedFinding],
+          newSystemMechanics: [],
+          newOrganizationsOrRanks: [],
+          majorLoreReveals: [],
+          suspiciousDeusExRules: [],
+          untracedNames: [],
+          severity: 'pass',
+          summary: '新增内容在任务书许可范围内。'
+        }
+      })]
+    }),
+    chapterGenerationSteps: [{ id: 'allowed-step', jobId: 'job-1', type: 'quality_gate', status: 'completed', startedAt: now(), completedAt: now(), input: '', output: '', error: '' }]
+  }))
+  const allowedNoveltySummary = serviceModule.buildRunTraceAuthorSummary(allowedNoveltyData, { traceId: 'trace-allowed-novelty', createdAt: now() })
+  checks.push(assert(!allowedNoveltySummary.likelyProblemSources.some((item) => item.source === 'novelty_drift'), 'task-authorized info novelty remains traceable without becoming an author risk'))
+  checks.push(assert(allowedNoveltySummary.continuityDiagnosis?.newCanonRisks?.length === 0, 'authorized info novelty is not mislabeled as a canon risk'))
+
+  const crossProjectData = defaultsModule.normalizeAppData({
+    ...makeData({
+      projects: [
+        ...makeData().projects,
+        { id: 'project-2', name: 'Other Project', genre: '', description: '', targetReaders: '', coreAppeal: '', style: '', createdAt: now(), updatedAt: now() }
+      ],
+      generationRunTraces: [baseTrace({
+        id: 'trace-cross-project',
+        omittedContextItems: [],
+        contextWarnings: [],
+        contextNeedPlanId: null,
+        requiredStateFactCategories: {},
+        contextNeedPlanWarnings: [],
+        contextNeedPlanOmittedItems: [],
+        characterStateWarnings: [],
+        characterStateIssueIds: [],
+        noveltyAuditResult: null
+      })],
+      qualityGateReports: [{ ...makeData().qualityGateReports[0], projectId: 'project-2' }],
+      consistencyReviewReports: [{ ...makeData().consistencyReviewReports[0], projectId: 'project-2' }],
+      redundancyReports: [{ ...makeData().redundancyReports[0], projectId: 'project-2' }]
+    })
+  })
+  const crossProjectSummary = serviceModule.buildRunTraceAuthorSummary(crossProjectData, { traceId: 'trace-cross-project', createdAt: now() })
+  checks.push(assert(!crossProjectSummary.likelyProblemSources.some((item) => ['quality_gate', 'consistency', 'redundancy'].includes(item.source)), 'trace summary ignores report ids that belong to another project'))
 
   const upserted = serviceModule.upsertRunTraceAuthorSummaryToAppData(data, summary)
   const upsertedAgain = serviceModule.upsertRunTraceAuthorSummaryToAppData(upserted, { ...summary, oneLineDiagnosis: 'updated' })
@@ -206,7 +406,7 @@ async function main() {
   checks.push(assert(leakedApiKey === 0, 'SQLite entity JSON does not contain API key'))
 
   checks.push(assert(panelSource.includes('作者诊断摘要') && panelSource.includes('高级 / 调试信息'), 'PipelineTracePanel defaults to author summary and keeps advanced trace details'))
-  checks.push(assert(fullPanelSource.includes('章节生成诊断摘要') && fullPanelSource.includes('生成诊断摘要'), 'RunTracePanel exposes manual summary generation'))
+  checks.push(assert(panelSource.includes('生成诊断摘要') && panelSource.includes('source.evidence[0]'), 'active Run Trace panel exposes manual summary generation and author-facing evidence'))
   checks.push(assert(runTests.includes('validate-run-trace-author-summary.mjs'), 'npm test runs run trace author summary validation'))
 
   const failed = checks.filter((check) => !check.ok)

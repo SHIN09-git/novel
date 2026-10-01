@@ -5,7 +5,30 @@ import type {
   ID
 } from '../shared/types'
 
+export type GenerationRunBundleValidationContext = Pick<
+  AppData,
+  | 'generatedChapterDrafts'
+  | 'consistencyReviewReports'
+  | 'qualityGateReports'
+  | 'editorialVerdicts'
+>
+
 const GENERATION_RUN_BUNDLE_SCHEMA_VERSION = 1
+const MAX_EDITORIAL_VERDICT_JSON_LENGTH = 24_000
+const FORBIDDEN_EDITORIAL_VERDICT_KEYS = new Set([
+  'apikey',
+  'apitoken',
+  'accesstoken',
+  'authorization',
+  'password',
+  'secret',
+  'body',
+  'draftbody',
+  'drafttext',
+  'content',
+  'prompt',
+  'fullprompt'
+])
 
 function uniqueById<T extends { id: ID }>(items: T[]): T[] {
   const seen = new Set<ID>()
@@ -56,6 +79,81 @@ function assertReportShape(collection: string, items: Array<{ id: ID; jobId?: ID
   assertChapterField(collection, items, errors)
 }
 
+function forbiddenEditorialVerdictKey(value: unknown): string | null {
+  if (!value || typeof value !== 'object') return null
+  const pending: object[] = [value]
+  const visited = new Set<object>()
+  while (pending.length) {
+    const current = pending.pop()
+    if (!current || visited.has(current)) continue
+    visited.add(current)
+    for (const [key, nested] of Object.entries(current)) {
+      const normalizedKey = key.replace(/[_-]/g, '').toLowerCase()
+      if (FORBIDDEN_EDITORIAL_VERDICT_KEYS.has(normalizedKey)) return key
+      if (nested && typeof nested === 'object') pending.push(nested)
+    }
+  }
+  return null
+}
+
+function assertEditorialVerdictsSafe(items: Array<{ id: ID }>, errors: string[]) {
+  for (const item of items) {
+    const forbiddenKey = forbiddenEditorialVerdictKey(item)
+    if (forbiddenKey) {
+      errors.push(`editorialVerdicts:${item.id || '<missing-id>'} contains forbidden persistence field ${forbiddenKey}`)
+      continue
+    }
+    try {
+      if (JSON.stringify(item).length > MAX_EDITORIAL_VERDICT_JSON_LENGTH) {
+        errors.push(`editorialVerdicts:${item.id || '<missing-id>'} is too large`)
+      }
+    } catch {
+      errors.push(`editorialVerdicts:${item.id || '<missing-id>'} is not serializable`)
+    }
+  }
+}
+
+function stepOutputRecord(step: ChapterGenerationStep): Record<string, unknown> | null {
+  if (!step.output.trim()) return null
+  try {
+    const parsed = JSON.parse(step.output) as unknown
+    return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? (parsed as Record<string, unknown>) : null
+  } catch {
+    return null
+  }
+}
+
+function nestedId(value: unknown): ID | null {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null
+  const id = (value as Record<string, unknown>).id
+  return typeof id === 'string' && id ? id : null
+}
+
+function generationRunContextIds(steps: ChapterGenerationStep[], runTraceContextNeedPlanId?: ID | null) {
+  const contextNeedPlanIds = new Set<ID>()
+  const contextBudgetProfileIds = new Set<ID>()
+  if (runTraceContextNeedPlanId) contextNeedPlanIds.add(runTraceContextNeedPlanId)
+
+  for (const step of steps) {
+    const output = stepOutputRecord(step)
+    if (!output) continue
+    if (step.type === 'context_need_planning') {
+      const id = typeof output.id === 'string' ? output.id : null
+      if (id) contextNeedPlanIds.add(id)
+    }
+    if (step.type === 'context_need_planning_from_plan') {
+      const id = nestedId(output.derivedContextNeedPlan)
+      if (id) contextNeedPlanIds.add(id)
+    }
+    if (step.type === 'context_budget_selection' || step.type === 'context_budget_selection_delta') {
+      const id = nestedId(output.profile)
+      if (id) contextBudgetProfileIds.add(id)
+    }
+  }
+
+  return { contextNeedPlanIds, contextBudgetProfileIds }
+}
+
 export function buildGenerationRunBundle(appData: AppData, jobId: ID): GenerationRunBundle {
   const job = appData.chapterGenerationJobs.find((item) => item.id === jobId)
   if (!job) throw new Error(`GenerationRunBundle cannot be built: job ${jobId} was not found`)
@@ -70,7 +168,11 @@ export function buildGenerationRunBundle(appData: AppData, jobId: ID): Generatio
   const redundancyReports = appData.redundancyReports.filter((report) =>
     report.jobId === jobId || generatedDrafts.some((draft) => draft.id === report.draftId)
   )
+  const editorialVerdicts = (appData.editorialVerdicts ?? []).filter((verdict) => verdict.jobId === jobId)
   const runTrace = appData.generationRunTraces.find((trace) => trace.jobId === jobId)
+  const steps = appData.chapterGenerationSteps.filter((step) => step.jobId === jobId)
+  const { contextNeedPlanIds, contextBudgetProfileIds } = generationRunContextIds(steps, runTrace?.contextNeedPlanId)
+  if (promptContextSnapshot?.contextNeedPlan?.id) contextNeedPlanIds.add(promptContextSnapshot.contextNeedPlan.id)
 
   return {
     schemaVersion: GENERATION_RUN_BUNDLE_SCHEMA_VERSION,
@@ -83,19 +185,25 @@ export function buildGenerationRunBundle(appData: AppData, jobId: ID): Generatio
       null,
     updatedAt: job.updatedAt,
     job,
-    steps: appData.chapterGenerationSteps.filter((step) => step.jobId === jobId),
+    steps,
     promptContextSnapshot,
+    contextNeedPlans: appData.contextNeedPlans.filter((plan) => contextNeedPlanIds.has(plan.id)),
+    contextBudgetProfiles: appData.contextBudgetProfiles.filter((profile) => contextBudgetProfileIds.has(profile.id)),
     generatedDrafts,
     qualityGateReports,
     consistencyReviewReports,
     memoryUpdateCandidates,
     characterStateChangeCandidates,
     redundancyReports,
+    editorialVerdicts,
     runTrace
   }
 }
 
-export function validateGenerationRunBundle(bundle: GenerationRunBundle, existingData?: AppData): void {
+export function validateGenerationRunBundle(
+  bundle: GenerationRunBundle,
+  existingData?: GenerationRunBundleValidationContext
+): void {
   const errors: string[] = []
   const jobId = bundle.job?.id
   const projectId = bundle.job?.projectId
@@ -112,12 +220,15 @@ export function validateGenerationRunBundle(bundle: GenerationRunBundle, existin
 
   assertSameJobId('chapterGenerationSteps', bundle.steps, jobId, errors)
   if (projectId) {
+    assertProjectId('contextNeedPlans', bundle.contextNeedPlans ?? [], projectId, errors)
+    assertProjectId('contextBudgetProfiles', bundle.contextBudgetProfiles ?? [], projectId, errors)
     assertProjectId('generatedChapterDrafts', bundle.generatedDrafts, projectId, errors)
     assertProjectId('qualityGateReports', bundle.qualityGateReports, projectId, errors)
     assertProjectId('consistencyReviewReports', bundle.consistencyReviewReports, projectId, errors)
     assertProjectId('memoryUpdateCandidates', bundle.memoryUpdateCandidates, projectId, errors)
     assertProjectId('characterStateChangeCandidates', bundle.characterStateChangeCandidates, projectId, errors)
     assertProjectId('redundancyReports', bundle.redundancyReports, projectId, errors)
+    assertProjectId('editorialVerdicts', bundle.editorialVerdicts ?? [], projectId, errors)
     if (bundle.runTrace?.projectId && bundle.runTrace.projectId !== projectId) {
       errors.push(`generationRunTrace:${bundle.runTrace.id} belongs to project ${bundle.runTrace.projectId}, expected ${projectId}`)
     }
@@ -128,6 +239,8 @@ export function validateGenerationRunBundle(bundle: GenerationRunBundle, existin
   assertSameJobId('memoryUpdateCandidates', bundle.memoryUpdateCandidates, jobId, errors)
   assertSameJobId('characterStateChangeCandidates', bundle.characterStateChangeCandidates, jobId, errors)
   assertSameJobId('redundancyReports', bundle.redundancyReports, jobId, errors)
+  assertReportShape('editorialVerdicts', bundle.editorialVerdicts ?? [], jobId, errors)
+  assertEditorialVerdictsSafe(bundle.editorialVerdicts ?? [], errors)
   assertChapterField('characterStateChangeCandidates', bundle.characterStateChangeCandidates, errors)
   assertChapterField('redundancyReports', bundle.redundancyReports, errors)
   if (bundle.runTrace) {
@@ -164,6 +277,13 @@ export function validateGenerationRunBundle(bundle: GenerationRunBundle, existin
   if (bundle.runTrace?.qualityGateReportId && !qualityIds.has(bundle.runTrace.qualityGateReportId)) {
     errors.push(`generationRunTrace.qualityGateReportId ${bundle.runTrace.qualityGateReportId} is not present in qualityGateReports`)
   }
+  const editorialVerdictIds = new Set([
+    ...(bundle.editorialVerdicts ?? []).map((verdict) => verdict.id),
+    ...((existingData?.editorialVerdicts ?? []).filter((verdict) => verdict.jobId === jobId).map((verdict) => verdict.id))
+  ])
+  if (bundle.runTrace?.editorialVerdictId && !editorialVerdictIds.has(bundle.runTrace.editorialVerdictId)) {
+    errors.push(`generationRunTrace.editorialVerdictId ${bundle.runTrace.editorialVerdictId} is not present in editorialVerdicts`)
+  }
 
   if (errors.length) throw new Error(`Invalid GenerationRunBundle: ${errors.join('; ')}`)
 }
@@ -175,12 +295,15 @@ export function applyGenerationRunBundleToAppData(appData: AppData, bundle: Gene
     chapterGenerationJobs: upsertById(appData.chapterGenerationJobs, [bundle.job]),
     chapterGenerationSteps: upsertById(appData.chapterGenerationSteps, bundle.steps),
     promptContextSnapshots: bundle.promptContextSnapshot ? upsertById(appData.promptContextSnapshots, [bundle.promptContextSnapshot]) : appData.promptContextSnapshots,
+    contextNeedPlans: upsertById(appData.contextNeedPlans, bundle.contextNeedPlans ?? []),
+    contextBudgetProfiles: upsertById(appData.contextBudgetProfiles, bundle.contextBudgetProfiles ?? []),
     generatedChapterDrafts: upsertById(appData.generatedChapterDrafts, bundle.generatedDrafts),
     qualityGateReports: upsertById(appData.qualityGateReports, bundle.qualityGateReports),
     consistencyReviewReports: upsertById(appData.consistencyReviewReports, bundle.consistencyReviewReports),
     memoryUpdateCandidates: upsertById(appData.memoryUpdateCandidates, bundle.memoryUpdateCandidates),
     characterStateChangeCandidates: upsertById(appData.characterStateChangeCandidates, bundle.characterStateChangeCandidates),
     redundancyReports: upsertById(appData.redundancyReports, bundle.redundancyReports),
+    editorialVerdicts: upsertById([...(appData.editorialVerdicts ?? [])], bundle.editorialVerdicts ?? []),
     generationRunTraces: bundle.runTrace ? upsertById(appData.generationRunTraces, [bundle.runTrace]) : appData.generationRunTraces
   }
 }

@@ -1,47 +1,38 @@
 import type { ForcedContextBlock, GeneratedChapterDraft, ID, PromptBlockOrderItem } from '../../../../../shared/types'
 import { ContextBudgetManager } from '../../../../../services/ContextBudgetManager'
 import { CharacterStateService } from '../../../../../services/CharacterStateService'
+import { ChapterTaskContractService } from '../../../../../services/ChapterTaskContractService'
 import { TokenEstimator } from '../../../../../services/TokenEstimator'
+import { bindNoveltyAuditToDraft } from '../../../../../services/DraftDiagnosticBindingService'
 import { inferPromptBlockOrderFromPrompt } from '../../../../../services/PromptBuilderService'
 import { PromptLintService } from '../../../../../services/PromptLintService'
+import { PromptCompositionMetricsService } from '../../../../../services/PromptCompositionMetricsService'
+import { ensureContinuityBridgeInPrompt } from '../../../../../services/PromptContractReplayService'
 import { formatContinuityBridgeForPrompt, resolveContinuityBridge } from '../../../../../services/ContinuityService'
 import { PlanContextGapAnalyzerService } from '../../../../../services/PlanContextGapAnalyzerService'
+import { shouldIsolateOpeningLegacyContext } from '../../../../../services/OpeningChapterContextPolicy'
+import { guardOpeningChapterPlanForDraft } from '../../../../../services/OpeningChapterPlanGuardService'
+import { activeChapters } from '../../../../../services/ChapterLifecycleService'
 import { newId, now } from '../../../utils/format'
 import { analyzeRedundancyDiagnostic, auditNoveltyDiagnostic } from '../../../utils/diagnosticsApi'
 import { buildPipelineContextResultFromSelection, createContextBudgetProfile, selectBudgetContext } from '../../../utils/promptContext'
-import { buildForeshadowingTreatmentModes, estimateForcedContextTokens, upsertGenerationRunTrace } from '../../../utils/runTrace'
 import {
-  diffIds,
-  enrichContextSelectionTrace,
-  pipelineChapterTask,
-  serializeOutput,
-  summarizeSnapshot,
-  uniqueIds,
-  validateGeneratedChapterDraft
+  appendGenerationRunTraceAiCall,
+  buildForeshadowingTreatmentModes,
+  estimateForcedContextTokens,
+  upsertGenerationRunTrace
+} from '../../../utils/runTrace'
+import {
+  assertChapterTaskPresentInPrompt, characterStateFactsPresentInPrompt, diffIds, enrichContextSelectionTrace,
+  hardCanonTraceFromPrompt, noveltyReferenceContext, pipelineChapterTask, serializeOutput, summarizeSnapshot,
+  validateAuthoritativeChapterTaskDraft, validateGeneratedChapterDraft
 } from '../pipelineUtils'
 import type { PipelineStepHandlerContext } from '../pipelineRunnerTypes'
-
-export async function runGenerateChapterPlanStep(ctx: PipelineStepHandlerContext) {
-  const { env, state, step, options } = ctx
-  const result = await env.aiService.generateChapterPlan(state.context, {
-    mode: options.pipelineMode,
-    targetChapterOrder: options.targetChapterOrder,
-    estimatedWordCount: options.estimatedWordCount,
-    readerEmotionTarget: options.readerEmotionTarget
-  })
-  if (!result.data) throw new Error(result.error || result.parseError || '任务书生成失败')
-  state.plan = result.data
-  state.working = env.updateStepInData(state.working, step.id, {
-    status: 'completed',
-    output: serializeOutput(result.data),
-    errorMessage: result.error?.includes('远程 AI 任务书生成失败') ? result.error : ''
-  })
-}
-
 export function runPlanContextNeedStep(ctx: PipelineStepHandlerContext) {
   const { env, state, job, step, options } = ctx
   const { project } = env
   if (!state.plan) throw new Error('缺少章节任务书，无法进行计划后上下文补全')
+  state.plan = guardOpeningChapterPlanForDraft({ generatedPlan: state.plan, targetChapterOrder: options.targetChapterOrder, chapterTaskSnapshot: job.chapterTaskSnapshot })
   const analysis = PlanContextGapAnalyzerService.buildFromChapterPlan({
     project,
     targetChapterOrder: options.targetChapterOrder,
@@ -50,7 +41,9 @@ export function runPlanContextNeedStep(ctx: PipelineStepHandlerContext) {
     characters: state.working.characters.filter((character) => character.projectId === project.id),
     foreshadowings: state.working.foreshadowings.filter((item) => item.projectId === project.id),
     timelineEvents: state.working.timelineEvents.filter((event) => event.projectId === project.id),
-    characterStateFacts: state.working.characterStateFacts.filter((fact) => fact.projectId === project.id)
+    characterStateFacts: state.working.characterStateFacts.filter((fact) => fact.projectId === project.id),
+    suppressLegacyStateExpansion: options.targetChapterOrder === 1 && Boolean(job.chapterTaskSnapshot),
+    suppressLegacyContextExpansion: options.targetChapterOrder === 1 && Boolean(job.chapterTaskSnapshot)
   })
   state.planGapAnalysis =
     job.contextSource === 'prompt_snapshot'
@@ -76,7 +69,6 @@ export function runPlanContextNeedStep(ctx: PipelineStepHandlerContext) {
     output: serializeOutput(state.planGapAnalysis)
   })
 }
-
 export function runContextBudgetDeltaStep(ctx: PipelineStepHandlerContext) {
   const { env, state, job, step, options, snapshot, activeStoryDirectionGuide } = ctx
   const { project } = env
@@ -102,16 +94,15 @@ export function runContextBudgetDeltaStep(ctx: PipelineStepHandlerContext) {
     })
     return
   }
-
   const previousSelection = state.budgetSelection
   const activeNeedPlan = state.contextNeedPlanFromPlan ?? state.contextNeedPlan
   if (!activeNeedPlan) throw new Error('缺少上下文需求计划，无法进行计划后补选。')
   state.budgetProfile = createContextBudgetProfile(project.id, options.budgetMode, options.budgetMaxTokens, `第 ${options.targetChapterOrder} 章计划后预算`)
+  if (job.chapterTaskSnapshot) state.budgetProfile = { ...state.budgetProfile, styleSampleMaxChars: 0 }
   state.budgetSelection = selectBudgetContext(project, state.working, options.targetChapterOrder, state.budgetProfile, {
-    characterIds: uniqueIds(activeNeedPlan.expectedCharacters.map((item) => item.characterId)),
-    foreshadowingIds: activeNeedPlan.requiredForeshadowingIds,
-    chapterTask: pipelineChapterTask(project, options, activeStoryDirectionGuide),
-    contextNeedPlan: activeNeedPlan
+    chapterTask: pipelineChapterTask(project, options, activeStoryDirectionGuide, job.chapterTaskSnapshot),
+    contextNeedPlan: activeNeedPlan,
+    isolateOpeningLegacyContext: shouldIsolateOpeningLegacyContext(options.targetChapterOrder, Boolean(job.chapterTaskSnapshot))
   })
   const deltaFromPreviousSelection = {
     addedCharacterIds: diffIds(state.budgetSelection.selectedCharacterIds, previousSelection?.selectedCharacterIds ?? []),
@@ -133,7 +124,6 @@ export function runContextBudgetDeltaStep(ctx: PipelineStepHandlerContext) {
     contextBudgetProfiles: [state.budgetProfile, ...state.working.contextBudgetProfiles]
   }
 }
-
 export function runRebuildContextWithPlanStep(ctx: PipelineStepHandlerContext) {
   const { env, state, job, step, options, snapshot, activeStoryDirectionGuide, storyDirectionTracePatch } = ctx
   const { project } = env
@@ -148,6 +138,10 @@ export function runRebuildContextWithPlanStep(ctx: PipelineStepHandlerContext) {
     promptLintWarnings = lintGuard.result.warnings
     promptLintIssueCount = lintGuard.result.issueCount
     promptBlockOrder = inferPromptBlockOrderFromPrompt(state.context, 'prompt_context_snapshot')
+    hardCanonTrace = hardCanonTraceFromPrompt(
+      state.context,
+      state.working.hardCanonPacks.find((pack) => pack.projectId === project.id) ?? null
+    )
     state.rebuiltContextFromPlan = true
   } else {
     if (!state.budgetSelection) throw new Error('缺少计划后预算选择，无法重建上下文。')
@@ -160,7 +154,9 @@ export function runRebuildContextWithPlanStep(ctx: PipelineStepHandlerContext) {
       state.budgetProfile,
       state.budgetSelection,
       state.contextNeedPlanFromPlan ?? state.contextNeedPlan,
-      activeStoryDirectionGuide
+      activeStoryDirectionGuide,
+      pipelineChapterTask(project, options, activeStoryDirectionGuide, job.chapterTaskSnapshot),
+      Boolean(job.chapterTaskSnapshot)
     )
     state.context = promptResult.finalPrompt
     promptBlockOrder = promptResult.promptBlockOrder
@@ -176,30 +172,22 @@ export function runRebuildContextWithPlanStep(ctx: PipelineStepHandlerContext) {
   }
   const continuityResult = resolveContinuityBridge({
     projectId: project.id,
-    chapters: state.working.chapters.filter((chapter) => chapter.projectId === project.id),
+    chapters: activeChapters(state.working.chapters.filter((chapter) => chapter.projectId === project.id)),
     bridges: state.working.chapterContinuityBridges.filter((bridge) => bridge.projectId === project.id),
     targetChapterOrder: options.targetChapterOrder
   })
-  if (continuityResult.bridge && !state.context.includes('上一章结尾衔接')) {
+  if (continuityResult.bridge) {
     const bridgePrompt = formatContinuityBridgeForPrompt(continuityResult.bridge)
-    state.context = `${state.context}\n\n## 上一章结尾衔接\n${bridgePrompt}`
-    promptBlockOrder = [
-      ...promptBlockOrder,
-      {
-        id: 'forced-continuity-bridge',
-        title: '上一章结尾衔接',
-        kind: 'continuity_bridge',
-        priority: promptBlockOrder.length + 1,
-        tokenEstimate: TokenEstimator.estimate(bridgePrompt),
-        source: continuityResult.source ?? 'continuity_service',
-        sourceIds: [continuityResult.bridge.id],
-        included: true,
-        compressed: false,
-        forced: true,
-        omittedReason: null,
-        reason: '计划后重建上下文仍缺少上一章衔接时，由流水线作为 forced context 追加。'
-      }
-    ]
+    const ensuredBridge = ensureContinuityBridgeInPrompt({
+      finalPrompt: state.context,
+      promptBlockOrder,
+      bridgeBody: bridgePrompt,
+      bridgeId: continuityResult.bridge.id,
+      source: continuityResult.source ?? 'continuity_service',
+      reason: '计划后重建上下文仍缺少上一章衔接时，由流水线在本章任务契约之前补入。'
+    })
+    state.context = ensuredBridge.finalPrompt
+    promptBlockOrder = ensuredBridge.promptBlockOrder
   }
   const continuityPromptBlock = continuityResult.bridge ? formatContinuityBridgeForPrompt(continuityResult.bridge) : ''
   const forcedContextBlocks: ForcedContextBlock[] = continuityResult.bridge
@@ -221,12 +209,19 @@ export function runRebuildContextWithPlanStep(ctx: PipelineStepHandlerContext) {
   const selectedTimelineEventIds = snapshot ? snapshot.contextSelectionResult.selectedTimelineEventIds : state.budgetSelection?.selectedTimelineEventIds ?? []
   const treatmentOverrides = snapshot?.foreshadowingTreatmentOverrides ?? {}
   const activeNeedPlan = state.contextNeedPlanFromPlan ?? state.contextNeedPlan
-  const includedCharacterStateFacts = CharacterStateService.getRelevantCharacterStatesForPrompt(
+  const relevantCharacterStateFacts = CharacterStateService.getRelevantCharacterStatesForPrompt(
     selectedCharacterIds,
     activeNeedPlan,
     options.targetChapterOrder,
     state.working.characterStateFacts.filter((fact) => fact.projectId === project.id)
   )
+  const includedCharacterStateFacts = characterStateFactsPresentInPrompt(state.context, relevantCharacterStateFacts)
+  const requiresCharacterStateFacts = Object.values(activeNeedPlan?.requiredStateFactCategories ?? {}).some(
+    (categories) => categories.length > 0
+  )
+  const storyDirectionGuideId = state.context.includes('中期剧情导向')
+    ? snapshot?.storyDirectionGuide?.id ?? activeStoryDirectionGuide?.id ?? null
+    : null
   const contextSelectionTrace = enrichContextSelectionTrace(
     snapshot?.contextSelectionResult.contextSelectionTrace ?? state.budgetSelection?.contextSelectionTrace,
     {
@@ -234,6 +229,8 @@ export function runRebuildContextWithPlanStep(ctx: PipelineStepHandlerContext) {
       contextNeedPlan: activeNeedPlan,
       includedCharacterStateFacts,
       hardCanonTrace,
+      storyDirectionGuideId,
+      selectionMode: snapshot ? 'prompt_snapshot' : state.budgetSelection?.contextSelectionTrace?.selectionMode ?? 'automatic',
       finalPromptTokenEstimate
     }
   )
@@ -277,6 +274,7 @@ export function runRebuildContextWithPlanStep(ctx: PipelineStepHandlerContext) {
     compressionRecords: state.budgetSelection?.compressionRecords ?? [],
     promptBlockOrder,
     finalPromptTokenEstimate,
+    promptCompositionMetrics: PromptCompositionMetricsService.calculate(state.context, promptBlockOrder, finalPromptTokenEstimate),
     promptLintWarnings,
     promptLintIssueCount,
     continuityBridgeId: continuityResult.bridge?.id ?? null,
@@ -299,10 +297,9 @@ export function runRebuildContextWithPlanStep(ctx: PipelineStepHandlerContext) {
         : false
     ),
     includedCharacterStateFactIds: includedCharacterStateFacts.map((fact) => fact.id),
-    characterStateWarnings: includedCharacterStateFacts.length
-      ? []
-      : activeNeedPlan
-        ? ['上下文需求计划要求角色状态类别，但本章没有匹配的状态账本事实。']
+    characterStateWarnings:
+      requiresCharacterStateFacts && includedCharacterStateFacts.length === 0
+        ? ['上下文需求计划要求角色状态类别，但最终 prompt 没有匹配的状态账本事实。']
         : [],
     characterStateIssueIds: [],
     hardCanonPackItemCount: hardCanonTrace.itemCount,
@@ -312,38 +309,65 @@ export function runRebuildContextWithPlanStep(ctx: PipelineStepHandlerContext) {
     contextSelectionTrace
   })
 }
-
 export async function runGenerateChapterDraftStep(ctx: PipelineStepHandlerContext) {
-  const { env, state, job, step, options } = ctx
-  const { project, aiService, updateStepInData } = env
+  const { env, state, job, step, options, activeStoryDirectionGuide } = ctx
+  const { project, updateStepInData } = env
+  const aiService = await env.getAiService('prose')
   if (!state.plan) throw new Error('缺少章节任务书，无法生成正文')
   if (job.contextSource !== 'prompt_snapshot' && !state.rebuiltContextFromPlan) throw new Error('缺少计划后重建上下文，无法生成正文。')
+  const chapterTask = pipelineChapterTask(project, options, activeStoryDirectionGuide, job.chapterTaskSnapshot)
+  state.plan = guardOpeningChapterPlanForDraft({ generatedPlan: state.plan, targetChapterOrder: options.targetChapterOrder, chapterTaskSnapshot: job.chapterTaskSnapshot })
+  if (job.chapterTaskSnapshot) assertChapterTaskPresentInPrompt(state.context, chapterTask, 'draft')
   let result = await aiService.generateChapterDraft(state.plan, state.context, {
     mode: options.pipelineMode,
+    targetChapterOrder: options.targetChapterOrder,
     estimatedWordCount: options.estimatedWordCount,
-    readerEmotionTarget: options.readerEmotionTarget
+    readerEmotionTarget: options.readerEmotionTarget,
+    chapterTask,
+    authoritativeChapterTask: Boolean(job.chapterTaskSnapshot)
   })
+  state.working = appendGenerationRunTraceAiCall(
+    state.working,
+    job.id,
+    step,
+    'prose',
+    result.telemetry,
+    result.ok && Boolean(result.data) ? 'success' : 'failed'
+  )
   if (!result.data) throw new Error(result.error || result.parseError || '正文生成失败')
-  let validationError = validateGeneratedChapterDraft(result.data.body, options.estimatedWordCount, result.usedAI)
+  let validationError = validateAuthoritativeChapterTaskDraft(result.data.body, result.data.title, options.estimatedWordCount, result.usedAI, job.chapterTaskSnapshot)
   if (validationError && result.usedAI) {
-    result = await aiService.generateChapterDraft(state.plan, state.context, {
+    const earlierResult = result
+    const earlierContract = job.chapterTaskSnapshot && earlierResult.data ? ChapterTaskContractService.evaluate({ ...earlierResult.data, chapterTask }) : null
+    const previousDraft = earlierContract && earlierResult.data &&
+      validateGeneratedChapterDraft(earlierResult.data.body, options.estimatedWordCount, earlierResult.usedAI) === null &&
+      ChapterTaskContractService.isLocallyRepairable(earlierContract) ? earlierResult.data : undefined
+    const retryResult = await aiService.generateChapterDraft(state.plan, state.context, {
       mode: options.pipelineMode,
+      targetChapterOrder: options.targetChapterOrder,
       estimatedWordCount: options.estimatedWordCount,
       readerEmotionTarget: options.readerEmotionTarget,
-      retryReason: validationError
+      chapterTask,
+      authoritativeChapterTask: Boolean(job.chapterTaskSnapshot),
+      retryReason: validationError, previousDraft,
+      retryIssueTypes: earlierContract?.issues.map((issue) => issue.type) ?? []
     })
-    if (!result.data) throw new Error(result.error || result.parseError || '正文重新生成失败')
-    validationError = validateGeneratedChapterDraft(result.data.body, options.estimatedWordCount, result.usedAI)
+    state.working = appendGenerationRunTraceAiCall(
+      state.working,
+      job.id,
+      step,
+      'prose',
+      retryResult.telemetry,
+      retryResult.ok && Boolean(retryResult.data) ? 'success' : 'failed'
+    )
+    if (!retryResult.data) throw new Error(retryResult.error || retryResult.parseError || '正文重新生成失败')
+    result = job.chapterTaskSnapshot && earlierResult.data && ChapterTaskContractService.shouldPreferEarlierAfterRetry({ earlier: earlierResult.data, later: retryResult.data, chapterTask }) ? earlierResult : retryResult
   }
+  if (!result.data) throw new Error(result.error || result.parseError || '正文生成失败')
+  if (validationError && result.usedAI) validationError = validateAuthoritativeChapterTaskDraft(result.data.body, result.data.title, options.estimatedWordCount, result.usedAI, job.chapterTaskSnapshot, { allowReviewableLengthUnderflow: true })
   if (validationError) {
-    throw new Error(`${validationError} 请重试，或提高设置页 Max Tokens。`)
+    throw new Error(`${validationError} 请检查任务约束后重试。`)
   }
-  state.draftResult = result.data
-  state.noveltyAuditResult = await auditNoveltyDiagnostic({
-    generatedText: result.data.body,
-    context: state.context,
-    chapterPlan: state.plan
-  })
   const draft: GeneratedChapterDraft = {
     id: newId(),
     projectId: project.id,
@@ -357,7 +381,20 @@ export async function runGenerateChapterDraftStep(ctx: PipelineStepHandlerContex
     createdAt: now(),
     updatedAt: now()
   }
-  const redundancyReport = await analyzeRedundancyDiagnostic({
+  state.draftResult = result.data
+  const auditNovelty = env.diagnostics?.auditNovelty ?? auditNoveltyDiagnostic
+  const analyzeRedundancy = env.diagnostics?.analyzeRedundancy ?? analyzeRedundancyDiagnostic
+  state.noveltyAuditResult = bindNoveltyAuditToDraft(
+    await auditNovelty({
+      generatedText: result.data.body,
+      context: state.context,
+      chapterPlan: state.plan,
+      project,
+      ...noveltyReferenceContext(state.working, project.id)
+    }),
+    draft
+  )
+  const redundancyReport = await analyzeRedundancy({
     projectId: project.id,
     chapterId: null,
     draftId: draft.id,

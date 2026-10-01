@@ -1,0 +1,196 @@
+{
+  "date": "2026-09-27T16:27:35.772Z",
+  "label": "after",
+  "schemaVersion": 1,
+  "iterations": 7,
+  "warmups": 2,
+  "environment": {
+    "node": "v24.14.0",
+    "abi": "137",
+    "platform": "win32",
+    "arch": "x64",
+    "os": "10.0.26100",
+    "cpu": "AMD Ryzen 7 7800X3D 8-Core Processor           ",
+    "totalMemoryBytes": 33397133312
+  },
+  "definitions": {
+    "scope": "Actual registered main-process data handlers and native SQLite, bundled under Node; Electron IPC serialization, renderer and logger disk writes excluded.",
+    "backup": "A recent real automatic JSON backup exists. Every measured checkpoint executes the real automatic-backup guard before its transaction.",
+    "isolation": "Synthetic 10/100/500 chapter datasets only; no user data, credentials or network model calls.",
+    "samples": "performance.now(), nearest-rank p50/p95 after warmups, no OS cache flush. UI latency is not inferred.",
+    "regression": "Full-read counts are deterministic; timings are observational, not machine-independent CI limits."
+  },
+  "sourceHashes": {
+    "src/main/BackupService.ts": "b9e147e7fe20d7f996d7d58ba9f3355852bca34fa805227ef0d691b85304f960",
+    "src/main/ipc/storageDataOperations.ts": "2426cafbdeab019bb7652c57621274465f6e5a45221231c3b3fb7cbc09e74f4c",
+    "src/main/ipc/dataIpcHandlers.ts": "688c9af43b78c0138cbd47c41d89c9e5fb09ffaa0274e677a18fadf4d841537c",
+    "src/shared/normalizers/appData.ts": "3e8918cbb57f9b16fd52866645cfe07d6596a7a2dea7641584dff4de0f968c43",
+    "src/storage/SqliteStorageService.ts": "047bc3884c19c2312f506277edf52d71891a0056e86c9c7a6345951224ae3b3e",
+    "src/storage/sqlite/sqliteInitialization.ts": "d172ffd710f7d6b74159665fb069779cbbefc9e9ecc2f5608204a1c17c2f7066"
+  },
+  "scenarios": [
+    {
+      "chapters": 10,
+      "bytes": 1595273,
+      "metrics": {
+        "automaticBackupGuard": {
+          "p50Ms": 0.272,
+          "p95Ms": 0.442,
+          "fullStorageLoads": 0,
+          "samplesMs": [
+            0.335,
+            0.236,
+            0.295,
+            0.272,
+            0.218,
+            0.261,
+            0.442
+          ],
+          "heapBefore": 13226616,
+          "heapAfter": 13914584
+        },
+        "generationCheckpointMainHandler": {
+          "p50Ms": 1.296,
+          "p95Ms": 1.521,
+          "fullStorageLoads": 0,
+          "samplesMs": [
+            1.27,
+            1.296,
+            1.322,
+            1.521,
+            1.392,
+            1.187,
+            1.187
+          ],
+          "heapBefore": 9038808,
+          "heapAfter": 10029624
+        },
+        "fullSaveMainHandler": {
+          "p50Ms": 5.535,
+          "p95Ms": 6.138,
+          "fullStorageLoads": 0,
+          "samplesMs": [
+            5.977,
+            6.138,
+            5.535,
+            5.538,
+            5.453,
+            5.463,
+            5
+          ],
+          "heapBefore": 10917224,
+          "heapAfter": 11009016
+        }
+      }
+    },
+    {
+      "chapters": 100,
+      "bytes": 15562399,
+      "metrics": {
+        "automaticBackupGuard": {
+          "p50Ms": 0.224,
+          "p95Ms": 0.279,
+          "fullStorageLoads": 0,
+          "samplesMs": [
+            0.268,
+            0.268,
+            0.279,
+            0.224,
+            0.202,
+            0.179,
+            0.178
+          ],
+          "heapBefore": 56815992,
+          "heapAfter": 56924392
+        },
+        "generationCheckpointMainHandler": {
+          "p50Ms": 1.226,
+          "p95Ms": 1.397,
+          "fullStorageLoads": 0,
+          "samplesMs": [
+            1.195,
+            1.226,
+            1.397,
+            1.318,
+            1.166,
+            1.391,
+            1.221
+          ],
+          "heapBefore": 17048784,
+          "heapAfter": 17928224
+        },
+        "fullSaveMainHandler": {
+          "p50Ms": 51.928,
+          "p95Ms": 53.709,
+          "fullStorageLoads": 0,
+          "samplesMs": [
+            53.384,
+            52.858,
+            51.928,
+            50.883,
+            53.709,
+            51.455,
+            51.883
+          ],
+          "heapBefore": 22597872,
+          "heapAfter": 25140496
+        }
+      }
+    },
+    {
+      "chapters": 500,
+      "bytes": 77553852,
+      "metrics": {
+        "automaticBackupGuard": {
+          "p50Ms": 0.282,
+          "p95Ms": 4.008,
+          "fullStorageLoads": 0,
+          "samplesMs": [
+            0.356,
+            0.323,
+            0.264,
+            0.222,
+            0.282,
+            4.008,
+            0.279
+          ],
+          "heapBefore": 324139824,
+          "heapAfter": 43440536
+        },
+        "generationCheckpointMainHandler": {
+          "p50Ms": 1.443,
+          "p95Ms": 1.892,
+          "fullStorageLoads": 0,
+          "samplesMs": [
+            1.632,
+            1.892,
+            1.412,
+            1.282,
+            1.232,
+            1.517,
+            1.443
+          ],
+          "heapBefore": 43710368,
+          "heapAfter": 44604384
+        },
+        "fullSaveMainHandler": {
+          "p50Ms": 252.549,
+          "p95Ms": 258.324,
+          "fullStorageLoads": 0,
+          "samplesMs": [
+            253.14,
+            258.256,
+            251.664,
+            252.549,
+            250.976,
+            251.727,
+            258.324
+          ],
+          "heapBefore": 104253152,
+          "heapAfter": 74125848
+        }
+      }
+    }
+  ],
+  "status": "passed"
+}

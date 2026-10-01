@@ -1,6 +1,7 @@
 import type { ChapterGenerationJob, GeneratedChapterDraft, PipelineContextSource, PromptContextSnapshot, QualityGateReport } from '../../../../shared/types'
 import { AuthorDecisionPolicyService } from '../../../../services/AuthorDecisionPolicyService'
 import { StatusBadge } from '../UI'
+import { pipelineJobStatusLabel } from './pipelineStatusLabels'
 
 function jobStatusTone(status: ChapterGenerationJob['status'] | 'empty') {
   if (status === 'failed') return 'danger' as const
@@ -12,6 +13,10 @@ function jobStatusTone(status: ChapterGenerationJob['status'] | 'empty') {
 function qualityStatus(report: QualityGateReport | null) {
   const decision = AuthorDecisionPolicyService.assessQualityGate(report)
   return { label: decision.label, tone: decision.tone }
+}
+
+function draftStatusLabel(status: GeneratedChapterDraft['status'] | 'empty') {
+  return { empty: '尚无正文', draft: '等待确认', accepted: '已采纳', rejected: '已退回' }[status]
 }
 
 export function PipelineTopStatusBar({
@@ -39,6 +44,7 @@ export function PipelineTopStatusBar({
 }) {
   const quality = qualityStatus(qualityReport)
   const jobStatus = job?.status ?? 'empty'
+  const draftStatus = draft?.status ?? 'empty'
   const sourceLabel = contextSource === 'prompt_snapshot' ? 'Prompt 快照' : '自动构建'
 
   return (
@@ -48,9 +54,9 @@ export function PipelineTopStatusBar({
         <h2>第 {targetChapterOrder} 章</h2>
       </div>
       <div className="pipeline-status-cluster">
-        <div>
-          <span>Job 状态</span>
-          <StatusBadge tone={jobStatusTone(jobStatus)}>{job ? job.status : '未开始'}</StatusBadge>
+        <div data-status={jobStatus}>
+          <span>生成进度</span>
+          <StatusBadge tone={jobStatusTone(jobStatus)}>{pipelineJobStatusLabel(jobStatus)}</StatusBadge>
         </div>
         <div>
           <span>上下文来源</span>
@@ -61,9 +67,9 @@ export function PipelineTopStatusBar({
           <span>质量门禁</span>
           <StatusBadge tone={quality.tone}>{quality.label}</StatusBadge>
         </div>
-        <div>
-          <span>草稿</span>
-          <strong>{draft ? draft.status : '未生成'}</strong>
+        <div data-status={draftStatus}>
+          <span>正文状态</span>
+          <strong>{draftStatusLabel(draftStatus)}</strong>
         </div>
       </div>
       <button className="primary-button" type="button" disabled={isRunning || primaryActionDisabled} onClick={onPrimaryAction}>

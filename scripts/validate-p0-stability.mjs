@@ -2,8 +2,9 @@ import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import { pathToFileURL } from 'node:url'
 import { join, resolve } from 'node:path'
 import ts from 'typescript'
+import { repoRoot } from './utils/repo-root.mjs'
 
-const root = resolve('.')
+const root = repoRoot
 const outDir = join(root, 'tmp', 'p0-stability-test')
 
 function assert(condition, message, details = {}) {
@@ -58,7 +59,40 @@ async function main() {
     join(root, 'src', 'renderer', 'src', 'components', 'pipeline', 'PipelineConfigPanel.tsx'),
     'utf-8'
   )
+  const pipelineDraftPanelSource = await readFile(
+    join(root, 'src', 'renderer', 'src', 'components', 'pipeline', 'PipelineDraftPanel.tsx'),
+    'utf-8'
+  )
+  const pipelineStepRailSource = await readFile(
+    join(root, 'src', 'renderer', 'src', 'components', 'pipeline', 'PipelineStepRail.tsx'),
+    'utf-8'
+  )
+  const pipelineMemoryPanelSource = await readFile(
+    join(root, 'src', 'renderer', 'src', 'components', 'pipeline', 'PipelineMemoryCandidatesPanel.tsx'),
+    'utf-8'
+  )
+  const pipelineUtilsSource = [
+    await readFile(join(root, 'src', 'renderer', 'src', 'views', 'generation', 'pipelineUtils.ts'), 'utf-8'),
+    await readFile(join(root, 'src', 'renderer', 'src', 'views', 'generation', 'pipelineStepDefinitions.ts'), 'utf-8')
+  ].join('\n')
+  const pipelineRevisionActionsSource = [
+    await readFile(join(root, 'src', 'renderer', 'src', 'views', 'generation', 'usePipelineRevisionActions.ts'), 'utf-8'),
+    await readFile(join(root, 'src', 'renderer', 'src', 'views', 'generation', 'pipelineRevisionActionHandlers.ts'), 'utf-8')
+  ].join('\n')
   const draftAcceptanceSource = await readFile(join(root, 'src', 'renderer', 'src', 'views', 'generation', 'useDraftAcceptance.ts'), 'utf-8')
+  const useAppDataSource = await readFile(join(root, 'src', 'renderer', 'src', 'hooks', 'useAppData.ts'), 'utf-8')
+  const homeViewSource = await readFile(join(root, 'src', 'renderer', 'src', 'views', 'HomeView.tsx'), 'utf-8')
+  const settingsViewSource = [
+    await readFile(join(root, 'src', 'renderer', 'src', 'views', 'SettingsView.tsx'), 'utf-8'),
+    await readFile(
+      join(root, 'src', 'renderer', 'src', 'views', 'settings', 'useSettingsStorage.ts'),
+      'utf-8'
+    ),
+    await readFile(
+      join(root, 'src', 'renderer', 'src', 'views', 'settings', 'useSettingsBackupAndLogs.ts'),
+      'utf-8'
+    )
+  ].join('\n')
 
   const events = []
   let diskValue = 0
@@ -79,6 +113,59 @@ async function main() {
       events.join('|') === 'start-1|end-1|start-2|end-2|start-3|end-3' && diskValue === 3,
       '连续 saveData 会按调用顺序落盘，最终保留最新数据',
       { events, diskValue, saveResults }
+    )
+  )
+
+  checks.push(
+    assert(
+      pipelineRunnerCoreSource.match(/tryAcquirePipelineRunLock/g)?.length >= 3 &&
+        pipelineRunnerCoreSource.includes("currentStep.status !== 'failed'") &&
+        pipelineRunnerCoreSource.includes('canSkipPipelineStep(currentStep.type)') &&
+        pipelineRunnerCoreSource.includes('await runPipelineFromStep(working, job.id, nextStepType, options)') &&
+        pipelineUtilsSource.includes("'generate_chapter_review'") &&
+        pipelineUtilsSource.includes("'consistency_review'"),
+      'retry and optional-step skip share the pipeline run lock, while skip resumes the next step'
+    )
+  )
+
+  checks.push(
+    assert(
+      pipelineDraftPanelSource.includes("disabled={isRunning || draft.status !== 'draft'}") &&
+        pipelineStepRailSource.includes('disabled={isRunning}') &&
+        pipelineMemoryPanelSource.includes('disabled={disabled}') &&
+        pipelineSource.includes('disabled: isPipelineRunning'),
+      'draft decisions, step controls, and memory candidate writes are disabled while a pipeline is running'
+    )
+  )
+
+  checks.push(
+    assert(
+      pipelineRevisionActionsSource.includes('async function startDraftRevision') &&
+        pipelineRevisionActionsSource.includes("type: 'custom'") &&
+        pipelineSource.includes('revisionActions.startDraftRevision'),
+      'generated drafts expose a working revision entry that creates a revision session before navigation'
+    )
+  )
+
+  const replaceEvents = []
+  let replaceDiskValue = ''
+  const replaceQueue = createSaveQueue(async (next) => {
+    replaceEvents.push(`start-${next.name}`)
+    await delay(next.delay)
+    replaceDiskValue = next.name
+    replaceEvents.push(`end-${next.name}`)
+    return { storagePath: `path-${next.name}` }
+  })
+  const staleSave = replaceQueue.enqueue({ name: 'stale-full-save', delay: 25 })
+  const replacementSave = replaceQueue.enqueue({ name: 'imported-replacement', delay: 0 })
+  await Promise.all([staleSave, replacementSave])
+  checks.push(
+    assert(
+      replaceEvents.join('|') ===
+        'start-stale-full-save|end-stale-full-save|start-imported-replacement|end-imported-replacement' &&
+        replaceDiskValue === 'imported-replacement',
+      '已持久化的数据替换操作会排在旧保存之后，避免旧 AppData 反向覆盖新数据',
+      { replaceEvents, replaceDiskValue }
     )
   )
 
@@ -175,6 +262,63 @@ async function main() {
         pipelineRunnerSource.includes('buildGenerationRunBundle') &&
         pipelineRunnerSource.includes('applyGenerationRunBundleToAppData'),
       'pipeline step persistence is merged through functional saveData and GenerationRunBundle'
+    )
+  )
+
+  checks.push(
+    assert(
+      /const runPersistedStorageOperation: RunPersistedStorageOperation/.test(useAppDataSource) &&
+        /const persisted = await operation\(current\)[\s\S]*?if \(persisted\.data\) commitPersistedData\(persisted\.data\)/.test(
+          useAppDataSource
+        ) &&
+        useAppDataSource.includes('return saveQueueRef.current.enqueue(operation)'),
+      'already-persisted operations share the renderer queue and adopt returned data without a second full save'
+    )
+  )
+
+  checks.push(
+    assert(
+      useAppDataSource.includes("import { getNovelDirectorDataApi } from '../platform/novelDirectorBridge'") &&
+        !/const bridge = window\.novelDirector/.test(useAppDataSource),
+      'useAppData reads preload data APIs through the guarded bridge accessor'
+    )
+  )
+
+  checks.push(
+    assert(
+      /function getCurrentData\(\): AppData\s*\{\s*return latestDataRef\.current\s*\}/.test(useAppDataSource) &&
+        /getCurrentData: \(\) => AppData/.test(settingsViewSource),
+      'SettingsView can read the latest AppData ref after queued saves flush'
+    )
+  )
+
+  checks.push(
+    assert(
+      settingsViewSource.includes('await exportAppData(options.getCurrentData())') &&
+        settingsViewSource.includes('(current) => migrateStoragePathRequest(targetPath, current, overwrite)') &&
+        settingsViewSource.includes('(current) => resetStoragePathRequest(current, false)') &&
+        settingsViewSource.includes('{ persistCurrentFirst: true }') &&
+        !settingsViewSource.includes('await exportAppData(data)') &&
+        !settingsViewSource.includes('await migrateStoragePathRequest(targetPath, data, overwrite)') &&
+        !settingsViewSource.includes('await resetStoragePathRequest(data, false)'),
+      'settings export/migration/reset use latest AppData and serialize migration with ordinary saves'
+    )
+  )
+
+  checks.push(
+    assert(
+      homeViewSource.includes('await importData(strategy)') && !homeViewSource.includes('replaceData'),
+      'importing existing data adopts the queued IPC result without a second full save'
+    )
+  )
+
+  checks.push(
+    assert(
+      settingsViewSource.includes('runPersistedStorageOperation(() => restoreBackupRequest(backup.path))') &&
+        settingsViewSource.includes('runPersistedStorageOperation(() =>') &&
+        settingsViewSource.includes('confirmMigrationMergeRequest(mergeSourcePath, mergeTargetPath)') &&
+        !settingsViewSource.includes('await replaceData(result.data, result.storagePath)'),
+      'backup restore and migration merge adopt main-process results without redundant renderer persistence'
     )
   )
 

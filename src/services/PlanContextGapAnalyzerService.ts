@@ -13,6 +13,7 @@ import type {
   TimelineEvent,
   ChapterPlan
 } from '../shared/types'
+import { isForeshadowingAvailableAtChapter } from '../shared/foreshadowingTreatment'
 
 export interface BuildPlanDerivedContextNeedPlanInput {
   project: Project
@@ -23,6 +24,8 @@ export interface BuildPlanDerivedContextNeedPlanInput {
   foreshadowings: Foreshadowing[]
   timelineEvents: TimelineEvent[]
   characterStateFacts: CharacterStateFact[]
+  suppressLegacyStateExpansion?: boolean
+  suppressLegacyContextExpansion?: boolean
 }
 
 const PHYSICAL_CATEGORIES: StateFactCategory[] = ['physical', 'status']
@@ -81,25 +84,30 @@ function excerpt(text: string, maxLength = 1200): string {
   return cleaned.length > maxLength ? `${cleaned.slice(0, maxLength)}...` : cleaned
 }
 
-function planToText(plan: ChapterPlan): string {
+function positivePlanText(plan: ChapterPlan): string {
   return [
     plan.chapterTitle,
     plan.chapterGoal,
     plan.conflictToPush,
     plan.characterBeats,
     plan.foreshadowingToUse,
-    plan.foreshadowingNotToReveal,
     plan.endingHook,
     plan.openingContinuationBeat,
     plan.carriedPhysicalState,
     plan.carriedEmotionalState,
     plan.unresolvedMicroTensions,
-    plan.forbiddenResets,
-    textValue(plan.allowedNovelty),
-    textValue(plan.forbiddenNovelty)
+    textValue(plan.allowedNovelty)
   ]
     .filter(Boolean)
     .join('\n')
+}
+
+function negativePlanText(plan: ChapterPlan): string {
+  return [plan.foreshadowingNotToReveal, plan.forbiddenResets, textValue(plan.forbiddenNovelty)].filter(Boolean).join('\n')
+}
+
+function planToText(plan: ChapterPlan): string {
+  return [positivePlanText(plan), negativePlanText(plan)].filter(Boolean).join('\n')
 }
 
 function emptyPlan(project: Project, targetChapterOrder: number, planText: string): ContextNeedPlan {
@@ -150,6 +158,9 @@ function expectedCharacterNeed(character: Character, reason: string): ExpectedCh
     characterId: character.id,
     roleInChapter: 'support',
     expectedPresence: 'onstage',
+    involvement: 'present',
+    stateCheckRequired: true,
+    uncertain: false,
     reason
   }
 }
@@ -157,11 +168,39 @@ function expectedCharacterNeed(character: Character, reason: string): ExpectedCh
 export class PlanContextGapAnalyzerService {
   static buildFromChapterPlan(input: BuildPlanDerivedContextNeedPlanInput): PlanContextGapAnalysisResult {
     const planText = planToText(input.plan)
-    const normalizedPlanText = normalizeText(planText)
+    const normalizedPlanText = normalizeText(positivePlanText(input.plan))
+    const normalizedNegativePlanText = normalizeText(negativePlanText(input.plan))
     const base = input.baseContextNeedPlan ?? emptyPlan(input.project, input.targetChapterOrder, planText)
+    if (input.suppressLegacyContextExpansion) {
+      const now = timestamp()
+      return {
+        baseContextNeedPlanId: input.baseContextNeedPlan?.id ?? null,
+        derivedContextNeedPlan: {
+          ...base,
+          id: `context-need-plan-plan-${input.project.id}-${input.targetChapterOrder}-${stableHash(`${base.id}:opening-isolation`)}`,
+          projectId: input.project.id,
+          targetChapterOrder: input.targetChapterOrder,
+          source: 'generation_pipeline',
+          warnings: unique([...base.warnings, '权威第一章采用净室上下文；模型章节计划不得扩选旧角色、伏笔、时间线或状态账本。']),
+          createdAt: now,
+          updatedAt: now
+        },
+        newlyRequiredCharacterIds: [],
+        newlyRequiredForeshadowingIds: [],
+        newlyRequiredTimelineEventIds: [],
+        newlyRequiredStateFactCategories: {},
+        warnings: ['权威第一章采用净室上下文；已忽略模型计划提出的旧资料扩选。'],
+        reason: '权威第一章的计划只能组织任务内素材，不能反向扩选旧项目上下文。'
+      }
+    }
     const warnings: string[] = []
     const baseExpectedCharacterIds = new Set(base.expectedCharacters.map((item) => item.characterId))
-    const baseRequiredForeshadowingIds = new Set(base.requiredForeshadowingIds)
+    const availableForeshadowings = input.foreshadowings.filter((item) => isForeshadowingAvailableAtChapter(item, input.targetChapterOrder))
+    const availableForeshadowingIds = new Set(availableForeshadowings.map((item) => item.id))
+    const knownForeshadowingIds = new Set(input.foreshadowings.map((item) => item.id))
+    const foreshadowingIdIsAvailable = (id: ID) => !knownForeshadowingIds.has(id) || availableForeshadowingIds.has(id)
+    const availableBaseRequiredForeshadowingIds = base.requiredForeshadowingIds.filter(foreshadowingIdIsAvailable)
+    const baseRequiredForeshadowingIds = new Set(availableBaseRequiredForeshadowingIds)
     const baseForbiddenForeshadowingIds = new Set(base.forbiddenForeshadowingIds)
     const baseTimelineIds = new Set(base.requiredTimelineEventIds)
 
@@ -169,16 +208,25 @@ export class PlanContextGapAnalyzerService {
     const newlyRequiredCharacterIds = matchedCharacters
       .map((character) => character.id)
       .filter((id) => !baseExpectedCharacterIds.has(id))
+    const negativeOnlyCharacters = input.characters.filter((character) =>
+      containsText(normalizedNegativePlanText, character.name) &&
+      !matchedCharacters.some((matched) => matched.id === character.id) &&
+      !baseExpectedCharacterIds.has(character.id)
+    )
 
-    const matchedForbiddenForeshadowings = input.foreshadowings.filter((item) => containsText(normalizeText(input.plan.foreshadowingNotToReveal || ''), item.title))
+    const matchedForbiddenForeshadowings = availableForeshadowings.filter((item) => containsText(normalizedNegativePlanText, item.title))
     const forbiddenForeshadowingIds = unique([...base.forbiddenForeshadowingIds, ...matchedForbiddenForeshadowings.map((item) => item.id)])
 
-    const matchedRequiredForeshadowings = input.foreshadowings.filter((item) => containsText(normalizeText(input.plan.foreshadowingToUse || ''), item.title))
+    const matchedRequiredForeshadowings = availableForeshadowings.filter((item) => containsText(normalizeText(input.plan.foreshadowingToUse || ''), item.title))
     const newlyRequiredForeshadowingIds = matchedRequiredForeshadowings
       .map((item) => item.id)
       .filter((id) => !baseRequiredForeshadowingIds.has(id) && !baseForbiddenForeshadowingIds.has(id) && !forbiddenForeshadowingIds.includes(id))
 
-    for (const item of input.foreshadowings) {
+    const earlyPlanForeshadowings = input.foreshadowings.filter((item) =>
+      !isForeshadowingAvailableAtChapter(item, input.targetChapterOrder) && containsText(normalizeText(input.plan.foreshadowingToUse || ''), item.title)
+    )
+    if (earlyPlanForeshadowings.length > 0) warnings.push(`章节计划点名了尚未到首次出现章节的伏笔：${earlyPlanForeshadowings.map((item) => `「${item.title}」（第 ${item.firstChapterOrder} 章）`).join('、')}，已按章节门禁跳过。`)
+    for (const item of availableForeshadowings) {
       if (!matchedRequiredForeshadowings.some((matched) => matched.id === item.id)) {
         if (item.description && containsText(normalizedPlanText, item.description)) {
           warnings.push(`章节计划弱匹配到伏笔描述「${item.title}」，建议人工确认是否需要纳入。`)
@@ -216,12 +264,14 @@ export class PlanContextGapAnalyzerService {
       }
     }
 
-    addCategories(PHYSICAL_CATEGORIES, input.plan.carriedPhysicalState)
-    addCategories(EMOTIONAL_CATEGORIES, input.plan.carriedEmotionalState)
-    addCategories(OPENING_CATEGORIES, input.plan.openingContinuationBeat)
-    addCategories(MICRO_TENSION_CATEGORIES, input.plan.unresolvedMicroTensions)
-    addCategories(FORBIDDEN_RESET_CATEGORIES, input.plan.forbiddenResets)
-    addCategories(CHARACTER_BEAT_CATEGORIES, input.plan.characterBeats)
+    if (!input.suppressLegacyStateExpansion) {
+      addCategories(PHYSICAL_CATEGORIES, input.plan.carriedPhysicalState)
+      addCategories(EMOTIONAL_CATEGORIES, input.plan.carriedEmotionalState)
+      addCategories(OPENING_CATEGORIES, input.plan.openingContinuationBeat)
+      addCategories(MICRO_TENSION_CATEGORIES, input.plan.unresolvedMicroTensions)
+      addCategories(FORBIDDEN_RESET_CATEGORIES, input.plan.forbiddenResets)
+      addCategories(CHARACTER_BEAT_CATEGORIES, input.plan.characterBeats)
+    }
 
     for (const [characterId, categories] of Object.entries(newlyRequiredStateFactCategories)) {
       const availableCategories = new Set(
@@ -233,7 +283,7 @@ export class PlanContextGapAnalyzerService {
       if (missing.length > 0) warnings.push(`章节计划需要角色状态 ${characterId}: ${missing.join('、')}，但账本中暂无 active 事实。`)
     }
 
-    let retrievalPriorities = [...base.retrievalPriorities]
+    let retrievalPriorities = base.retrievalPriorities.filter((item) => item.type !== 'foreshadowing' || foreshadowingIdIsAvailable(item.id))
     for (const character of matchedCharacters) {
       retrievalPriorities = addPriority(retrievalPriorities, {
         type: 'character_card',
@@ -274,7 +324,7 @@ export class PlanContextGapAnalyzerService {
 
     const contextNeeds: ContextNeedItem[] = uniqueByKey(
       [
-        ...(base.contextNeeds ?? []),
+        ...(base.contextNeeds ?? []).filter((need) => need.sourceHint !== 'foreshadowing' || !need.sourceId || foreshadowingIdIsAvailable(need.sourceId)),
         ...newlyRequiredCharacterIds.flatMap((id) => [
           {
             id: `need-plan-character-card-${id}`,
@@ -325,7 +375,7 @@ export class PlanContextGapAnalyzerService {
       source: 'generation_pipeline',
       chapterIntent: [base.chapterIntent, '[由章节计划补全]', excerpt(planText)].filter(Boolean).join('\n\n'),
       expectedCharacters,
-      requiredForeshadowingIds: unique([...base.requiredForeshadowingIds, ...newlyRequiredForeshadowingIds]).filter(
+      requiredForeshadowingIds: unique([...availableBaseRequiredForeshadowingIds, ...newlyRequiredForeshadowingIds]).filter(
         (id) => !forbiddenForeshadowingIds.includes(id)
       ),
       forbiddenForeshadowingIds,
@@ -333,6 +383,10 @@ export class PlanContextGapAnalyzerService {
       requiredStateFactCategories,
       retrievalPriorities,
       contextNeeds,
+      exclusionRules: uniqueByKey([
+        ...base.exclusionRules,
+        ...negativeOnlyCharacters.map((character) => ({ type: 'character', id: character.id, reason: '章节计划的负向字段点名该角色，不得将其作为新增正向上下文需求。', source: 'planner' as const }))
+      ], (rule) => `${rule.type}:${rule.id}`),
       warnings: unique([...base.warnings, ...warnings]),
       createdAt: timestamp(),
       updatedAt: timestamp()

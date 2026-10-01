@@ -5,11 +5,22 @@ import { CharacterStateService } from '../../../../../services/CharacterStateSer
 import { TokenEstimator } from '../../../../../services/TokenEstimator'
 import { inferPromptBlockOrderFromPrompt } from '../../../../../services/PromptBuilderService'
 import { PromptLintService } from '../../../../../services/PromptLintService'
+import { PromptCompositionMetricsService } from '../../../../../services/PromptCompositionMetricsService'
+import { ensureContinuityBridgeInPrompt } from '../../../../../services/PromptContractReplayService'
 import { formatContinuityBridgeForPrompt, resolveContinuityBridge } from '../../../../../services/ContinuityService'
 import { StoryDirectionService } from '../../../../../services/StoryDirectionService'
+import { activeChapters } from '../../../../../services/ChapterLifecycleService'
+import { isolateOpeningCharacterCards, shouldIsolateOpeningLegacyContext } from '../../../../../services/OpeningChapterContextPolicy'
 import { buildPipelineContextResultFromSelection, createContextBudgetProfile, selectBudgetContext } from '../../../utils/promptContext'
 import { buildForeshadowingTreatmentModes, estimateForcedContextTokens, upsertGenerationRunTrace } from '../../../utils/runTrace'
-import { enrichContextSelectionTrace, pipelineChapterTask, serializeOutput, summarizeSnapshot } from '../pipelineUtils'
+import {
+  characterStateFactsPresentInPrompt,
+  enrichContextSelectionTrace,
+  hardCanonTraceFromPrompt,
+  pipelineChapterTask,
+  serializeOutput,
+  summarizeSnapshot
+} from '../pipelineUtils'
 import type { PipelineStepHandlerContext } from '../pipelineRunnerTypes'
 
 export function runContextNeedPlanningStep(ctx: PipelineStepHandlerContext) {
@@ -32,7 +43,7 @@ export function runContextNeedPlanningStep(ctx: PipelineStepHandlerContext) {
     return
   }
 
-  const scopedChapters = state.working.chapters.filter((chapter) => chapter.projectId === project.id)
+  const scopedChapters = activeChapters(state.working.chapters.filter((chapter) => chapter.projectId === project.id))
   const previousChapter = scopedChapters.find((chapter) => chapter.order === options.targetChapterOrder - 1) ?? null
   const continuityResult = resolveContinuityBridge({
     projectId: project.id,
@@ -40,22 +51,25 @@ export function runContextNeedPlanningStep(ctx: PipelineStepHandlerContext) {
     bridges: state.working.chapterContinuityBridges.filter((bridge) => bridge.projectId === project.id),
     targetChapterOrder: options.targetChapterOrder
   })
+  const isolateOpeningLegacyContext = shouldIsolateOpeningLegacyContext(options.targetChapterOrder, Boolean(job.chapterTaskSnapshot))
+  const plannerCharacters = isolateOpeningLegacyContext ? isolateOpeningCharacterCards(scoped.characters) : scoped.characters
   state.contextNeedPlan = ContextNeedPlannerService.buildFromChapterIntent({
     project,
     storyBible: scoped.bible,
     targetChapterOrder: options.targetChapterOrder,
-    chapterTaskDraft: pipelineChapterTask(project, options, activeStoryDirectionGuide),
+    chapterTaskDraft: pipelineChapterTask(project, options, activeStoryDirectionGuide, job.chapterTaskSnapshot),
     previousChapter,
     continuityBridge: continuityResult.bridge,
-    characters: scoped.characters,
-    characterStateFacts: scoped.characterStateFacts,
+    characters: plannerCharacters,
+    characterStateFacts: isolateOpeningLegacyContext ? [] : scoped.characterStateFacts,
     foreshadowing: scoped.foreshadowings,
-    timelineEvents: scoped.timelineEvents,
+    timelineEvents: isolateOpeningLegacyContext ? [] : scoped.timelineEvents,
     stageSummaries: scoped.stageSummaries,
     hardCanonItems: (state.working.hardCanonPacks ?? [])
       .filter((pack) => pack.projectId === project.id)
       .flatMap((pack) => pack.items),
     storyDirectionGuide: activeStoryDirectionGuide,
+    isolateOpeningLegacyContext,
     storyDirectionPromptText: StoryDirectionService.formatForPrompt(activeStoryDirectionGuide, options.targetChapterOrder),
     source: 'generation_pipeline'
   })
@@ -89,9 +103,11 @@ export function runContextBudgetSelectionStep(ctx: PipelineStepHandlerContext) {
   }
 
   state.budgetProfile = createContextBudgetProfile(project.id, options.budgetMode, options.budgetMaxTokens, `第 ${options.targetChapterOrder} 章流水线预算`)
+  if (job.chapterTaskSnapshot) state.budgetProfile = { ...state.budgetProfile, styleSampleMaxChars: 0 }
   state.budgetSelection = selectBudgetContext(project, state.working, options.targetChapterOrder, state.budgetProfile, {
-    chapterTask: pipelineChapterTask(project, options, activeStoryDirectionGuide),
-    contextNeedPlan: state.contextNeedPlan
+    chapterTask: pipelineChapterTask(project, options, activeStoryDirectionGuide, job.chapterTaskSnapshot),
+    contextNeedPlan: state.contextNeedPlan,
+    isolateOpeningLegacyContext: shouldIsolateOpeningLegacyContext(options.targetChapterOrder, Boolean(job.chapterTaskSnapshot))
   })
   state.working = {
     ...env.updateStepInData(state.working, step.id, {
@@ -120,11 +136,16 @@ export function runBuildContextStep(ctx: PipelineStepHandlerContext) {
     promptLintWarnings = lintGuard.result.warnings
     promptLintIssueCount = lintGuard.result.issueCount
     promptBlockOrder = inferPromptBlockOrderFromPrompt(state.context, 'prompt_context_snapshot')
+    hardCanonTrace = hardCanonTraceFromPrompt(
+      state.context,
+      state.working.hardCanonPacks.find((pack) => pack.projectId === project.id) ?? null
+    )
   } else {
     if (!state.budgetSelection) {
       state.budgetSelection = selectBudgetContext(project, state.working, options.targetChapterOrder, state.budgetProfile, {
-        chapterTask: pipelineChapterTask(project, options, activeStoryDirectionGuide),
-        contextNeedPlan: state.contextNeedPlan
+        chapterTask: pipelineChapterTask(project, options, activeStoryDirectionGuide, job.chapterTaskSnapshot),
+        contextNeedPlan: state.contextNeedPlan,
+        isolateOpeningLegacyContext: shouldIsolateOpeningLegacyContext(options.targetChapterOrder, Boolean(job.chapterTaskSnapshot))
       })
     }
     const promptResult = buildPipelineContextResultFromSelection(
@@ -136,7 +157,9 @@ export function runBuildContextStep(ctx: PipelineStepHandlerContext) {
       state.budgetProfile,
       state.budgetSelection,
       state.contextNeedPlan,
-      activeStoryDirectionGuide
+      activeStoryDirectionGuide,
+      pipelineChapterTask(project, options, activeStoryDirectionGuide, job.chapterTaskSnapshot),
+      Boolean(job.chapterTaskSnapshot)
     )
     state.context = promptResult.finalPrompt
     promptBlockOrder = promptResult.promptBlockOrder
@@ -151,30 +174,22 @@ export function runBuildContextStep(ctx: PipelineStepHandlerContext) {
   }
   const continuityResult = resolveContinuityBridge({
     projectId: project.id,
-    chapters: state.working.chapters.filter((chapter) => chapter.projectId === project.id),
+    chapters: activeChapters(state.working.chapters.filter((chapter) => chapter.projectId === project.id)),
     bridges: state.working.chapterContinuityBridges.filter((bridge) => bridge.projectId === project.id),
     targetChapterOrder: options.targetChapterOrder
   })
-  if (continuityResult.bridge && !state.context.includes('上一章结尾衔接')) {
+  if (continuityResult.bridge) {
     const bridgePrompt = formatContinuityBridgeForPrompt(continuityResult.bridge)
-    state.context = `${state.context}\n\n## 上一章结尾衔接\n${bridgePrompt}`
-    promptBlockOrder = [
-      ...promptBlockOrder,
-      {
-        id: 'forced-continuity-bridge',
-        title: '上一章结尾衔接',
-        kind: 'continuity_bridge',
-        priority: promptBlockOrder.length + 1,
-        tokenEstimate: TokenEstimator.estimate(bridgePrompt),
-        source: continuityResult.source ?? 'continuity_service',
-        sourceIds: [continuityResult.bridge.id],
-        included: true,
-        compressed: false,
-        forced: true,
-        omittedReason: null,
-        reason: '快照或旧 prompt 缺少上一章衔接时，由流水线作为 forced context 追加。'
-      }
-    ]
+    const ensuredBridge = ensureContinuityBridgeInPrompt({
+      finalPrompt: state.context,
+      promptBlockOrder,
+      bridgeBody: bridgePrompt,
+      bridgeId: continuityResult.bridge.id,
+      source: continuityResult.source ?? 'continuity_service',
+      reason: '快照或旧 Prompt 缺少上一章衔接时，由流水线在本章任务契约之前补入。'
+    })
+    state.context = ensuredBridge.finalPrompt
+    promptBlockOrder = ensuredBridge.promptBlockOrder
   }
   const continuityPromptBlock = continuityResult.bridge ? formatContinuityBridgeForPrompt(continuityResult.bridge) : ''
   const forcedContextBlocks: ForcedContextBlock[] = continuityResult.bridge
@@ -209,12 +224,19 @@ export function runBuildContextStep(ctx: PipelineStepHandlerContext) {
   const selectedForeshadowingIds = snapshot ? snapshot.selectedForeshadowingIds : state.budgetSelection?.selectedForeshadowingIds ?? []
   const selectedTimelineEventIds = snapshot ? snapshot.contextSelectionResult.selectedTimelineEventIds : state.budgetSelection?.selectedTimelineEventIds ?? []
   const treatmentOverrides = snapshot?.foreshadowingTreatmentOverrides ?? {}
-  const includedCharacterStateFacts = CharacterStateService.getRelevantCharacterStatesForPrompt(
+  const relevantCharacterStateFacts = CharacterStateService.getRelevantCharacterStatesForPrompt(
     selectedCharacterIds,
     state.contextNeedPlan,
     options.targetChapterOrder,
     state.working.characterStateFacts.filter((fact) => fact.projectId === project.id)
   )
+  const includedCharacterStateFacts = characterStateFactsPresentInPrompt(state.context, relevantCharacterStateFacts)
+  const requiresCharacterStateFacts = Object.values(state.contextNeedPlan?.requiredStateFactCategories ?? {}).some(
+    (categories) => categories.length > 0
+  )
+  const storyDirectionGuideId = state.context.includes('中期剧情导向')
+    ? snapshot?.storyDirectionGuide?.id ?? activeStoryDirectionGuide?.id ?? null
+    : null
   const contextSelectionTrace = enrichContextSelectionTrace(
     snapshot?.contextSelectionResult.contextSelectionTrace ?? state.budgetSelection?.contextSelectionTrace,
     {
@@ -222,6 +244,8 @@ export function runBuildContextStep(ctx: PipelineStepHandlerContext) {
       contextNeedPlan: state.contextNeedPlan,
       includedCharacterStateFacts,
       hardCanonTrace,
+      storyDirectionGuideId,
+      selectionMode: snapshot ? 'prompt_snapshot' : state.budgetSelection?.contextSelectionTrace?.selectionMode ?? 'automatic',
       finalPromptTokenEstimate
     }
   )
@@ -251,6 +275,7 @@ export function runBuildContextStep(ctx: PipelineStepHandlerContext) {
     compressionRecords: state.budgetSelection?.compressionRecords ?? [],
     promptBlockOrder,
     finalPromptTokenEstimate,
+    promptCompositionMetrics: PromptCompositionMetricsService.calculate(state.context, promptBlockOrder, finalPromptTokenEstimate),
     promptLintWarnings,
     promptLintIssueCount,
     continuityBridgeId: continuityResult.bridge?.id ?? null,
@@ -273,10 +298,9 @@ export function runBuildContextStep(ctx: PipelineStepHandlerContext) {
         : false
     ),
     includedCharacterStateFactIds: includedCharacterStateFacts.map((fact) => fact.id),
-    characterStateWarnings: includedCharacterStateFacts.length
-      ? []
-      : state.contextNeedPlan
-        ? ['上下文需求计划要求角色状态类别，但本章没有匹配的状态账本事实。']
+    characterStateWarnings:
+      requiresCharacterStateFacts && includedCharacterStateFacts.length === 0
+        ? ['上下文需求计划要求角色状态类别，但最终 prompt 没有匹配的状态账本事实。']
         : [],
     characterStateIssueIds: [],
     hardCanonPackItemCount: hardCanonTrace.itemCount,

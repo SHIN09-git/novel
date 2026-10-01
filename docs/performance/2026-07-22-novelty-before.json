@@ -1,0 +1,65 @@
+{
+  "benchmark": "novelty-audit",
+  "measuredAt": "2026-07-21T16:20:28.160Z",
+  "buildMode": "esbuild production-style Node bundle of the real NoveltyDetector implementation",
+  "machine": {
+    "platform": "win32",
+    "arch": "x64",
+    "node": "v24.14.0",
+    "cpu": "AMD Ryzen 7 7800X3D 8-Core Processor           ",
+    "logicalCpuCount": 16,
+    "totalMemoryBytes": 33397133312
+  },
+  "methodology": {
+    "clock": "performance.now()",
+    "statistics": "warmup followed by repeated samples; p50/p95 use nearest-rank percentile",
+    "samplesContain": "Chinese true positives, benign prose, substring collisions, negation, quotations and proper names"
+  },
+  "results": [
+    {
+      "name": "small",
+      "characters": 2000,
+      "iterations": 80,
+      "warmups": 12,
+      "utf8Bytes": 5922,
+      "findings": 29,
+      "timing": {
+        "minMs": 4.755,
+        "p50Ms": 6.511,
+        "p95Ms": 8.171,
+        "maxMs": 14.446,
+        "meanMs": 6.571
+      }
+    },
+    {
+      "name": "medium",
+      "characters": 24000,
+      "iterations": 40,
+      "warmups": 8,
+      "utf8Bytes": 71046,
+      "findings": 28,
+      "timing": {
+        "minMs": 136.807,
+        "p50Ms": 160.567,
+        "p95Ms": 223.078,
+        "maxMs": 322.175,
+        "meanMs": 170.458
+      }
+    },
+    {
+      "name": "large",
+      "characters": 160000,
+      "iterations": 16,
+      "warmups": 5,
+      "utf8Bytes": 473622,
+      "findings": 28,
+      "timing": {
+        "minMs": 4341.159,
+        "p50Ms": 4468.995,
+        "p95Ms": 4860.72,
+        "maxMs": 4860.72,
+        "meanMs": 4537.702
+      }
+    }
+  ]
+}

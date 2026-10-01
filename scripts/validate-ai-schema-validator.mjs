@@ -2,8 +2,9 @@ import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import { join, resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import ts from 'typescript'
+import { repoRoot } from './utils/repo-root.mjs'
 
-const root = resolve('.')
+const root = repoRoot
 const outDir = join(root, 'tmp', 'ai-schema-validator-test')
 
 function assert(condition, message, details = {}) {
@@ -48,7 +49,15 @@ async function main() {
   const checks = []
   const validator = await loadTsModule('src/services/ai/AISchemaValidator.ts')
   const clientSource = await readFile(join(root, 'src', 'services', 'ai', 'AIClient.ts'), 'utf-8')
-  const normalizerSource = await readFile(join(root, 'src', 'services', 'ai', 'AIResponseNormalizer.ts'), 'utf-8')
+  const normalizerSource = (
+    await Promise.all([
+      'AIResponseNormalizer.ts',
+      'responseNormalizers/primitives.ts',
+      'responseNormalizers/characterState.ts',
+      'responseNormalizers/chapter.ts',
+      'responseNormalizers/quality.ts'
+    ].map((relativePath) => readFile(join(root, 'src', 'services', 'ai', relativePath), 'utf-8')))
+  ).join('\n')
   const qualityGatePolicySource = await readFile(join(root, 'src', 'shared', 'qualityGatePolicy.ts'), 'utf-8')
   const qualityGateServiceSource = await readFile(join(root, 'src', 'services', 'QualityGateService.ts'), 'utf-8')
   const chapterReviewSource = await readFile(join(root, 'src', 'services', 'ai', 'ChapterReviewAI.ts'), 'utf-8')
@@ -189,6 +198,30 @@ async function main() {
     )
   )
 
+  const validBlockedGate = validator.validateQualityGateSchema({
+    overallScore: 72,
+    pass: false,
+    dimensions: dimensionScores(),
+    issues: [
+      {
+        severity: 'high',
+        type: 'chapter_continuity_break',
+        description: 'the opening resets the previous ending',
+        evidence: 'three days later',
+        suggestedFix: 'continue from the unresolved doorway action'
+      }
+    ],
+    requiredFixes: ['continue from the unresolved doorway action'],
+    optionalSuggestions: ['tighten one repeated environment description']
+  })
+  checks.push(
+    assert(
+      validBlockedGate.ok,
+      'quality gate schema accepts blocker-only required fixes alongside non-blocking optional suggestions',
+      validBlockedGate
+    )
+  )
+
   const invalidRevision = validator.validateRevisionResultSchema({ revisedText: 'revised text' })
   checks.push(
     assert(
@@ -267,6 +300,15 @@ async function main() {
 
   checks.push(
     assert(
+      !chapterReviewSource.includes("chapterText || '暂无正文'") &&
+        !chapterReviewSource.includes("context || '暂无'") &&
+        chapterReviewSource.includes('不要提取候选、不要生成复盘事实'),
+      'chapter review prompts use explicit missing-input instructions instead of fake placeholder text'
+    )
+  )
+
+  checks.push(
+    assert(
       pipelineSource.includes('validateChapterPlanSchema') &&
         pipelineSource.includes('validateChapterDraftSchema') &&
         pipelineSource.includes('allowedNovelty') &&
@@ -286,13 +328,27 @@ async function main() {
 
   checks.push(
     assert(
+      qualitySource.includes('requiredFixes is reserved exclusively for acceptance blockers') &&
+        qualitySource.includes('If requiredFixes contains one or more items, pass must be false') &&
+        qualitySource.includes('Medium or low severity non-blocking improvements must not appear in requiredFixes') &&
+        qualitySource.includes('put them in optionalSuggestions') &&
+        qualitySource.includes('if requiredFixes is non-empty'),
+      'QualityGateAI prompt couples blocker-only requiredFixes to pass=false and routes non-blocking advice to optionalSuggestions'
+    )
+  )
+
+  checks.push(
+    assert(
       qualitySource.includes('score < 50') &&
         qualitySource.includes('score < 80') &&
         normalizerSource.includes('QUALITY_GATE_PASS_SCORE') &&
         qualityGatePolicySource.includes('QUALITY_GATE_PASS_SCORE = 50') &&
         qualityGatePolicySource.includes('QUALITY_GATE_HUMAN_REVIEW_SCORE = 80') &&
+        qualityGatePolicySource.includes('qualityGateHasRequiredFixes') &&
+        qualityGatePolicySource.includes('qualityGateSatisfiesPassCriteria') &&
+        qualityGateServiceSource.includes('qualityGateSatisfiesPassCriteria(report)') &&
         qualityGateServiceSource.includes('shouldQualityGateRequireHumanReview(report)'),
-      'quality gate pass threshold is 50 and human review threshold is 80'
+      'quality gate pass threshold is 50, required fixes block raw pass, and human review threshold is 80'
     )
   )
 

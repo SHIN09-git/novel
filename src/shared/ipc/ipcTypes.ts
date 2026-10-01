@@ -1,11 +1,19 @@
 import type {
   AppData,
+  CandidateDecisionCommand,
+  CandidateDecisionReceipt,
+  CandidateDecisionRemovedRecords,
   AppSettings,
+  AiCallProgress,
+  AiCallTelemetry,
   ChapterCommitBundle,
+  Character,
+  CharacterStateFact,
   DataMergePreview,
   ChapterNoveltyPolicy,
   ChapterDraftResult,
   ChapterPlan,
+  ChapterTask,
   ContextCompressionRecord,
   ContextSelectionResult,
   ForcedContextBlock,
@@ -19,6 +27,13 @@ import type {
   RedundancyReport,
   RevisionCommitBundle
 } from '../types'
+import type {
+  AgentAuthorizationAction,
+  AgentAuthorizationGrant
+} from '../types/agentAuthorization'
+import type { RuntimeInfo } from '../runtimeInfo'
+
+export type { AiCallProgress, AiCallProgressStage, AiCallTelemetry, AiCallTerminationCategory, AiTokenUsage } from '../types'
 
 export type IpcResult<T> = { ok: true; data: T } | IpcFailure
 
@@ -31,13 +46,20 @@ export interface IpcFailure {
 export interface StorageGetResult {
   data: AppData
   storagePath: string
+  revision?: string
   credentialWarning?: string
 }
 
 export interface StorageSaveResult {
   ok: true
   storagePath: string
+  revision?: string
   credentialWarning?: string
+}
+
+export interface StorageSaveRequest {
+  data: AppData
+  expectedRevision?: string
 }
 
 export interface StorageWriteResult {
@@ -49,16 +71,31 @@ export interface StorageWriteResult {
   credentialWarning?: string
 }
 
+export interface CandidateDecisionWriteResult extends StorageWriteResult {
+  receipt: CandidateDecisionReceipt
+  changes: Partial<AppData>
+  removedRecords?: CandidateDecisionRemovedRecords[]
+  replayed: boolean
+}
+
+export interface ExecuteCandidateDecisionRequest {
+  command: CandidateDecisionCommand
+  expectedRevision?: string
+}
+
 export interface SaveGenerationRunBundleRequest {
   bundle: GenerationRunBundle
+  expectedRevision?: string
 }
 
 export interface SaveChapterCommitBundleRequest {
   bundle: ChapterCommitBundle
+  expectedRevision?: string
 }
 
 export interface SaveRevisionCommitBundleRequest {
   bundle: RevisionCommitBundle
+  expectedRevision?: string
 }
 
 export interface ExportDataResult {
@@ -71,13 +108,26 @@ export interface ImportDataResult {
   filePath?: string
   data?: AppData
   storagePath?: string
+  revision?: string
   credentialWarning?: string
+  mergePreview?: DataMergePreview
+  mergeBlocked?: boolean
+  importedProjectIds?: string[]
+}
+
+export type ImportDataStrategy = 'merge' | 'replace'
+
+export interface ImportDataRequest {
+  expectedRevision?: string
+  strategy?: ImportDataStrategy
 }
 
 export interface GetStoragePathResult {
   storagePath: string
   defaultStoragePath: string
 }
+
+export type GetRuntimeInfoResult = RuntimeInfo
 
 export interface SelectStoragePathResult {
   canceled: boolean
@@ -88,6 +138,7 @@ export interface MigrateStoragePathRequest {
   storagePath: string
   data: AppData
   overwrite?: boolean
+  expectedRevision?: string
 }
 
 export interface MigrateStoragePathResult {
@@ -99,12 +150,14 @@ export interface MigrateStoragePathResult {
   backupPath?: string
   targetBackupPath?: string
   mergePreview?: DataMergePreview
+  revision?: string
   error?: string
 }
 
 export interface ResetStoragePathRequest {
   data: AppData
   overwrite?: boolean
+  expectedRevision?: string
 }
 
 export type ResetStoragePathResult = MigrateStoragePathResult
@@ -139,7 +192,13 @@ export interface BackupRestoreResult {
   ok: true
   data: AppData
   storagePath: string
+  revision?: string
   preRestoreBackupPath?: string
+}
+
+export interface BackupRestoreRequest {
+  backupPath: string
+  expectedRevision?: string
 }
 
 export interface BackupDeleteResult {
@@ -174,6 +233,7 @@ export interface MigrationMergePreviewResult {
 export interface ConfirmMigrationMergeRequest {
   sourcePath: string
   targetPath: string
+  expectedRevision?: string
 }
 
 export interface ConfirmMigrationMergeResult {
@@ -183,6 +243,7 @@ export interface ConfirmMigrationMergeResult {
   preview?: DataMergePreview
   sourceBackupPath?: string
   targetBackupPath?: string
+  revision?: string
   error?: string
 }
 
@@ -223,6 +284,8 @@ export type CredentialMigrateLegacyApiKeyResult = CredentialStateResult
 export interface ChatCompletionRequest {
   settings: AppSettings
   messages: Array<{ role: 'system' | 'user'; content: string }>
+  runId?: string
+  clientCallId?: string
 }
 
 export interface ChatCompletionResult {
@@ -230,6 +293,59 @@ export interface ChatCompletionResult {
   content?: string
   error?: string
   finishReason?: string
+  telemetry?: AiCallTelemetry
+}
+
+export interface CancelAiRunResult {
+  ok: true
+  cancelled: boolean
+}
+
+export interface CancelAiCallRequest {
+  runId: string
+  callId: string
+}
+
+export type CancelAiCallResult = CancelAiRunResult
+
+export interface GetAiCallProgressRequest {
+  runId?: string
+  callId?: string
+}
+
+export type GetAiCallProgressResult = AiCallProgress | null
+export type ListAiCallProgressResult = AiCallProgress[]
+
+export interface AgentAuthorizationListRequest {
+  projectId: string
+}
+
+export type AgentAuthorizationListResult = AgentAuthorizationGrant[]
+
+export interface AgentAuthorizationGrantRequest {
+  projectId: string
+  actions: AgentAuthorizationAction[]
+  chapterStart: number | null
+  chapterEnd: number | null
+}
+
+export type AgentAuthorizationGrantResult = AgentAuthorizationGrant
+
+export interface AgentAuthorizationRevokeRequest {
+  projectId: string
+  grantId: string
+}
+
+export type AgentAuthorizationRevokeResult = AgentAuthorizationGrant | null
+
+export interface CodexCliStatusResult {
+  ok: true
+  available: boolean
+  authenticated: boolean
+  authenticationMode?: 'chatgpt' | 'api_key' | 'unknown'
+  resolvedPath?: string
+  version?: string
+  message: string
 }
 
 export interface DiagnosticsAnalyzeRedundancyRequest {
@@ -247,7 +363,9 @@ export interface DiagnosticsAuditNoveltyRequest {
   chapterPlan: ChapterPlan | null
   noveltyPolicy?: ChapterNoveltyPolicy
   project?: Project | null
-  appData?: AppData | null
+  knownCharacterNames?: string[]
+  knownForeshadowingTexts?: string[]
+  knownCanonTexts?: string[]
   contextSelection?: ContextSelectionResult | null
   promptBlockOrder?: PromptBlockOrderItem[] | null
   forcedContextBlocks?: ForcedContextBlock[] | null
@@ -258,6 +376,7 @@ export type DiagnosticsAuditNoveltyResult = NoveltyAuditResult
 
 export interface DiagnosticsEvaluateQualityGateRequest {
   settings: AppSettings
+  runId?: string
   projectId: string
   jobId: string
   chapterId: string | null
@@ -266,8 +385,15 @@ export interface DiagnosticsEvaluateQualityGateRequest {
   context: string
   chapterPlan: ChapterPlan | null
   consistencyReports?: AppData['consistencyReviewReports']
+  noveltyAuditResult?: NoveltyAuditResult | null
+  redundancyReport?: RedundancyReport | null
+  characterStateFacts?: CharacterStateFact[]
+  characters?: Character[]
   promptContextSnapshotId?: string | null
   contextSource?: PipelineContextSource
+  targetChapterOrder?: number
+  hasAuthoritativeChapterTask?: boolean
+  chapterTask?: ChapterTask | null
 }
 
 export type DiagnosticsEvaluateQualityGateResult = QualityGateReport

@@ -1,0 +1,58 @@
+.pipeline-task-editor {
+  container-type: inline-size;
+  width: 100%;
+  min-width: 0;
+  color: var(--ink);
+}
+
+.pipeline-config-fields { display: grid; gap: 12px; border: 0; margin: 0; padding: 0; min-width: 0; }
+
+.pipeline-task-heading {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 8px 16px;
+  margin-bottom: 14px;
+}
+
+.pipeline-task-heading h3 { margin: 0; font-size: 15px; line-height: 1.5; }
+.pipeline-task-heading p { margin: 4px 0 0; color: var(--muted); font-size: 12px; }
+.pipeline-task-status { color: var(--color-accent-strong); font-size: 12px; }
+.pipeline-task-status.dirty { color: var(--color-warning); }
+.pipeline-task-editor :is(h3, p, span, strong, label, li, button) { overflow-wrap: anywhere; }
+
+.pipeline-task-fields { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px 16px; }
+.pipeline-task-field { display: grid; align-content: start; gap: 6px; min-width: 0; }
+.pipeline-task-field.full-width { grid-column: 1 / -1; }
+.pipeline-task-field label { color: var(--muted); font-size: 12px; font-weight: 600; }
+.pipeline-task-field :is(input, textarea) {
+  width: 100%;
+  min-width: 0;
+  max-width: 100%;
+  padding: 9px 10px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--color-surface-elevated);
+  color: var(--ink);
+  font: inherit;
+  font-size: 13px;
+  line-height: 1.65;
+}
+.pipeline-task-field textarea { min-height: 66px; resize: vertical; overflow-wrap: anywhere; }
+.pipeline-task-advanced { margin-top: 14px; border-top: 1px solid var(--line); }
+.pipeline-task-advanced > summary { padding: 10px 0; color: var(--color-accent-strong); font-size: 12px; cursor: pointer; }
+.pipeline-task-advanced > .pipeline-task-fields { padding: 2px 0 10px; }
+.pipeline-task-impact { margin-top: 12px; padding-left: 10px; border-left: 2px solid var(--color-info); font-size: 12px; line-height: 1.65; }
+.pipeline-task-impact strong { font-size: 12px; }
+.pipeline-task-impact p { margin: 4px 0 0; color: var(--muted); }
+.pipeline-task-impact ul { margin: 4px 0 0; padding-left: 18px; color: var(--color-warning); }
+.pipeline-task-error { margin: 12px 0 0; color: var(--danger); font-size: 12px; line-height: 1.65; }
+.pipeline-task-actions { display: flex; justify-content: flex-end; flex-wrap: wrap; gap: 8px; margin-top: 14px; }
+.pipeline-task-actions button { min-height: 36px; max-width: 100%; font-size: 12px; white-space: normal; }
+.pipeline-task-editor :is(button, input, textarea, summary):focus-visible { outline: 2px solid var(--color-accent-strong); outline-offset: 2px; }
+
+@container (max-width: 560px) {
+  .pipeline-task-fields { grid-template-columns: minmax(0, 1fr); gap: 10px; }
+  .pipeline-task-actions button { flex: 1 1 140px; }
+}

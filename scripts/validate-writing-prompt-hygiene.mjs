@@ -2,8 +2,9 @@ import { mkdir, readFile, rm, writeFile } from 'node:fs/promises'
 import { dirname, join, resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import ts from 'typescript'
+import { repoRoot } from './utils/repo-root.mjs'
 
-const root = resolve('.')
+const root = repoRoot
 const outDir = join(root, 'tmp', 'writing-prompt-hygiene-test')
 
 function assert(condition, message, details = {}) {
@@ -37,16 +38,24 @@ async function compileTsTree(files) {
 
 async function loadPromptBuilder() {
   await compileTsTree([
+    'src/shared/chapterText.ts',
     'src/shared/foreshadowingTreatment.ts',
     'src/services/TokenEstimator.ts',
     'src/services/ContinuityService.ts',
     'src/services/CharacterStateService.ts',
+    'src/services/characterState/logInference.ts',
+    'src/services/characterState/stateMutations.ts',
+    'src/services/characterState/stateSelection.ts',
+    'src/services/characterState/stateValidation.ts',
+    'src/services/characterState/stateValue.ts',
     'src/services/StageSummaryService.ts',
     'src/services/ContextCompressionService.ts',
     'src/services/contextBudget/types.ts',
     'src/services/contextBudget/scoringEngine.ts',
     'src/services/contextBudget/selectionEngine.ts',
+    'src/services/contextBudget/selectionFinalizer.ts',
     'src/services/contextBudget/traceBuilder.ts',
+    'src/services/ChapterLifecycleService.ts',
     'src/services/ContextBudgetManager.ts',
     'src/services/StoryDirectionService.ts',
     'src/services/HardCanonPackService.ts',
@@ -57,7 +66,9 @@ async function loadPromptBuilder() {
     'src/services/promptFormatters/promptUtils.ts',
     'src/services/PromptBuilderService.ts'
   ])
-  return import(`${pathToFileURL(join(outDir, 'src/services/PromptBuilderService.mjs')).href}?t=${Date.now()}`)
+  const promptBuilderModule = await import(`${pathToFileURL(join(outDir, 'src/services/PromptBuilderService.mjs')).href}?t=${Date.now()}`)
+  const continuityModule = await import(`${pathToFileURL(join(outDir, 'src/services/ContinuityService.mjs')).href}?t=${Date.now()}`)
+  return { ...promptBuilderModule, ...continuityModule }
 }
 
 const now = '2026-01-01T00:00:00.000Z'
@@ -304,9 +315,57 @@ function buildInput() {
 
 async function main() {
   const checks = []
-  const { PromptBuilderService } = await loadPromptBuilder()
+  const { PromptBuilderService, formatContinuityBridgeForPrompt } = await loadPromptBuilder()
+  const sparseBridgePrompt = formatContinuityBridgeForPrompt({
+    id: 'sparse-bridge',
+    projectId,
+    fromChapterId: 'chapter-17',
+    toChapterOrder: 18,
+    lastSceneLocation: '',
+    lastPhysicalState: '周烬右手结晶化仍在',
+    lastEmotionalState: '',
+    lastUnresolvedAction: '',
+    lastDialogueOrThought: '',
+    immediateNextBeat: '',
+    mustContinueFrom: '',
+    mustNotReset: '',
+    openMicroTensions: '',
+    createdAt: now,
+    updatedAt: now
+  })
+  checks.push(assert(!sparseBridgePrompt.includes('待补充') && !sparseBridgePrompt.includes('暂无'), 'continuity bridge formatter omits placeholder fields before prompt lint'))
+  checks.push(assert(sparseBridgePrompt.includes('周烬右手结晶化仍在'), 'continuity bridge formatter keeps real sparse bridge facts'))
   const result = PromptBuilderService.buildResult(buildInput())
   const prompt = result.finalPrompt
+  const openingInput = buildInput()
+  openingInput.config = { ...openingInput.config, targetChapterOrder: 1 }
+  openingInput.contextNeedPlan = null
+  const openingPrompt = PromptBuilderService.buildResult(openingInput).finalPrompt
+  checks.push(assert(openingPrompt.includes('不存在上一章') && openingPrompt.includes('直接从本章任务指定的场景自然开场'), 'chapter 1 prompt explicitly establishes a natural opening'))
+  checks.push(assert(
+    !openingPrompt.includes('长篇小说续写助手') &&
+      !openingPrompt.includes('硬规则：下一章开头必须直接承接上一章最后一幕') &&
+      !openingPrompt.includes('从上一章结尾后的数秒到数分钟内开始'),
+    'chapter 1 prompt contains no unconditional previous-chapter continuation rule'
+  ))
+  checks.push(assert(
+    openingPrompt.includes('权威第一章不使用旧章节、阶段摘要、时间线、既有伏笔或中期剧情导向') &&
+      !openingPrompt.includes('6. 中期剧情导向 StoryDirectionGuide（只决定推进方向）') &&
+      !openingPrompt.includes('8. 远期压缩摘要') &&
+      !openingPrompt.includes('9. 时间线校验参考'),
+    'chapter 1 priority rules do not advertise unavailable legacy plot sources'
+  ))
+  checks.push(assert(
+    openingPrompt.includes('## 5. 本章任务点名人物') &&
+      !openingPrompt.includes('【角色状态账本切片】') &&
+      !openingPrompt.includes('请创作《山城副本加载中》第一章'),
+    'chapter 1 prompt uses task-scoped character identities without legacy-state or project-title priming'
+  ))
+  checks.push(assert(
+    openingPrompt.includes('不带专名、不承担剧情功能的普通食材、器具、摊贩或路人') &&
+      openingPrompt.includes('不得让这些日常补充承载悬疑信息、后续钩子或便利解法'),
+    'chapter 1 keeps plot scope closed while allowing ordinary unnamed daily texture'
+  ))
 
   checks.push(assert(!prompt.includes('待补充') && !prompt.includes('暂无与本章需求匹配') && !prompt.includes('暂无'), 'writing prompt does not include placeholder text'))
   checks.push(assert(result.warnings.some((warning) => warning.includes('章节任务字段缺失')), 'missing core task fields become warnings instead of prompt placeholders', result.warnings))
@@ -327,6 +386,58 @@ async function main() {
 
   checks.push(assert(!prompt.includes('Novelty guardrail:') && !prompt.includes('Rule horror / infinite-flow constraint:'), 'duplicate English guardrails are removed from final writing prompt'))
   checks.push(assert(prompt.includes('不得新增无铺垫救命规则') || prompt.includes('不得新增无铺垫'), 'Chinese novelty/output constraints remain present'))
+
+  const revisionContextSource = await readFile(join(root, 'src/renderer/src/views/revision/revisionAiContext.ts'), 'utf-8')
+  checks.push(assert(
+    !revisionContextSource.includes("|| '待补充'") &&
+      !revisionContextSource.includes('|| "待补充"') &&
+      !revisionContextSource.includes("|| '暂无'") &&
+      !revisionContextSource.includes('|| "暂无"') &&
+      !revisionContextSource.includes(": '暂无'"),
+    'revision AI context builder skips missing fields instead of injecting placeholders'
+  ))
+
+  const promptUtilsSource = await readFile(join(root, 'src/services/promptFormatters/promptUtils.ts'), 'utf-8')
+  checks.push(assert(
+    !promptUtilsSource.includes("文风要求：${styleSample || '待补充'}"),
+    'style envelope omits missing style samples instead of injecting placeholders'
+  ))
+
+  const storyDirectionSource = await readFile(join(root, 'src/services/ai/StoryDirectionAI.ts'), 'utf-8')
+  checks.push(assert(
+    !storyDirectionSource.includes("|| '（暂无）'") &&
+      !storyDirectionSource.includes("|| '（无）'") &&
+      storyDirectionSource.includes('不要编造已经发生的剧情') &&
+      storyDirectionSource.includes('不得自行补充新世界规则或系统机制'),
+    'story direction AI prompts state missing-context boundaries instead of injecting placeholder source material'
+  ))
+
+  const stageSummarySource = await readFile(join(root, 'src/services/StageSummaryService.ts'), 'utf-8')
+  checks.push(assert(
+    !stageSummarySource.includes('暂无复盘摘要'),
+    'stage summary draft generation skips empty chapter recaps instead of persisting placeholder summaries'
+  ))
+
+  const promptBuilderSource = await readFile(join(root, 'src/services/PromptBuilderService.ts'), 'utf-8')
+  checks.push(assert(
+    !promptBuilderSource.includes("|| '暂无时间线事件。'") &&
+      promptBuilderSource.includes('enabled: config.modules.timeline && Boolean(timelineText)'),
+    'empty timeline context is omitted from writing prompt instead of rendered as a placeholder block'
+  ))
+
+  const chapterContextSource = await readFile(join(root, 'src/renderer/src/views/chapters/chapterAiContext.ts'), 'utf-8')
+  checks.push(assert(
+    !chapterContextSource.includes("|| '暂无'") &&
+      !chapterContextSource.includes("|| '暂无摘要'") &&
+      chapterContextSource.includes('不要补写历史剧情'),
+    'chapter page AI context builder omits empty fields and uses explicit no-invention guidance'
+  ))
+  const chaptersViewSource = await readFile(join(root, 'src/renderer/src/views/ChaptersView.tsx'), 'utf-8')
+  checks.push(assert(
+    chaptersViewSource.includes("import { buildChapterAiContext } from './chapters/chapterAiContext'") &&
+      chaptersViewSource.includes('return buildChapterAiContext({'),
+    'chapter page delegates AI context construction to a pure helper'
+  ))
 
   const failed = checks.filter((check) => !check.ok)
   for (const check of checks) {

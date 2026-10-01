@@ -8,6 +8,7 @@ import type {
   ContextNeedPriority,
   ContextNeedPlan,
   ContextSelectionResult,
+  ContextSelectionMode,
   ContextSelectionTrace,
   ContextSelectionTraceBlock,
   ContextSelectionTraceDroppedBlock,
@@ -38,6 +39,8 @@ export interface ForcedContextSelection {
   chapterTask?: Partial<ChapterTask> | null
   foreshadowingTreatmentOverrides?: Record<ID, ForeshadowingTreatmentMode>
   contextNeedPlan?: ContextNeedPlan | null
+  selectionMode?: ContextSelectionMode
+  isolateOpeningLegacyContext?: boolean
 }
 
 export interface ScoringContext {
@@ -45,6 +48,10 @@ export interface ScoringContext {
   task?: Partial<ChapterTask> | null
   forcedCharacterIds: Set<ID>
   forcedForeshadowingIds: Set<ID>
+  manualCharacterIds: Set<ID>
+  manualForeshadowingIds: Set<ID>
+  excludedCharacterIds: Set<ID>
+  selectionMode: ContextSelectionMode
   foreshadowingTreatmentOverrides?: Record<ID, ForeshadowingTreatmentMode>
   relatedCharacterIds: Set<ID>
   contextNeedPlan?: ContextNeedPlan | null

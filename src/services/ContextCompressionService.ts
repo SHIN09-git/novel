@@ -94,6 +94,7 @@ export function createDroppedChapterCompressionRecord(chapter: Chapter, reason: 
     replacementText: '',
     replacementTokenEstimate: 0,
     savedTokenEstimate: originalTokenEstimate,
+    reasonCode: 'budget_exceeded',
     reason
   }
 }
@@ -126,6 +127,7 @@ function createReplacementRecord(
     replacementText,
     replacementTokenEstimate,
     savedTokenEstimate: Math.max(0, originalTokenEstimate - replacementTokenEstimate),
+    reasonCode: 'compressed_replacement',
     reason
   }
 }
@@ -232,6 +234,10 @@ export function compressChapterRecapsForBudget({
         type: 'chapter',
         id: chapter.id,
         reason: dropped.reason,
+        reasonCode: 'budget_exceeded',
+        priority: 'low',
+        uncertain: false,
+        replacementSourceId: null,
         estimatedTokensSaved: dropped.savedTokenEstimate
       }
     ]

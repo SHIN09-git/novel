@@ -1,22 +1,21 @@
 import { useMemo, useState } from 'react'
 import type { ID, StageSummary } from '../../../shared/types'
-import { AIService } from '../../../services/AIService'
 import { useConfirm } from '../components/ConfirmDialog'
 import { EmptyState, NumberInput, TextArea } from '../components/FormFields'
 import { Header } from '../components/Layout'
 import { clampNumber, newId, now } from '../utils/format'
-import { projectData } from '../utils/projectData'
+import { useProjectData } from '../hooks/useProjectData'
 import type { ProjectProps } from './viewTypes'
+import '../styles/views/stage-summary.css'
 import { updateProjectTimestamp } from './viewTypes'
 
 export function StageSummaryView({ data, project, saveData }: ProjectProps) {
   const confirmAction = useConfirm()
-  const scoped = projectData(data, project.id)
-  const chapters = [...scoped.chapters].sort((a, b) => a.order - b.order)
-  const summaries = [...scoped.stageSummaries].sort((a, b) => a.chapterStart - b.chapterStart)
+  const scoped = useProjectData(data, project.id)
+  const chapters = useMemo(() => [...scoped.chapters].sort((a, b) => a.order - b.order), [scoped.chapters])
+  const summaries = useMemo(() => [...scoped.stageSummaries].sort((a, b) => a.chapterStart - b.chapterStart), [scoped.stageSummaries])
   const [chapterStart, setChapterStart] = useState(1)
   const [chapterEnd, setChapterEnd] = useState(3)
-  const aiService = useMemo(() => new AIService(), [])
 
   function coveredRange(start: number, end: number) {
     return `第 ${start}-${end} 章`
@@ -25,6 +24,8 @@ export function StageSummaryView({ data, project, saveData }: ProjectProps) {
   async function generateDraft() {
     const selectedChapters = chapters.filter((chapter) => chapter.order >= chapterStart && chapter.order <= chapterEnd)
     if (selectedChapters.length === 0) return
+    const { AIService } = await import('../../../services/AIService')
+    const aiService = new AIService(data.settings)
     const draft = await aiService.generateStageSummary(selectedChapters)
     const timestamp = now()
     const summary: StageSummary = { ...draft, id: newId(), projectId: project.id, createdAt: timestamp, updatedAt: timestamp }
@@ -41,7 +42,7 @@ export function StageSummaryView({ data, project, saveData }: ProjectProps) {
   }
 
   async function updateSummary(id: ID, patch: Partial<StageSummary>) {
-    await saveData((current) => ({
+    return saveData((current) => ({
       ...current,
       projects: updateProjectTimestamp(current, project.id),
       stageSummaries: current.stageSummaries.map((summary) => (summary.id === id ? { ...summary, ...patch, updatedAt: now() } : summary))
@@ -100,11 +101,11 @@ export function StageSummaryView({ data, project, saveData }: ProjectProps) {
                 }} />
               </div>
               <div className="form-grid">
-                <TextArea label="压缩剧情摘要" value={summary.compressedPlotSummary || summary.plotProgress} onChange={(compressedPlotSummary) => updateSummary(summary.id, { compressedPlotSummary, plotProgress: compressedPlotSummary })} />
-                <TextArea label="不可逆变化" value={summary.irreversibleChanges ?? ''} onChange={(irreversibleChanges) => updateSummary(summary.id, { irreversibleChanges })} />
-                <TextArea label="结尾承接状态" value={summary.endingCarryoverState ?? ''} onChange={(endingCarryoverState) => updateSummary(summary.id, { endingCarryoverState })} />
-                <TextArea label="情绪余味" value={summary.emotionalAftertaste ?? ''} onChange={(emotionalAftertaste) => updateSummary(summary.id, { emotionalAftertaste })} />
-                <TextArea label="节奏状态" value={summary.pacingState ?? ''} onChange={(pacingState) => updateSummary(summary.id, { pacingState })} />
+                <TextArea label="压缩剧情摘要" value={summary.compressedPlotSummary || summary.plotProgress} debounceMs={500} bufferKey={summary.id} onChange={(compressedPlotSummary) => updateSummary(summary.id, { compressedPlotSummary, plotProgress: compressedPlotSummary })} />
+                <TextArea label="不可逆变化" value={summary.irreversibleChanges ?? ''} debounceMs={500} bufferKey={summary.id} onChange={(irreversibleChanges) => updateSummary(summary.id, { irreversibleChanges })} />
+                <TextArea label="结尾承接状态" value={summary.endingCarryoverState ?? ''} debounceMs={500} bufferKey={summary.id} onChange={(endingCarryoverState) => updateSummary(summary.id, { endingCarryoverState })} />
+                <TextArea label="情绪余味" value={summary.emotionalAftertaste ?? ''} debounceMs={500} bufferKey={summary.id} onChange={(emotionalAftertaste) => updateSummary(summary.id, { emotionalAftertaste })} />
+                <TextArea label="节奏状态" value={summary.pacingState ?? ''} debounceMs={500} bufferKey={summary.id} onChange={(pacingState) => updateSummary(summary.id, { pacingState })} />
               </div>
               <button className="danger-button" onClick={() => deleteSummary(summary)}>
                 删除阶段摘要

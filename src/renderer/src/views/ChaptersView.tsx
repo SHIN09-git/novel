@@ -1,93 +1,119 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { lazy, Suspense, useEffect, useMemo, useRef, useState } from 'react'
 import type {
-  AIResult,
   AppData,
   Chapter,
-  ChapterContinuityBridge,
-  ChapterContinuityBridgeSuggestion,
-  ChapterReviewDraft,
-  ChapterVersion,
-  CharacterStateChangeCandidate,
-  CharacterStateChangeSuggestion,
-  CharacterStateFact,
-  CharacterStateTransaction,
-  CharacterStateLog,
-  CharacterStateSuggestion,
-  Foreshadowing,
-  ForeshadowingCandidate,
-  ForeshadowingExtractionResult,
-  ForeshadowingStatus,
-  ForeshadowingStatusChangeSuggestion,
   ID,
-  NextChapterSuggestions,
   Project,
   RevisionCommitBundle
 } from '../../../shared/types'
-import { AIService } from '../../../services/AIService'
-import { buildRestoreRevisionCommitBundle, getChapterVersionChain, type ChapterVersionChainEntry } from '../../../services/ChapterVersionChainService'
-import { applyRevisionCommitBundleToAppData } from '../../../services/RevisionCommitBundleService'
-import { normalizeTreatmentMode } from '../../../shared/foreshadowingTreatment'
-import { ExportService } from '../../../services/ExportService'
+import {
+  archiveChapterInAppData,
+  nextChapterOrder,
+  reorderChapterInAppData,
+  restoreArchivedChapterInAppData
+} from '../../../services/ChapterLifecycleService'
 import { useConfirm } from '../components/ConfirmDialog'
 import { EmptyState } from '../components/FormFields'
 import { Header } from '../components/Layout'
-import { projectData } from '../utils/projectData'
-import { formatDate, newId, now } from '../utils/format'
-import type { SaveDataInput } from '../utils/saveDataState'
-import { ChapterAIDraftPanels } from './chapters/ChapterAIDraftPanels'
+import { useProjectData } from '../hooks/useProjectData'
+import { newId, now } from '../utils/format'
+import type { SaveDataHandler } from '../utils/saveDataState'
 import { ChapterEditorPanel } from './chapters/ChapterEditorPanel'
 import { ChapterListPanel } from './chapters/ChapterListPanel'
-import { ChapterReviewPanel } from './chapters/ChapterReviewPanel'
-import { ChapterVersionHistoryPanel } from './chapters/ChapterVersionHistoryPanel'
+import { buildChapterAiContext } from './chapters/chapterAiContext'
 import { reviewFields, type ReviewTextField } from './chapters/chapterViewTypes'
+import { useChapterAiDrafts } from './chapters/useChapterAiDrafts'
+import { useChapterBodyDraft } from './chapters/useChapterBodyDraft'
+import { useChapterCharacterActions } from './chapters/useChapterCharacterActions'
+import { formatNextSuggestionsAsRiskText, useChapterContinuityActions } from './chapters/useChapterContinuityActions'
+import { useChapterExportActions } from './chapters/useChapterExportActions'
+import { useChapterForeshadowingActions } from './chapters/useChapterForeshadowingActions'
+import { useChapterVersionActions } from './chapters/useChapterVersionActions'
+import { updateProjectTimestamp } from './viewTypes'
+
+const ChapterAIDraftPanels = lazy(() =>
+  import('./chapters/ChapterAIDraftPanels').then((module) => ({ default: module.ChapterAIDraftPanels }))
+)
+const ChapterReviewPanel = lazy(() =>
+  import('./chapters/ChapterReviewPanel').then((module) => ({ default: module.ChapterReviewPanel }))
+)
+const ChapterVersionHistoryPanel = lazy(() =>
+  import('./chapters/ChapterVersionHistoryPanel').then((module) => ({ default: module.ChapterVersionHistoryPanel }))
+)
+
+function ChapterPanelLoading({ label }: { label: string }) {
+  return (
+    <div className="panel">
+      <p className="muted">正在加载{label}...</p>
+    </div>
+  )
+}
 
 interface ProjectProps {
   data: AppData
   project: Project
-  saveData: (next: SaveDataInput) => Promise<void>
+  saveData: SaveDataHandler
   saveRevisionCommitBundle?: (buildCommit: (currentData: AppData) => { next: AppData; bundle: RevisionCommitBundle }) => Promise<void>
+  initialChapterId?: ID | null
+  onInitialChapterConsumed?: () => void
+  onOpenReader?: (chapterId?: ID | null) => void
 }
 
-function updateProjectTimestamp(data: AppData, projectId: ID): Project[] {
-  return data.projects.map((project) => (project.id === projectId ? { ...project, updatedAt: now() } : project))
-}
-
-const emptyBridgeSuggestion: ChapterContinuityBridgeSuggestion = {
-  lastSceneLocation: '',
-  lastPhysicalState: '',
-  lastEmotionalState: '',
-  lastUnresolvedAction: '',
-  lastDialogueOrThought: '',
-  immediateNextBeat: '',
-  mustContinueFrom: '',
-  mustNotReset: '',
-  openMicroTensions: ''
-}
-
-export function ChaptersView({ data, project, saveData, saveRevisionCommitBundle }: ProjectProps) {
+export function ChaptersView({
+  data,
+  project,
+  saveData,
+  saveRevisionCommitBundle,
+  initialChapterId,
+  onInitialChapterConsumed,
+  onOpenReader
+}: ProjectProps) {
   const confirmAction = useConfirm()
-  const scoped = projectData(data, project.id)
-  const chapters = [...scoped.chapters].sort((a, b) => a.order - b.order)
-  const chapterListItems = [...chapters].sort((a, b) => b.order - a.order)
+  const scoped = useProjectData(data, project.id)
+  const chapters = useMemo(() => [...scoped.chapters].sort((a, b) => a.order - b.order), [scoped.chapters])
+  const chapterListItems = useMemo(() => [...chapters].sort((a, b) => b.order - a.order), [chapters])
+  const archivedChapterListItems = useMemo(
+    () => [...scoped.archivedChapters].sort((a, b) => b.order - a.order),
+    [scoped.archivedChapters]
+  )
   const defaultSelectedChapter = chapterListItems[0] ?? null
   const [selectedId, setSelectedId] = useState<ID | null>(defaultSelectedChapter?.id ?? null)
   const selected = chapters.find((chapter) => chapter.id === selectedId) ?? defaultSelectedChapter
   const selectedBridge = selected
     ? scoped.chapterContinuityBridges.find((bridge) => bridge.fromChapterId === selected.id && bridge.toChapterOrder === selected.order + 1) ?? null
     : null
-  const [bodyDraft, setBodyDraft] = useState(selected?.body ?? '')
-  const [loadingAction, setLoadingAction] = useState<string | null>(null)
   const [aiMessage, setAiMessage] = useState('')
-  const [rawAIText, setRawAIText] = useState('')
-  const [reviewDraft, setReviewDraft] = useState<ChapterReviewDraft | null>(null)
-  const [characterSuggestions, setCharacterSuggestions] = useState<CharacterStateSuggestion[]>([])
-  const [foreshadowingDraft, setForeshadowingDraft] = useState<ForeshadowingExtractionResult | null>(null)
-  const [nextSuggestions, setNextSuggestions] = useState<NextChapterSuggestions | null>(null)
   const [showVersionHistory, setShowVersionHistory] = useState(false)
-  const bodySaveTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
-  const aiService = useMemo(() => new AIService(data.settings), [data.settings])
+  const [showReviewPanel, setShowReviewPanel] = useState(false)
+  const pendingSelectionMessage = useRef('')
+  const bodyEditor = useChapterBodyDraft({ selected, projectId: project.id, saveData, onStatusMessage: setAiMessage })
+  const {
+    bodyDraft,
+    saveStatus: bodySaveStatus,
+    conflict: bodyConflict,
+    updateBodyDraft,
+    flushBody,
+    useExternalBody,
+    keepLocalBody,
+    replaceWithPersistedBody
+  } = bodyEditor
+  const chapterAi = useChapterAiDrafts({
+    settings: data.settings,
+    selected,
+    characters: scoped.characters,
+    foreshadowings: scoped.foreshadowings,
+    chapterText: () => (selected ? bodyDraft : ''),
+    chapterContext: buildChapterContext,
+    flushBody,
+    setMessage: setAiMessage
+  })
 
   useEffect(() => {
+    if (initialChapterId && chapters.some((chapter) => chapter.id === initialChapterId)) {
+      setSelectedId(initialChapterId)
+      onInitialChapterConsumed?.()
+      return
+    }
     if (!selectedId && defaultSelectedChapter) {
       setSelectedId(defaultSelectedChapter.id)
       return
@@ -95,63 +121,30 @@ export function ChaptersView({ data, project, saveData, saveRevisionCommitBundle
     if (selectedId && !chapters.some((chapter) => chapter.id === selectedId)) {
       setSelectedId(defaultSelectedChapter?.id ?? null)
     }
-  }, [chapters, defaultSelectedChapter, selectedId])
+  }, [chapters, defaultSelectedChapter, initialChapterId, onInitialChapterConsumed, selectedId])
 
   useEffect(() => {
-    setBodyDraft(selected?.body ?? '')
-    setReviewDraft(null)
-    setCharacterSuggestions([])
-    setForeshadowingDraft(null)
-    setNextSuggestions(null)
-    setRawAIText('')
-    setAiMessage('')
+    setShowVersionHistory(false)
+    setShowReviewPanel(false)
+    setAiMessage(pendingSelectionMessage.current)
+    pendingSelectionMessage.current = ''
   }, [selected?.id])
 
-  useEffect(() => {
-    return () => {
-      if (bodySaveTimer.current) clearTimeout(bodySaveTimer.current)
-    }
-  }, [])
-
   function buildChapterContext(): string {
-    const bible = scoped.bible
-    const recentChapters = [...scoped.chapters]
-      .filter((chapter) => !selected || chapter.order < selected.order)
-      .sort((a, b) => b.order - a.order)
-      .slice(0, 3)
-      .map((chapter) => `第 ${chapter.order} 章《${chapter.title || '未命名'}》：${chapter.summary || '暂无摘要'}`)
-      .join('\n')
-
-    return [
-      `项目：${project.name}`,
-      `简介：${project.description || '暂无'}`,
-      `题材：${project.genre || '暂无'}`,
-      `核心爽点：${project.coreAppeal || '暂无'}`,
-      `主线冲突：${bible?.mainConflict || '暂无'}`,
-      `重要不可违背设定：${bible?.immutableFacts || '暂无'}`,
-      `主要角色：${scoped.characters.filter((character) => character.isMain).map((character) => character.name).join('、') || '暂无'}`,
-      `未回收伏笔：${scoped.foreshadowings.filter((item) => item.status !== 'resolved' && item.status !== 'abandoned').map((item) => item.title).join('、') || '暂无'}`,
-      `最近章节摘要：\n${recentChapters || '暂无'}`
-    ].join('\n')
-  }
-
-  function chapterText(): string {
-    return bodyDraft || selected?.body || ''
-  }
-
-  function handleAIResult<T>(result: AIResult<T>, onData: (data: T) => void) {
-    setRawAIText(result.rawText ?? '')
-    if (result.data) onData(result.data)
-    if (result.parseError) {
-      setAiMessage(`解析失败，可手动复制。${result.parseError}`)
-      return
-    }
-    setAiMessage(result.error || (result.usedAI ? 'AI 草稿已生成，请预览后再应用。' : '未配置 API Key，已生成本地结构化模板。'))
+    return buildChapterAiContext({
+      project,
+      bible: scoped.bible,
+      chapters: scoped.chapters,
+      characters: scoped.characters,
+      foreshadowings: scoped.foreshadowings,
+      selectedChapter: selected
+    })
   }
 
   async function addChapter() {
+    if (!(await flushBody())) return
     const timestamp = now()
-    const order = Math.max(0, ...chapters.map((chapter) => chapter.order)) + 1
+    const order = nextChapterOrder(scoped.allChapters, project.id)
     const chapter: Chapter = {
       id: newId(),
       projectId: project.id,
@@ -166,11 +159,12 @@ export function ChaptersView({ data, project, saveData, saveRevisionCommitBundle
       endingHook: '',
       riskWarnings: '',
       includedInStageSummary: false,
+      archivedAt: null,
       createdAt: timestamp,
       updatedAt: timestamp
     }
-    await saveData((current) => {
-      const nextOrder = Math.max(0, ...current.chapters.filter((item) => item.projectId === project.id).map((item) => item.order)) + 1
+    const saved = await saveData((current) => {
+      const nextOrder = nextChapterOrder(current.chapters, project.id)
       return {
         ...current,
         projects: updateProjectTimestamp(current, project.id),
@@ -179,139 +173,48 @@ export function ChaptersView({ data, project, saveData, saveRevisionCommitBundle
           : [...current.chapters, { ...chapter, order: nextOrder, title: `第 ${nextOrder} 章` }]
       }
     })
+    if (!saved.ok) return
     setSelectedId(chapter.id)
   }
 
   async function updateChapter(id: ID, patch: Partial<Chapter>) {
-    await saveData((current) => ({
+    if (typeof patch.order === 'number') {
+      return saveData((current) => reorderChapterInAppData(current, id, patch.order as number, now()))
+    }
+    return saveData((current) => ({
       ...current,
       projects: updateProjectTimestamp(current, project.id),
       chapters: current.chapters.map((chapter) => (chapter.id === id ? { ...chapter, ...patch, updatedAt: now() } : chapter))
     }))
   }
 
-  function updateBodyDebounced(id: ID, body: string) {
-    setBodyDraft(body)
-    if (bodySaveTimer.current) clearTimeout(bodySaveTimer.current)
-    bodySaveTimer.current = setTimeout(() => {
-      void updateChapter(id, { body })
-    }, 500)
-  }
-
-  async function flushBody() {
-    if (selected && bodyDraft !== selected.body) {
-      if (bodySaveTimer.current) clearTimeout(bodySaveTimer.current)
-      await updateChapter(selected.id, { body: bodyDraft })
-    }
-  }
-
-  async function deleteChapter(id: ID) {
+  async function archiveChapter(id: ID) {
     const confirmed = await confirmAction({
-      title: '删除章节',
-      message: '确定删除这一章吗？相关草稿、质量报告和修订记录会保留安全兜底，但章节正文会被移除。',
-      confirmLabel: '删除章节',
+      title: '归档章节',
+      message: '归档后，本章不会进入阅读、Prompt 或后续生成，但正文、版本链、提交和审稿记录都会保留，可随时恢复。',
+      confirmLabel: '归档章节',
       tone: 'danger'
     })
     if (!confirmed) return
-    await saveData((current) => {
-      const revisionSessionIds = new Set(current.revisionSessions.filter((session) => session.chapterId === id).map((session) => session.id))
-      return {
-        ...current,
-        projects: updateProjectTimestamp(current, project.id),
-        chapters: current.chapters.filter((chapter) => chapter.id !== id),
-        chapterContinuityBridges: current.chapterContinuityBridges.filter((bridge) => bridge.fromChapterId !== id),
-        characterStateLogs: current.characterStateLogs.map((log) => (log.chapterId === id ? { ...log, chapterId: null } : log)),
-        revisionSessions: current.revisionSessions.filter((session) => session.chapterId !== id),
-        revisionRequests: current.revisionRequests.filter((request) => !revisionSessionIds.has(request.sessionId)),
-        revisionVersions: current.revisionVersions.filter((version) => !revisionSessionIds.has(version.sessionId)),
-        chapterVersions: current.chapterVersions.filter((version) => version.chapterId !== id)
-      }
+    if (!(await flushBody())) return
+    const saved = await saveData((current) => {
+      return archiveChapterInAppData(current, id, now())
     })
+    if (!saved.ok) return
+    pendingSelectionMessage.current = '章节已归档，正文和完整版本链仍然保留。'
     setSelectedId(null)
   }
 
-  async function restoreChapterVersionEntry(entry: ChapterVersionChainEntry) {
-    if (!selected || !entry.version || entry.isCurrent) return
-    if (entry.body === selected.body && bodyDraft === selected.body) {
-      setAiMessage('该历史版本已经是当前正文，无需重复恢复。')
-      return
-    }
-    if (bodyDraft !== selected.body) {
-      const saveFirst = await confirmAction({
-        title: '存在未保存修改',
-        message: '当前编辑区有未保存修改。恢复历史版本前，建议先保存当前正文；保存后系统仍会把恢复动作写成新的版本提交。',
-        confirmLabel: '保存并继续'
-      })
-      if (!saveFirst) return
-      await flushBody()
-    }
-    const confirmed = await confirmAction({
-      title: '恢复历史版本',
-      message: '系统会创建一个新的“历史版本恢复”提交；当前正文不会被永久删除，之后仍可以从版本链恢复回来。',
-      confirmLabel: '创建恢复版本'
+  async function restoreArchivedChapter(chapter: Chapter) {
+    let orderChanged = false
+    const saved = await saveData((current) => {
+      const restored = restoreArchivedChapterInAppData(current, chapter.id, now())
+      orderChanged = restored.orderChanged
+      return restored.data
     })
-    if (!confirmed) return
-    const timestamp = now()
-    const buildCommit = (current: AppData): { next: AppData; bundle: RevisionCommitBundle } => {
-      const bundle = buildRestoreRevisionCommitBundle({
-        appData: current,
-        projectId: project.id,
-        chapterId: selected.id,
-        sourceVersionId: entry.version?.id ?? '',
-        revisionCommitId: newId(),
-        newChapterVersionId: newId(),
-        restoredAt: timestamp,
-        note: `从 ${formatDate(entry.createdAt)} 的历史版本恢复`
-      })
-      return {
-        next: applyRevisionCommitBundleToAppData(current, bundle),
-        bundle
-      }
-    }
-    try {
-      if (saveRevisionCommitBundle) {
-        await saveRevisionCommitBundle(buildCommit)
-      } else {
-        await saveData((current) => buildCommit(current).next)
-      }
-      setBodyDraft(entry.body)
-      setAiMessage('已创建新的恢复版本，原版本链已保留。')
-    } catch (error) {
-      setAiMessage(error instanceof Error ? error.message : '恢复历史版本失败。')
-    }
-  }
-
-  async function deleteChapterVersionEntry(entry: ChapterVersionChainEntry) {
-    if (!entry.version) return
-    await deleteChapterVersion(entry.version)
-  }
-
-  async function copyChapterVersionEntry(entry: ChapterVersionChainEntry) {
-    const base = selected ?? chapters.find((chapter) => chapter.id === entry.chapterId)
-    if (!base) return
-    await window.novelDirector.clipboard.writeText(ExportService.formatChapterAsText({ ...base, title: entry.title, body: entry.body }))
-    setAiMessage('已复制历史版本正文')
-  }
-
-  async function deleteChapterVersion(version: ChapterVersion) {
-    const confirmed = await confirmAction({
-      title: '删除历史版本',
-      message: '确定删除这个章节历史版本吗？',
-      confirmLabel: '删除版本',
-      tone: 'danger'
-    })
-    if (!confirmed) return
-    await saveData((current) => ({
-      ...current,
-      chapterVersions: current.chapterVersions.filter((item) => item.id !== version.id)
-    }))
-  }
-
-  async function copyChapterVersion(version: ChapterVersion) {
-    const base = selected ?? chapters.find((chapter) => chapter.id === version.chapterId)
-    if (!base) return
-    await window.novelDirector.clipboard.writeText(ExportService.formatChapterAsText({ ...base, title: version.title, body: version.body }))
-    setAiMessage('已复制历史版本正文')
+    if (!saved.ok) return
+    pendingSelectionMessage.current = orderChanged ? '章节已恢复；原章序已被占用，因此移动到当前末尾。' : '章节已恢复。'
+    setSelectedId(chapter.id)
   }
 
   async function applyReviewTemplate(chapter: Chapter) {
@@ -326,285 +229,64 @@ export function ChaptersView({ data, project, saveData, saveRevisionCommitBundle
     })
   }
 
-  async function runAIAction<T>(label: string, action: () => Promise<AIResult<T>>, onData: (data: T) => void) {
-    if (!selected) return
-    setLoadingAction(label)
-    setAiMessage('')
-    await flushBody()
-    try {
-      handleAIResult(await action(), onData)
-    } finally {
-      setLoadingAction(null)
-    }
-  }
-
   async function applyReviewField(field: ReviewTextField) {
-    if (!selected || !reviewDraft) return
-    await updateChapter(selected.id, { [field]: reviewDraft[field] } as Partial<Chapter>)
+    if (!selected || !chapterAi.reviewDraft) return
+    const result = await updateChapter(selected.id, { [field]: chapterAi.reviewDraft[field] } as Partial<Chapter>)
+    if (!result.ok) setAiMessage(`应用复盘字段失败：${result.errorMessage}`)
   }
 
   async function applyAllReviewDraft() {
-    if (!selected || !reviewDraft) return
-    const { continuityBridgeSuggestion, characterStateChangeSuggestions: _stateSuggestions, ...chapterReview } = reviewDraft
-    await updateChapter(selected.id, chapterReview)
+    if (!selected || !chapterAi.reviewDraft) return
+    const { continuityBridgeSuggestion, characterStateChangeSuggestions: _stateSuggestions, ...chapterReview } = chapterAi.reviewDraft
+    const result = await updateChapter(selected.id, chapterReview)
+    if (!result.ok) {
+      setAiMessage(`应用章节复盘失败：${result.errorMessage}`)
+      return
+    }
     if (continuityBridgeSuggestion) await saveContinuityBridge(continuityBridgeSuggestion)
   }
 
-  async function saveContinuityBridge(suggestion: ChapterContinuityBridgeSuggestion) {
-    if (!selected) return
-    const timestamp = now()
-    const existing = selectedBridge
-    const bridge: ChapterContinuityBridge = {
-      ...(existing ?? {
-        id: newId(),
-        projectId: project.id,
-        fromChapterId: selected.id,
-        toChapterOrder: selected.order + 1,
-        createdAt: timestamp
-      }),
-      ...suggestion,
-      updatedAt: timestamp
-    }
-    await saveData((current) => ({
-      ...current,
-      projects: updateProjectTimestamp(current, project.id),
-      chapterContinuityBridges: existing
-        ? current.chapterContinuityBridges.map((item) => (item.id === existing.id ? bridge : item))
-        : [bridge, ...current.chapterContinuityBridges]
-    }))
-    setAiMessage('已保存下一章衔接状态。')
-  }
-
-  async function updateContinuityBridgeField(field: keyof ChapterContinuityBridgeSuggestion, value: string) {
-    await saveContinuityBridge({ ...(selectedBridge ?? emptyBridgeSuggestion), [field]: value })
-  }
-
-  async function applyCharacterSuggestion(suggestion: CharacterStateSuggestion) {
-    if (!selected) return
-    const character = scoped.characters.find((item) => item.id === suggestion.characterId)
-    if (!character) return
-    const timestamp = now()
-    const log: CharacterStateLog = {
-      id: newId(),
-      projectId: project.id,
-      characterId: character.id,
-      chapterId: selected.id,
-      chapterOrder: selected.order,
-      note: suggestion.changeSummary,
-      createdAt: timestamp
-    }
-    await saveData((current) => ({
-      ...current,
-      projects: updateProjectTimestamp(current, project.id),
-      characters: current.characters.map((item) =>
-        item.id === character.id
-          ? {
-              ...item,
-              emotionalState: suggestion.newCurrentEmotionalState || item.emotionalState,
-              protagonistRelationship: suggestion.newRelationshipWithProtagonist || item.protagonistRelationship,
-              nextActionTendency: suggestion.newNextActionTendency || item.nextActionTendency,
-              lastChangedChapter: selected.order,
-              updatedAt: timestamp
-            }
-          : item
-      ),
-      characterStateLogs: [...current.characterStateLogs, log]
-    }))
-    setCharacterSuggestions((items) => items.filter((item) => item !== suggestion))
-  }
-
-  async function createStateChangeCandidate(suggestion: CharacterStateChangeSuggestion) {
-    if (!selected) return
-    const character = scoped.characters.find((item) => item.id === suggestion.characterId)
-    if (!character) return
-    const timestamp = now()
-    const existingFact = scoped.characterStateFacts.find(
-      (fact) => fact.characterId === suggestion.characterId && fact.key === suggestion.key && fact.status === 'active'
-    )
-    const proposedFact: CharacterStateFact = {
-      id: existingFact?.id ?? newId(),
-      projectId: project.id,
-      characterId: suggestion.characterId,
-      category: suggestion.category,
-      key: suggestion.key,
-      label: suggestion.label,
-      valueType: Array.isArray(suggestion.afterValue) ? 'list' : typeof suggestion.afterValue === 'number' ? 'number' : 'text',
-      value: suggestion.afterValue ?? existingFact?.value ?? '',
-      unit: existingFact?.unit ?? '',
-      linkedCardFields: suggestion.linkedCardFields,
-      trackingLevel: suggestion.category === 'relationship' || suggestion.category === 'status' ? 'soft' : 'hard',
-      promptPolicy: 'when_relevant',
-      status: 'active',
-      sourceChapterId: selected.id,
-      sourceChapterOrder: selected.order,
-      evidence: suggestion.evidence,
-      confidence: suggestion.confidence,
-      createdAt: existingFact?.createdAt ?? timestamp,
-      updatedAt: timestamp
-    }
-    const proposedTransaction: CharacterStateTransaction = {
-      id: newId(),
-      projectId: project.id,
-      characterId: suggestion.characterId,
-      factId: proposedFact.id,
-      chapterId: selected.id,
-      chapterOrder: selected.order,
-      transactionType: suggestion.suggestedTransactionType,
-      beforeValue: suggestion.beforeValue ?? existingFact?.value ?? null,
-      afterValue: suggestion.afterValue,
-      delta: suggestion.delta,
-      reason: suggestion.evidence,
-      evidence: suggestion.evidence,
-      source: 'chapter_review',
-      status: 'pending',
-      createdAt: timestamp,
-      updatedAt: timestamp
-    }
-    const candidate: CharacterStateChangeCandidate = {
-      id: newId(),
-      projectId: project.id,
-      characterId: suggestion.characterId,
-      chapterId: selected.id,
-      chapterOrder: selected.order,
-      candidateType: suggestion.changeType,
-      targetFactId: existingFact?.id ?? null,
-      proposedFact,
-      proposedTransaction,
-      beforeValue: suggestion.beforeValue ?? existingFact?.value ?? null,
-      afterValue: suggestion.afterValue,
-      evidence: suggestion.evidence,
-      confidence: suggestion.confidence,
-      riskLevel: suggestion.riskLevel,
-      status: 'pending',
-      createdAt: timestamp,
-      updatedAt: timestamp
-    }
-    await saveData((current) => ({
-      ...current,
-      projects: updateProjectTimestamp(current, project.id),
-      characterStateChangeCandidates: [candidate, ...current.characterStateChangeCandidates]
-    }))
-    setAiMessage(`已加入 ${character.name} 的状态变化候选。`)
-  }
-
-  async function applyForeshadowingCandidate(candidate: ForeshadowingCandidate, status: ForeshadowingStatus = 'unresolved') {
-    if (!selected) return
-    const timestamp = now()
-    const item: Foreshadowing = {
-      id: newId(),
-      projectId: project.id,
-      title: candidate.title,
-      firstChapterOrder: candidate.firstChapterOrder ?? selected.order,
-      description: candidate.description,
-      status,
-      weight: candidate.suggestedWeight,
-      treatmentMode: normalizeTreatmentMode(candidate.recommendedTreatmentMode, status, candidate.suggestedWeight),
-      expectedPayoff: candidate.expectedPayoff,
-      payoffMethod: '',
-      relatedCharacterIds: candidate.relatedCharacterIds,
-      relatedMainPlot: '',
-      notes: candidate.notes,
-      actualPayoffChapter: null,
-      createdAt: timestamp,
-      updatedAt: timestamp
-    }
-    await saveData((current) => ({
-      ...current,
-      projects: updateProjectTimestamp(current, project.id),
-      foreshadowings: [...current.foreshadowings, item]
-    }))
-  }
-
-  async function applyStatusChange(change: ForeshadowingStatusChangeSuggestion) {
-    if (!selected) return
-    await saveData((current) => ({
-      ...current,
-      projects: updateProjectTimestamp(current, project.id),
-      foreshadowings: current.foreshadowings.map((item) =>
-        item.id === change.foreshadowingId
-          ? {
-              ...item,
-              status: change.suggestedStatus,
-              actualPayoffChapter: change.suggestedStatus === 'resolved' ? selected.order : item.actualPayoffChapter,
-              notes: [item.notes, change.notes || change.evidenceText].filter(Boolean).join('\n'),
-              updatedAt: now()
-            }
-          : item
-      )
-    }))
-  }
-
-  function nextSuggestionsAsRiskText(suggestions: NextChapterSuggestions): string {
-    return [
-      '下一章风险提醒：',
-      `- 下一章目标：${suggestions.nextChapterGoal}`,
-      `- 必须推进的冲突：${suggestions.conflictToPush}`,
-      `- 必须保留的悬念：${suggestions.suspenseToKeep}`,
-      `- 可轻推伏笔：${suggestions.foreshadowingToHint}`,
-      `- 不要提前揭示：${suggestions.foreshadowingNotToReveal}`,
-      `- 建议结尾钩子：${suggestions.suggestedEndingHook}`,
-      `- 读者情绪目标：${suggestions.readerEmotionTarget}`
-    ].join('\n')
-  }
-
-  function selectedChapterWithDraft(): Chapter | null {
-    return selected ? { ...selected, body: bodyDraft } : null
-  }
-
-  async function copyChapterBody(includeTitle = false) {
-    const chapter = selectedChapterWithDraft()
-    if (!chapter) return
-    if (!chapter.body.trim()) {
-      setAiMessage('当前章节正文为空')
-      return
-    }
-    const content = includeTitle ? ExportService.formatChapterAsText(chapter) : chapter.body
-    await window.novelDirector.clipboard.writeText(content)
-    setAiMessage(includeTitle ? '已复制章节标题 + 正文' : '已复制正文')
-  }
-
-  async function exportCurrentChapter(format: 'txt' | 'md') {
-    const chapter = selectedChapterWithDraft()
-    if (!chapter) return
-    if (!chapter.body.trim()) {
-      setAiMessage('当前章节正文为空')
-      return
-    }
-    await flushBody()
-    const content = format === 'txt' ? ExportService.formatChapterAsText(chapter) : ExportService.formatChapterAsMarkdown(chapter)
-    const fileName = ExportService.defaultChapterFileName(chapter, format)
-    const result =
-      format === 'txt'
-        ? await window.novelDirector.export.saveTextFile(content, fileName)
-        : await window.novelDirector.export.saveMarkdownFile(content, fileName)
-    if (!result.canceled) {
-      setAiMessage(`已导出：${result.filePath}`)
-    }
-  }
-
-  async function exportAllChapters(format: 'txt' | 'md') {
-    if (chapters.length === 0) {
-      setAiMessage('当前项目暂无章节可导出')
-      return
-    }
-    await flushBody()
-    const currentBody = selected ? { [selected.id]: bodyDraft } : {}
-    const exportChapters = chapters.map((chapter) => ({ ...chapter, body: currentBody[chapter.id] ?? chapter.body }))
-    const content =
-      format === 'txt'
-        ? ExportService.formatAllChaptersAsText(exportChapters)
-        : ExportService.formatAllChaptersAsMarkdown(project, exportChapters)
-    const fileName = ExportService.defaultAllChaptersFileName(project, format)
-    const result =
-      format === 'txt'
-        ? await window.novelDirector.export.saveTextFile(content, fileName)
-        : await window.novelDirector.export.saveMarkdownFile(content, fileName)
-    if (!result.canceled) {
-      setAiMessage(`已导出全部章节：${result.filePath}`)
-    }
-  }
-
-  const selectedChapterVersionChain = selected ? getChapterVersionChain(data, selected.id) : []
+  const { saveContinuityBridge, updateContinuityBridgeField } = useChapterContinuityActions({
+    selected,
+    selectedBridge,
+    project,
+    saveData,
+    setAiMessage
+  })
+  const { copyChapterBody, exportCurrentChapter, exportAllChapters } = useChapterExportActions({
+    chapters,
+    selected,
+    bodyDraft,
+    project,
+    flushBody,
+    setAiMessage
+  })
+  const { applyCharacterSuggestion, createStateChangeCandidate } = useChapterCharacterActions({
+    selected,
+    project,
+    characters: scoped.characters,
+    characterStateFacts: scoped.characterStateFacts,
+    saveData,
+    setCharacterSuggestions: chapterAi.setCharacterSuggestions,
+    setAiMessage
+  })
+  const { applyForeshadowingCandidate, applyStatusChange } = useChapterForeshadowingActions({
+    selected,
+    project,
+    saveData
+  })
+  const { copyChapterVersionEntry, restoreChapterVersionEntry, deleteChapterVersionEntry } = useChapterVersionActions({
+    chapters,
+    selected,
+    bodyDraft,
+    project,
+    saveData,
+    saveRevisionCommitBundle,
+    confirmAction,
+    flushBody,
+    replaceWithPersistedBody,
+    setAiMessage
+  })
   const bodyCharacterCount = bodyDraft.replace(/\s/g, '').length
   const paragraphCount = bodyDraft.trim() ? bodyDraft.split(/\n+/).filter((line) => line.trim()).length : 0
   const reviewFilledCount = selected
@@ -616,6 +298,21 @@ export function ChaptersView({ data, project, saveData, saveRevisionCommitBundle
       ? '写作中'
       : '未开始'
 
+  async function openReader() {
+    if (!(await flushBody())) return
+    onOpenReader?.(selected?.id ?? null)
+  }
+
+  async function confirmKeepLocalBody() {
+    const confirmed = await confirmAction({
+      title: '覆盖外部正文',
+      message: '这会用当前编辑区内容覆盖其他流程刚保存的正文。请确认你已经理解两份内容的差异；版本历史中的正式提交不会被删除。',
+      confirmLabel: '保留本地并覆盖',
+      tone: 'danger'
+    })
+    if (confirmed) await keepLocalBody()
+  }
+
   return (
     <div className="chapters-view">
       <Header
@@ -623,6 +320,7 @@ export function ChaptersView({ data, project, saveData, saveRevisionCommitBundle
         description="左侧管理章节脉络，中间沉浸写作，右侧沉淀可进入长期记忆的复盘信息。"
         actions={
           <>
+            <button className="ghost-button" onClick={() => void openReader()}>连贯阅读</button>
             <button className="ghost-button" onClick={() => exportAllChapters('txt')}>导出全部 TXT</button>
             <button className="ghost-button" onClick={() => exportAllChapters('md')}>导出全部 MD</button>
             <button className="primary-button" onClick={addChapter}>新增章节</button>
@@ -632,13 +330,19 @@ export function ChaptersView({ data, project, saveData, saveRevisionCommitBundle
       <section className="split-layout chapter-workbench">
         <ChapterListPanel
           chapters={chapterListItems}
+          archivedChapters={archivedChapterListItems}
           selectedChapterId={selected?.id ?? null}
           activeBodyCharacterCount={bodyCharacterCount}
           onSelectChapter={(chapter) => {
-            void flushBody().then(() => setSelectedId(chapter.id))
+            void flushBody().then((saved) => {
+              if (saved) setSelectedId(chapter.id)
+            })
+          }}
+          onRestoreChapter={(chapter) => {
+            void restoreArchivedChapter(chapter)
           }}
         />
-        <div className="editor-pane">
+        <div className={`editor-pane${showReviewPanel ? ' with-review-panel' : ''}`}>
           {!selected ? (
             <EmptyState title="暂无章节" description="创建章节后，可以在这里写正文并填写复盘字段。" />
           ) : (
@@ -651,24 +355,30 @@ export function ChaptersView({ data, project, saveData, saveRevisionCommitBundle
                 reviewFilledCount={reviewFilledCount}
                 reviewFieldCount={reviewFields.length}
                 chapterStatus={chapterStatus}
-                loadingAction={loadingAction}
+                bodySaveStatus={bodySaveStatus}
+                hasBodyConflict={Boolean(bodyConflict)}
+                loadingAction={chapterAi.loadingAction}
                 aiMessage={aiMessage}
+                getAiService={chapterAi.getAiService}
+                aiRewriteContext={buildChapterContext}
+                onAiRewriteStatus={setAiMessage}
                 showVersionHistory={showVersionHistory}
-                versionCount={Math.max(0, selectedChapterVersionChain.length - 1)}
+                showReviewPanel={showReviewPanel}
                 versionHistory={
-                  <ChapterVersionHistoryPanel
-                    data={data}
-                    selected={selected}
-                    entries={selectedChapterVersionChain}
-                    onCopyVersion={copyChapterVersionEntry}
-                    onRestoreVersion={restoreChapterVersionEntry}
-                    onDeleteVersion={deleteChapterVersionEntry}
-                  />
+                  <Suspense fallback={<ChapterPanelLoading label="版本历史" />}>
+                    <ChapterVersionHistoryPanel
+                      key={selected.id}
+                      data={data}
+                      selected={selected}
+                      onCopyVersion={copyChapterVersionEntry}
+                      onRestoreVersion={restoreChapterVersionEntry}
+                      onDeleteVersion={deleteChapterVersionEntry}
+                    />
+                  </Suspense>
                 }
-                onUpdateChapter={(patch) => {
-                  void updateChapter(selected.id, patch)
-                }}
-                onBodyChange={(body) => updateBodyDebounced(selected.id, body)}
+                onUpdateChapter={(patch) => updateChapter(selected.id, patch)}
+                onBodyChange={updateBodyDraft}
+                onApplyRewrite={async (body) => { updateBodyDraft(body); return flushBody() }}
                 onBodyBlur={() => {
                   void flushBody()
                 }}
@@ -685,79 +395,76 @@ export function ChaptersView({ data, project, saveData, saveRevisionCommitBundle
                   void exportCurrentChapter('md')
                 }}
                 onToggleVersionHistory={() => setShowVersionHistory((value) => !value)}
+                onToggleReviewPanel={() => setShowReviewPanel((value) => !value)}
                 onApplyReviewTemplate={() => {
                   void applyReviewTemplate(selected)
                 }}
-                onGenerateReview={() =>
-                  runAIAction('review', () => aiService.generateChapterReview(chapterText(), buildChapterContext()), setReviewDraft)
-                }
-                onExtractCharacters={() =>
-                  runAIAction(
-                    'characters',
-                    () => aiService.updateCharacterStates(chapterText(), scoped.characters, buildChapterContext()),
-                    setCharacterSuggestions
-                  )
-                }
-                onExtractForeshadowing={() =>
-                  runAIAction(
-                    'foreshadowing',
-                    () => aiService.extractForeshadowing(chapterText(), scoped.foreshadowings, buildChapterContext(), scoped.characters),
-                    setForeshadowingDraft
-                  )
-                }
-                onGenerateNextRisk={() =>
-                  runAIAction('next', () => aiService.generateNextChapterSuggestions(selected, buildChapterContext()), setNextSuggestions)
-                }
-                onDeleteChapter={() => {
-                  void deleteChapter(selected.id)
+                onGenerateReview={() => void chapterAi.actions.generateReview()}
+                onExtractCharacters={() => void chapterAi.actions.extractCharacters()}
+                onExtractForeshadowing={() => void chapterAi.actions.extractForeshadowing()}
+                onGenerateNextRisk={() => void chapterAi.actions.generateNextRisk()}
+                onArchiveChapter={() => {
+                  void archiveChapter(selected.id)
                 }}
+                onUseExternalBody={useExternalBody}
+                onKeepLocalBody={() => void confirmKeepLocalBody()}
               />
 
-              <ChapterAIDraftPanels
-                selectedOrder={selected.order}
-                rawAIText={rawAIText}
-                reviewDraft={reviewDraft}
-                reviewFields={reviewFields}
-                characters={scoped.characters}
-                characterSuggestions={characterSuggestions}
-                foreshadowings={scoped.foreshadowings}
-                foreshadowingDraft={foreshadowingDraft}
-                nextSuggestions={nextSuggestions}
-                onSetReviewDraft={setReviewDraft}
-                onApplyAllReviewDraft={applyAllReviewDraft}
-                onApplyReviewField={applyReviewField}
-                onSaveContinuityBridge={(suggestion) => {
-                  void saveContinuityBridge(suggestion)
-                }}
-                onApplyCharacterSuggestion={(suggestion) => {
-                  void applyCharacterSuggestion(suggestion)
-                }}
-                onCreateStateChangeCandidate={(suggestion) => {
-                  void createStateChangeCandidate(suggestion)
-                }}
-                onApplyForeshadowingCandidate={(candidate, status) => {
-                  void applyForeshadowingCandidate(candidate, status)
-                }}
-                onApplyStatusChange={(change) => {
-                  void applyStatusChange(change)
-                }}
-                onSetNextSuggestions={setNextSuggestions}
-                onApplyNextSuggestions={() => {
-                  void updateChapter(selected.id, { riskWarnings: nextSuggestions ? nextSuggestionsAsRiskText(nextSuggestions) : '' })
-                }}
-              />
+              {chapterAi.hasOutput ? (
+                <Suspense fallback={<ChapterPanelLoading label="AI 草稿" />}>
+                  <ChapterAIDraftPanels
+                    selectedOrder={selected.order}
+                    rawAIText={chapterAi.rawAIText}
+                    reviewDraft={chapterAi.reviewDraft}
+                    reviewFields={reviewFields}
+                    characters={scoped.characters}
+                    characterSuggestions={chapterAi.characterSuggestions}
+                    foreshadowings={scoped.foreshadowings}
+                    foreshadowingDraft={chapterAi.foreshadowingDraft}
+                    nextSuggestions={chapterAi.nextSuggestions}
+                    onSetReviewDraft={chapterAi.setReviewDraft}
+                    onApplyAllReviewDraft={applyAllReviewDraft}
+                    onApplyReviewField={applyReviewField}
+                    onSaveContinuityBridge={(suggestion) => {
+                      void saveContinuityBridge(suggestion)
+                    }}
+                    onApplyCharacterSuggestion={(suggestion) => {
+                      void applyCharacterSuggestion(suggestion)
+                    }}
+                    onCreateStateChangeCandidate={(suggestion) => {
+                      void createStateChangeCandidate(suggestion)
+                    }}
+                    onApplyForeshadowingCandidate={(candidate, status) => {
+                      void applyForeshadowingCandidate(candidate, status)
+                    }}
+                    onApplyStatusChange={(change) => {
+                      void applyStatusChange(change)
+                    }}
+                    onSetNextSuggestions={chapterAi.setNextSuggestions}
+                    onApplyNextSuggestions={() => {
+                      void updateChapter(selected.id, {
+                        riskWarnings: chapterAi.nextSuggestions ? formatNextSuggestionsAsRiskText(chapterAi.nextSuggestions) : ''
+                      })
+                    }}
+                  />
+                </Suspense>
+              ) : null}
 
-              <ChapterReviewPanel
-                selected={selected}
-                selectedBridge={selectedBridge}
-                reviewFields={reviewFields}
-                onUpdateChapter={(patch) => {
-                  void updateChapter(selected.id, patch)
-                }}
-                onUpdateContinuityBridgeField={(field, value) => {
-                  void updateContinuityBridgeField(field, value)
-                }}
-              />
+              {showReviewPanel ? (
+                <Suspense fallback={<ChapterPanelLoading label="本章复盘" />}>
+                  <ChapterReviewPanel
+                    selected={selected}
+                    selectedBridge={selectedBridge}
+                    reviewFields={reviewFields}
+                    onUpdateChapter={(patch) => {
+                      void updateChapter(selected.id, patch)
+                    }}
+                    onUpdateContinuityBridgeField={(field, value) => {
+                      void updateContinuityBridgeField(field, value)
+                    }}
+                  />
+                </Suspense>
+              ) : null}
             </>
           )}
         </div>

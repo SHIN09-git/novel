@@ -183,15 +183,16 @@ export const validateChapterReviewSchema: AISchemaValidator = (value) =>
 
 export const validateCharacterSuggestionsSchema: AISchemaValidator = (value) => {
   const list = Array.isArray(value) ? value : asRecord(value)?.suggestions
+  const basePath = Array.isArray(value) ? '$' : '$.suggestions'
   const issues: AISchemaIssue[] = []
   if (!Array.isArray(list)) return result('角色状态更新', [issue('$.suggestions', '必须是数组。')])
   list.forEach((item, index) => {
     const obj = asRecord(item)
     if (!obj) {
-      issues.push(issue(`$.suggestions[${index}]`, '必须是对象。'))
+      issues.push(issue(`${basePath}[${index}]`, '必须是对象。'))
       return
     }
-    issues.push(...requireStringFields(obj, ['characterId', 'changeSummary'], `$.suggestions[${index}]`))
+    issues.push(...requireStringFields(obj, ['characterId', 'changeSummary'], `${basePath}[${index}]`))
   })
   return result('角色状态更新', issues)
 }
@@ -241,6 +242,30 @@ export const validateChapterPlanSchema: AISchemaValidator = (value) =>
       'forbiddenNovelty'
     ])
   )
+
+function nestedIssues(prefix: string, validation: AISchemaValidationResult): AISchemaIssue[] {
+  return validation.issues.map((item) => ({
+    ...item,
+    path: item.path === '$' ? prefix : `${prefix}${item.path.slice(1)}`
+  }))
+}
+
+export const validatePostDraftAnalysisSchema: AISchemaValidator = (value) =>
+  validateObjectSchema(value, '统一章节生成后分析', (obj) => {
+    const issues = [
+      ...nestedIssues('$.chapterReview', validateChapterReviewSchema(obj.chapterReview)),
+      ...nestedIssues('$.characterSuggestions', validateCharacterSuggestionsSchema(obj.characterSuggestions)),
+      ...nestedIssues(
+        '$.foreshadowingExtraction',
+        validateForeshadowingExtractionSchema(obj.foreshadowingExtraction)
+      )
+    ]
+    const chapterReview = asRecord(obj.chapterReview)
+    if (chapterReview && !Array.isArray(chapterReview.characterStateChangeSuggestions)) {
+      issues.push(issue('$.chapterReview.characterStateChangeSuggestions', '统一分析必须包含角色硬状态候选数组。'))
+    }
+    return issues
+  })
 
 export const validateChapterDraftSchema: AISchemaValidator = (value) =>
   validateObjectSchema(value, '章节正文草稿', (obj) => {

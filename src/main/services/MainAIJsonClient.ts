@@ -9,11 +9,12 @@ import type { IAIService } from './AIService'
 export class MainAIJsonClient implements AIJsonClient {
   constructor(
     private readonly settings: AppSettings,
-    private readonly aiTransport: IAIService
+    private readonly aiTransport: IAIService,
+    private readonly runId?: string
   ) {}
 
   private hasApiConfig(): boolean {
-    return this.settings.apiProvider === 'local' || this.settings.hasApiKey
+    return this.settings.apiProvider === 'local' || this.settings.apiProvider === 'codex_cli' || this.settings.hasApiKey
   }
 
   async requestJson<T>(
@@ -29,6 +30,7 @@ export class MainAIJsonClient implements AIJsonClient {
     try {
       const request: ChatCompletionRequest = {
         settings: this.settings,
+        runId: this.runId,
         messages: [
           { role: 'system', content: systemPrompt },
           { role: 'user', content: userPrompt }
@@ -36,7 +38,13 @@ export class MainAIJsonClient implements AIJsonClient {
       }
       const response = await this.aiTransport.chatCompletion(request)
       if (!response.ok || !response.content) {
-        return { ok: false, usedAI: true, data: null, error: response.error || 'AI 调用失败。' }
+        return {
+          ok: false,
+          usedAI: true,
+          data: null,
+          error: response.error || 'AI 调用失败。',
+          telemetry: response.telemetry
+        }
       }
       if (isTruncatedFinishReason(response.finishReason)) {
         return {
@@ -45,6 +53,7 @@ export class MainAIJsonClient implements AIJsonClient {
           data: null,
           rawText: response.content,
           finishReason: response.finishReason,
+          telemetry: response.telemetry,
           error: 'AI 输出被 max tokens 截断。请提高 Max Tokens，或降低章节预计字数后重试。'
         }
       }
@@ -58,7 +67,8 @@ export class MainAIJsonClient implements AIJsonClient {
           usedAI: true,
           data: normalize(parsed.data),
           rawText: response.content,
-          finishReason: response.finishReason
+          finishReason: response.finishReason,
+          telemetry: response.telemetry
         }
       } catch (error) {
         const fallbackData = parseFallback?.(response.content)
@@ -69,6 +79,7 @@ export class MainAIJsonClient implements AIJsonClient {
             data: fallbackData,
             rawText: response.content,
             finishReason: response.finishReason,
+            telemetry: response.telemetry,
             parseError: normalizeAIError(error),
             error: 'AI 没有返回严格 JSON，已使用可恢复解析结果。'
           }
@@ -79,6 +90,7 @@ export class MainAIJsonClient implements AIJsonClient {
           data: null,
           rawText: response.content,
           finishReason: response.finishReason,
+          telemetry: response.telemetry,
           parseError: normalizeAIError(error),
           error: normalizeAIError(error)
         }

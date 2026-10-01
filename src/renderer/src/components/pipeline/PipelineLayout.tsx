@@ -15,7 +15,7 @@ export function PipelineLayout({
     <div className="pipeline-shell">
       <div className="pipeline-top-status">{topBar}</div>
       <div className="pipeline-console-grid">
-        <aside className="pipeline-sidebar">{sidebar}</aside>
+        <aside className="pipeline-sidebar" aria-label="流水线工具">{sidebar}</aside>
         <main className="pipeline-main">{main}</main>
         <aside className="pipeline-inspector">{inspector}</aside>
       </div>

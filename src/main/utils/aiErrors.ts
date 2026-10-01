@@ -12,6 +12,24 @@ export class AiHttpError extends Error {
   }
 }
 
+export class AiRequestCancelledError extends Error {
+  readonly code = 'AI_REQUEST_CANCELLED'
+
+  constructor() {
+    super('用户已取消 AI 请求。可从最后成功步骤继续重试。')
+    this.name = 'AiRequestCancelledError'
+  }
+}
+
+export class AiRequestTimeoutError extends Error {
+  readonly code = 'AI_REQUEST_TIMEOUT'
+
+  constructor(readonly timeoutMs: number) {
+    super(`AI 请求超过 ${Math.ceil(timeoutMs / 1000)} 秒硬超时，已自动终止。可切换模型或从当前步骤重试。`)
+    this.name = 'AiRequestTimeoutError'
+  }
+}
+
 function errorCode(error: unknown): string {
   if (!error || typeof error !== 'object') return ''
   const record = error as Record<string, unknown>
@@ -32,6 +50,8 @@ function httpStatus(error: unknown): number | null {
 }
 
 export function isRetryableAiError(error: unknown): boolean {
+  if (error instanceof AiRequestCancelledError) return false
+  if (error instanceof AiRequestTimeoutError) return true
   const status = httpStatus(error)
   if (status !== null) {
     if ([400, 401, 403, 413].includes(status)) return false
@@ -47,6 +67,8 @@ export function isRetryableAiError(error: unknown): boolean {
 }
 
 export function describeAiRetryError(error: unknown): string {
+  if (error instanceof AiRequestCancelledError) return error.code
+  if (error instanceof AiRequestTimeoutError) return `${error.code}:${error.timeoutMs}`
   if (error instanceof AiHttpError) return `HTTP ${error.status}`
   const code = errorCode(error)
   if (code) return code

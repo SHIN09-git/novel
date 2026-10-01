@@ -1,6 +1,7 @@
-type NovelDirectorBridge = Window['novelDirector']
+type NovelDirectorBridge = NonNullable<Window['novelDirector']>
 
 function readBridge(): NovelDirectorBridge | undefined {
+  if (typeof window === 'undefined') return undefined
   return (window as Window & { novelDirector?: NovelDirectorBridge }).novelDirector
 }
 
@@ -50,4 +51,42 @@ export function getNovelDirectorCredentialsApi(): NovelDirectorBridge['credentia
     throw new Error('凭据桥接未加载。请重新启动应用，或重新构建安装包。')
   }
   return credentials
+}
+
+export function getNovelDirectorExportApi(): NovelDirectorBridge['export'] {
+  const exportApi = getNovelDirectorBridge().export
+  if (!exportApi?.saveTextFile || !exportApi.saveMarkdownFile) {
+    throw new Error('导出桥接未加载。请重新启动应用，或重新构建安装包。')
+  }
+  return exportApi
+}
+
+export function getNovelDirectorClipboardApi(): NovelDirectorBridge['clipboard'] {
+  const clipboard = getNovelDirectorBridge().clipboard
+  if (!clipboard?.writeText) {
+    throw new Error('剪贴板桥接未加载。请重新启动应用，或重新构建安装包。')
+  }
+  return clipboard
+}
+
+export function getNovelDirectorDiagnosticsApi(): NovelDirectorBridge['diagnostics'] {
+  const diagnostics = getNovelDirectorBridge().diagnostics
+  if (!diagnostics?.analyzeRedundancy || !diagnostics.auditNovelty || !diagnostics.evaluateQualityGate) {
+    throw new Error('诊断桥接未加载。请重新启动应用，或重新构建安装包。')
+  }
+  return diagnostics
+}
+
+export function getNovelDirectorAiApi(): NovelDirectorBridge['ai'] {
+  const ai = getNovelDirectorBridge().ai
+  if (!ai?.chatCompletion || !ai.cancelRun) {
+    throw new Error('AI 桥接未加载。请重新启动应用，或重新构建安装包。')
+  }
+  return ai
+}
+
+export function getNovelDirectorAgentAuthorizationApi(): NovelDirectorBridge['agentAuthorization'] | null {
+  const authorization = readBridge()?.agentAuthorization
+  if (typeof authorization?.list !== 'function' || typeof authorization.grant !== 'function' || typeof authorization.revoke !== 'function') return null
+  return authorization
 }

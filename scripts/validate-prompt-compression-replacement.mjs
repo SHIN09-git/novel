@@ -2,8 +2,9 @@ import { mkdir, readFile, rm, writeFile } from 'node:fs/promises'
 import { dirname, join, resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import ts from 'typescript'
+import { repoRoot } from './utils/repo-root.mjs'
 
-const root = resolve('.')
+const root = repoRoot
 const outDir = join(root, 'tmp', 'prompt-compression-replacement-test')
 
 function assert(condition, message, details = {}) {
@@ -37,16 +38,24 @@ async function compileTsTree(files) {
 
 async function loadModules() {
   await compileTsTree([
+    'src/shared/chapterText.ts',
     'src/shared/foreshadowingTreatment.ts',
     'src/services/TokenEstimator.ts',
     'src/services/ContinuityService.ts',
     'src/services/CharacterStateService.ts',
+    'src/services/characterState/logInference.ts',
+    'src/services/characterState/stateMutations.ts',
+    'src/services/characterState/stateSelection.ts',
+    'src/services/characterState/stateValidation.ts',
+    'src/services/characterState/stateValue.ts',
     'src/services/StageSummaryService.ts',
     'src/services/ContextCompressionService.ts',
     'src/services/contextBudget/types.ts',
     'src/services/contextBudget/scoringEngine.ts',
     'src/services/contextBudget/selectionEngine.ts',
+    'src/services/contextBudget/selectionFinalizer.ts',
     'src/services/contextBudget/traceBuilder.ts',
+    'src/services/ChapterLifecycleService.ts',
     'src/services/ContextBudgetManager.ts',
     'src/services/StoryDirectionService.ts',
     'src/services/HardCanonPackService.ts',
@@ -231,10 +240,24 @@ async function main() {
   checks.push(
     assert(
       stageRecord?.replacementKind === 'stage_summary' &&
+        stageRecord.reasonCode === 'compressed_replacement' &&
         stageRecord.originalTokenEstimate > stageRecord.replacementTokenEstimate &&
         stageRecord.savedTokenEstimate > 0,
       'budget pressure replaces old detailed recap with covering stage summary',
       { records: tightSelection.compressionRecords }
+    )
+  )
+  const compressedChapterTrace = tightSelection.contextSelectionTrace?.selectedBlocks.find(
+    (block) => block.blockType === 'chapter' && block.sourceId === 'chapter-2'
+  )
+  checks.push(
+    assert(
+      compressedChapterTrace?.compressed === true &&
+        compressedChapterTrace.reasonCode === 'compressed_replacement' &&
+        compressedChapterTrace.replacementSourceId === 'stage-1-3' &&
+        compressedChapterTrace.tokenEstimate === stageRecord?.replacementTokenEstimate,
+      'selection trace records the replacement block and its actual token cost instead of claiming a full recap',
+      compressedChapterTrace
     )
   )
   checks.push(
@@ -311,6 +334,18 @@ async function main() {
       dropSelection.compressionRecords
     )
   )
+  checks.push(
+    assert(
+      dropSelection.omittedItems.some(
+        (item) => item.id === 'chapter-2' && item.reasonCode === 'budget_exceeded'
+      ) &&
+        dropSelection.contextSelectionTrace?.droppedBlocks.some(
+          (block) => block.sourceId === 'chapter-2' && block.reasonCode === 'budget_exceeded'
+        ),
+      'unreplaceable recap removal is exposed as a budget_exceeded drop in selection and trace',
+      dropSelection
+    )
+  )
 
   const manualBase = {
     selectedStoryBibleFields: [],
@@ -356,8 +391,12 @@ async function main() {
     await readFile(join(root, 'src/renderer/src/views/generation/pipelineSteps/chapterGeneration.ts'), 'utf-8')
   ].join('\n')
   const generationViewSource = await readFile(join(root, 'src/renderer/src/views/GenerationPipelineView.tsx'), 'utf-8')
+  const revisionActionsSource = [
+    await readFile(join(root, 'src/renderer/src/views/generation/usePipelineRevisionActions.ts'), 'utf-8'),
+    await readFile(join(root, 'src/renderer/src/views/generation/pipelineRevisionActionHandlers.ts'), 'utf-8')
+  ].join('\n')
   const revisionContextSource = await readFile(join(root, 'src/renderer/src/views/generation/revisionCandidateContext.ts'), 'utf-8')
-  const tracePanelSource = await readFile(join(root, 'src/renderer/src/views/generation/RunTracePanel.tsx'), 'utf-8')
+  const tracePanelSource = await readFile(join(root, 'src/renderer/src/components/pipeline/PipelineTracePanel.tsx'), 'utf-8')
 
   checks.push(assert(compressionSource.includes('compressChapterRecapsForBudget'), 'compression service exposes deterministic chapter recap compression'))
   checks.push(assert(promptBuilderSource.includes('formatCompressedChapterRecap') && promptBuilderSource.includes('compressionByChapterId'), 'PromptBuilderService renders compressed replacements in explicit selection mode'))
@@ -379,9 +418,10 @@ async function main() {
   checks.push(assert(runnerSource.includes('promptBlockOrder,'), 'Run Trace records promptBlockOrder alongside compressionRecords'))
   checks.push(
     assert(
-      generationViewSource.includes('upsertGenerationRunTraceByJobId') &&
-        generationViewSource.includes('compressionRecords: revisionContext.compressionRecords') &&
-        generationViewSource.includes("import('./generation/revisionCandidateContext')") &&
+      generationViewSource.includes('usePipelineRevisionActions') &&
+        revisionActionsSource.includes('upsertGenerationRunTraceByJobId') &&
+        revisionActionsSource.includes('compressionRecords: revisionContext.compressionRecords') &&
+        revisionActionsSource.includes("import('./revisionCandidateContext')") &&
         revisionContextSource.includes('buildPipelineContextFromSelection(project, data, targetOrder'),
       'quality gate revision candidate context rebuild uses explicit selection and records compressionRecords when rebuilt'
     )

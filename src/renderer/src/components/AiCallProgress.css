@@ -1,0 +1,68 @@
+.ai-call-progress {
+  display: grid;
+  flex: 1 1 260px;
+  gap: 3px;
+  min-width: 0;
+}
+
+.ai-call-progress-primary {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 10px;
+}
+
+.ai-call-progress-primary strong {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--color-text-primary);
+  font-size: 0.9rem;
+}
+
+/* Live-work cue: a breathing dot beside the label and a sweeping hairline under it. */
+.ai-call-progress[data-running] .ai-call-progress-primary strong::before {
+  content: "";
+  width: 7px;
+  height: 7px;
+  flex: 0 0 auto;
+  border-radius: 999px;
+  color: var(--color-accent);
+  background: currentColor;
+  animation: nd-pulse-ring 1.2s var(--ease-out) infinite;
+}
+
+.ai-call-progress[data-running]::after {
+  content: "";
+  display: block;
+  height: 2px;
+  margin-top: 4px;
+  border-radius: 999px;
+  background:
+    linear-gradient(90deg, transparent, var(--color-accent), transparent) 0 0 / 40% 100% no-repeat,
+    color-mix(in srgb, var(--color-accent) 14%, transparent);
+  animation: ai-call-sweep 1.6s var(--ease-in-out) infinite;
+}
+
+@keyframes ai-call-sweep {
+  from { background-position: -60% 0, 0 0; }
+  to { background-position: 160% 0, 0 0; }
+}
+
+.ai-call-progress-primary span,
+.ai-call-progress small {
+  color: var(--color-text-muted);
+  font-size: 0.82rem;
+}
+
+.ai-call-progress small {
+  line-height: 1.45;
+}
+
+@media (max-width: 640px) {
+  .ai-call-progress-primary {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 2px;
+  }
+}

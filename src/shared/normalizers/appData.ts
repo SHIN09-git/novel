@@ -1,10 +1,13 @@
+import { normalizeCandidateDecisionReceipts } from './candidateDecision'
+import { normalizeQuickRewriteDrafts } from './quickRewrite'
 import type {
   AppData,
   AppSettings,
   ChapterCommitBundle,
-  ChapterTask,
+  Chapter,
   ChapterContinuityBridge,
   ChapterGenerationJob,
+  ChapterGenerationStep,
   CharacterCardField,
   CharacterStateChangeCandidate,
   CharacterStateChangeSuggestion,
@@ -37,6 +40,7 @@ import type {
   ConsistencyReviewIssue,
   ConsistencyReviewReport,
   ConsistencySeverity,
+  EditorialVerdict,
   Foreshadowing,
   ForeshadowingCandidate,
   ForeshadowingStatus,
@@ -63,6 +67,7 @@ import type {
   PromptModuleSelection,
   PromptContextSnapshot,
   PromptBlockOrderItem,
+  PipelineMode,
   Project,
   RetrievalPriority,
   StateFactCategory,
@@ -72,22 +77,61 @@ import type {
   StoryDirectionGuide,
   StoryDirectionGuideSource,
   StoryDirectionGuideStatus,
-  StoryDirectionHorizon
+  StoryDirectionHorizon,
+  AgentActionPreview,
+  AgentRun,
+  Character,
+  WorldManagementReceipt
 } from '../types'
 
-import { DEFAULT_SETTINGS, EMPTY_APP_DATA, createEmptyChapterTask, createEmptyHardCanonPack } from '../defaults/index'
+import {
+  DEFAULT_SETTINGS,
+  EMPTY_APP_DATA,
+  createEmptyHardCanonPack,
+  defaultModulesForMode
+} from '../defaults/index'
 import { arrayOrEmpty, objectOrEmpty, recordOrEmpty, stringArrayValue, stringValue } from './common'
 import { normalizeCharacterStateChangeCandidate, normalizeCharacterStateFact, normalizeCharacterStateLog, normalizeCharacterStateTransaction } from './characterState'
 import { normalizeChapterContinuityBridge, normalizeContinuityBridgeSuggestion } from './continuity'
 import { normalizeBudgetProfile, normalizeContextNeedPlan, normalizeContextSelectionResult } from './context'
 import { normalizeForeshadowing } from './foreshadowing'
 import { normalizeMemoryUpdateCandidate } from './memoryUpdate'
-import { normalizeConsistencyReviewReport, normalizeQualityGateReport, normalizeRedundancyReport } from './reports'
+import { normalizeConsistencyReviewReport, normalizeEditorialVerdict, normalizeQualityGateReport, normalizeRedundancyReport } from './reports'
 import { normalizeGenerationRunTrace, normalizeRunTraceAuthorSummary } from './runTrace'
 import { normalizeStoryDirectionGuide } from './storyDirection'
+import { normalizeAgentActionPreview, normalizeAgentRun } from './agent'
+import { normalizeWorldManagementReceipts } from './worldManagement'
+import { normalizeChapterTask, normalizeChapterTaskEdit, normalizePipelineMode, normalizePipelineRecipeReference } from './generation'
+import { normalizePipelineAIRoleConfigs, normalizePipelineAIRunConfig } from './pipelineRunConfig'
 
-function normalizeChapterTask(value: unknown): ChapterTask {
-  return { ...createEmptyChapterTask(), ...(objectOrEmpty(value) as Partial<ChapterTask>) }
+const LEGACY_DEFAULT_AI_TIMEOUT_MS = 120_000
+
+function normalizeRequestTimeoutMs(value: unknown): number {
+  if (typeof value !== 'number' || !Number.isFinite(value)) return DEFAULT_SETTINGS.requestTimeoutMs
+  // Upgrade only the former default. Deliberate custom timeout values remain unchanged.
+  return value === LEGACY_DEFAULT_AI_TIMEOUT_MS ? DEFAULT_SETTINGS.requestTimeoutMs : value
+}
+
+function normalizeCharacter(value: unknown): Character {
+  const character = objectOrEmpty(value)
+  const timestamp = new Date().toISOString()
+  return {
+    ...(value as Character),
+    id: stringValue(character.id), projectId: stringValue(character.projectId), name: stringValue(character.name),
+    role: stringValue(character.role), surfaceGoal: stringValue(character.surfaceGoal), deepDesire: stringValue(character.deepDesire),
+    coreFear: stringValue(character.coreFear), selfDeception: stringValue(character.selfDeception),
+    knownInformation: stringValue(character.knownInformation), unknownInformation: stringValue(character.unknownInformation),
+    protagonistRelationship: stringValue(character.protagonistRelationship), emotionalState: stringValue(character.emotionalState),
+    nextActionTendency: stringValue(character.nextActionTendency), forbiddenWriting: stringValue(character.forbiddenWriting),
+    roleFunction: stringValue(character.roleFunction), deepNeed: stringValue(character.deepNeed),
+    decisionLogic: stringValue(character.decisionLogic), abilitiesAndResources: stringValue(character.abilitiesAndResources),
+    weaknessAndCost: stringValue(character.weaknessAndCost), relationshipTension: stringValue(character.relationshipTension),
+    futureHooks: stringValue(character.futureHooks),
+    lastChangedChapter: typeof character.lastChangedChapter === 'number' && Number.isSafeInteger(character.lastChangedChapter)
+      ? character.lastChangedChapter : null,
+    isMain: character.isMain === true, createdAt: stringValue(character.createdAt) || timestamp,
+    updatedAt: stringValue(character.updatedAt) || timestamp
+  }
 }
 
 function normalizeStageSummary(value: unknown): StageSummary {
@@ -197,12 +241,30 @@ function normalizePromptContextSnapshot(value: PromptContextSnapshot | Record<st
   const snapshot = objectOrEmpty(value)
   const timestamp = new Date().toISOString()
   const projectId = stringValue(snapshot.projectId)
+  const mode = snapshot.mode === 'light' || snapshot.mode === 'standard' || snapshot.mode === 'full' || snapshot.mode === 'custom'
+    ? snapshot.mode
+    : 'standard'
+  const promptMode = snapshot.promptMode === 'light' || snapshot.promptMode === 'standard' || snapshot.promptMode === 'full'
+    ? snapshot.promptMode
+    : undefined
+  const moduleMode = promptMode ?? (mode === 'custom' ? 'standard' : mode)
   return {
     ...(value as PromptContextSnapshot),
     id: stringValue(snapshot.id),
     projectId,
     targetChapterOrder: typeof snapshot.targetChapterOrder === 'number' ? snapshot.targetChapterOrder : 1,
-    mode: snapshot.mode === 'light' || snapshot.mode === 'standard' || snapshot.mode === 'full' || snapshot.mode === 'custom' ? snapshot.mode : 'standard',
+    mode,
+    promptMode,
+    moduleSelection:
+      snapshot.moduleSelection && typeof snapshot.moduleSelection === 'object'
+        ? {
+            ...defaultModulesForMode(moduleMode),
+            ...objectOrEmpty(snapshot.moduleSelection)
+          } as PromptContextSnapshot['moduleSelection']
+        : undefined,
+    continuityInstructions: stringValue(snapshot.continuityInstructions),
+    useContinuityBridge:
+      typeof snapshot.useContinuityBridge === 'boolean' ? snapshot.useContinuityBridge : undefined,
     budgetProfileId: stringValue(snapshot.budgetProfileId) || null,
     budgetProfile: normalizeBudgetProfile(snapshot.budgetProfile, projectId),
     contextSelectionResult: normalizeContextSelectionResult(snapshot.contextSelectionResult),
@@ -221,12 +283,119 @@ function normalizePromptContextSnapshot(value: PromptContextSnapshot | Record<st
   }
 }
 
-function normalizeChapterGenerationJob(value: ChapterGenerationJob | Record<string, unknown>): ChapterGenerationJob {
+function pipelineModeFromStepSnapshot(value: unknown): PipelineMode | null {
+  if (typeof value !== 'string' || !value.trim()) return null
+  try {
+    return normalizePipelineMode(objectOrEmpty(JSON.parse(value)).pipelineMode)
+  } catch {
+    return null
+  }
+}
+
+function indexLegacyPipelineModes(
+  jobs: ChapterGenerationJob[],
+  steps: ChapterGenerationStep[]
+): Map<string, { mode: PipelineMode; order: number }> {
+  const jobIds = new Set<string>()
+  jobs.forEach((value) => {
+    const job = objectOrEmpty(value)
+    if (!normalizePipelineMode(job.pipelineMode)) jobIds.add(stringValue(job.id))
+  })
+  const modes = new Map<string, { mode: PipelineMode; order: number }>()
+  if (jobIds.size === 0) return modes
+
+  steps.forEach((step, index) => {
+    const jobId = step.jobId
+    if (!jobIds.has(jobId)) return
+    const mode = pipelineModeFromStepSnapshot(step.inputSnapshot)
+    if (!mode) return
+    const timestamp = Date.parse(step.updatedAt || step.createdAt)
+    // Keep the original global index for invalid dates; later equal orders win.
+    const order = Number.isFinite(timestamp) ? timestamp : index
+    const latest = modes.get(jobId)
+    if (!latest || order >= latest.order) {
+      modes.set(jobId, { mode, order })
+    }
+  })
+  return modes
+}
+
+function legacyPipelineModeForJob(
+  value: ChapterGenerationJob | Record<string, unknown>,
+  modes: ReadonlyMap<string, { mode: PipelineMode }>
+): PipelineMode | null {
   const job = objectOrEmpty(value)
+  const directMode = normalizePipelineMode(job.pipelineMode)
+  if (directMode) return directMode
+  return modes.get(stringValue(job.id))?.mode ?? null
+}
+
+function normalizeChapterGenerationJob(
+  value: ChapterGenerationJob | Record<string, unknown>,
+  legacyMode: PipelineMode | null = null
+): ChapterGenerationJob {
+  const job = objectOrEmpty(value)
+  const aiRunConfig = objectOrEmpty(job.aiRunConfig)
+  const pipelineMode = normalizePipelineMode(job.pipelineMode) ?? legacyMode
+  const recipe = normalizePipelineRecipeReference(job, pipelineMode)
   return {
     ...(value as ChapterGenerationJob),
+    chapterTaskSnapshot:
+      job.chapterTaskSnapshot && typeof job.chapterTaskSnapshot === 'object' && !Array.isArray(job.chapterTaskSnapshot)
+        ? normalizeChapterTask(job.chapterTaskSnapshot)
+        : null,
+    taskEdit: normalizeChapterTaskEdit(job.taskEdit),
     promptContextSnapshotId: stringValue(job.promptContextSnapshotId) || null,
-    contextSource: job.contextSource === 'prompt_snapshot' ? 'prompt_snapshot' : 'auto'
+    contextSource: job.contextSource === 'prompt_snapshot' ? 'prompt_snapshot' : 'auto',
+    pipelineMode,
+    pipelineRecipeId: recipe.pipelineRecipeId,
+    pipelineRecipeVersion: recipe.pipelineRecipeVersion,
+    pipelineRecipe: recipe.pipelineRecipe,
+    aiRunConfig: normalizePipelineAIRunConfig(aiRunConfig, DEFAULT_SETTINGS)
+  }
+}
+
+function normalizeProject(value: Project | Record<string, unknown>): Project {
+  const project = objectOrEmpty(value)
+  const timestamp = new Date().toISOString()
+  const createdAt = stringValue(project.createdAt) || timestamp
+  return {
+    ...(value as Project),
+    id: stringValue(project.id),
+    name: stringValue(project.name) || '未命名项目',
+    genre: stringValue(project.genre),
+    description: stringValue(project.description),
+    targetReaders: stringValue(project.targetReaders),
+    coreAppeal: stringValue(project.coreAppeal),
+    style: stringValue(project.style),
+    createdAt,
+    updatedAt: stringValue(project.updatedAt) || createdAt,
+    lastOpenedAt: stringValue(project.lastOpenedAt) || null
+  }
+}
+
+function normalizeChapter(value: Chapter | Record<string, unknown>): Chapter {
+  const chapter = objectOrEmpty(value)
+  const timestamp = new Date().toISOString()
+  const createdAt = stringValue(chapter.createdAt) || timestamp
+  return {
+    ...(value as Chapter),
+    id: stringValue(chapter.id),
+    projectId: stringValue(chapter.projectId),
+    order: typeof chapter.order === 'number' && Number.isFinite(chapter.order) ? chapter.order : 1,
+    title: stringValue(chapter.title),
+    body: stringValue(chapter.body),
+    summary: stringValue(chapter.summary),
+    newInformation: stringValue(chapter.newInformation),
+    characterChanges: stringValue(chapter.characterChanges),
+    newForeshadowing: stringValue(chapter.newForeshadowing),
+    resolvedForeshadowing: stringValue(chapter.resolvedForeshadowing),
+    endingHook: stringValue(chapter.endingHook),
+    riskWarnings: stringValue(chapter.riskWarnings),
+    includedInStageSummary: Boolean(chapter.includedInStageSummary),
+    archivedAt: stringValue(chapter.archivedAt) || null,
+    createdAt,
+    updatedAt: stringValue(chapter.updatedAt) || createdAt
   }
 }
 
@@ -235,7 +404,10 @@ export function normalizeAppData(input: Partial<AppData>): AppData {
   const rawSettings = recordOrEmpty(raw.settings)
   const legacyApiKey = stringValue(rawSettings.apiKey)
   const hasApiKey = typeof rawSettings.hasApiKey === 'boolean' ? rawSettings.hasApiKey : Boolean(legacyApiKey.trim())
-  const projects = arrayOrEmpty<Project>(raw.projects)
+  const projects = arrayOrEmpty<Project>(raw.projects).map(normalizeProject)
+  const chapterGenerationSteps = arrayOrEmpty<ChapterGenerationStep>(raw.chapterGenerationSteps)
+  const chapterGenerationJobs = arrayOrEmpty<ChapterGenerationJob>(raw.chapterGenerationJobs)
+  const legacyPipelineModes = indexLegacyPipelineModes(chapterGenerationJobs, chapterGenerationSteps)
   const normalizedHardCanonPacks = arrayOrEmpty<HardCanonPack>(raw.hardCanonPacks).map(normalizeHardCanonPack)
   const hardCanonProjectIds = new Set(normalizedHardCanonPacks.map((pack) => pack.projectId))
   const hardCanonPacks = [
@@ -250,13 +422,24 @@ export function normalizeAppData(input: Partial<AppData>): AppData {
     settings: {
       ...DEFAULT_SETTINGS,
       ...(rawSettings as Partial<AppSettings>),
+      apiProvider:
+        rawSettings.apiProvider === 'openai' ||
+        rawSettings.apiProvider === 'compatible' ||
+        rawSettings.apiProvider === 'local' ||
+        rawSettings.apiProvider === 'codex_cli'
+          ? rawSettings.apiProvider
+          : DEFAULT_SETTINGS.apiProvider,
+      codexCliPath: stringValue(rawSettings.codexCliPath) || DEFAULT_SETTINGS.codexCliPath,
+      codexCliModel: stringValue(rawSettings.codexCliModel),
+      requestTimeoutMs: normalizeRequestTimeoutMs(rawSettings.requestTimeoutMs),
+      pipelineModelRoles: normalizePipelineAIRoleConfigs(rawSettings.pipelineModelRoles),
       apiKey: legacyApiKey,
       hasApiKey
     },
     projects,
     storyBibles: arrayOrEmpty(raw.storyBibles),
-    chapters: arrayOrEmpty(raw.chapters),
-    characters: arrayOrEmpty(raw.characters),
+    chapters: arrayOrEmpty<Chapter>(raw.chapters).map(normalizeChapter),
+    characters: arrayOrEmpty(raw.characters).map(normalizeCharacter),
     characterStateLogs: arrayOrEmpty<CharacterStateLog>(raw.characterStateLogs).map(normalizeCharacterStateLog),
     characterStateFacts: arrayOrEmpty<CharacterStateFact>(raw.characterStateFacts).map(normalizeCharacterStateFact),
     characterStateTransactions: arrayOrEmpty<CharacterStateTransaction>(raw.characterStateTransactions).map(normalizeCharacterStateTransaction),
@@ -270,23 +453,31 @@ export function normalizeAppData(input: Partial<AppData>): AppData {
     hardCanonPacks,
     contextNeedPlans: arrayOrEmpty<ContextNeedPlan>(raw.contextNeedPlans).map(normalizeContextNeedPlan),
     chapterContinuityBridges: arrayOrEmpty<ChapterContinuityBridge>(raw.chapterContinuityBridges).map(normalizeChapterContinuityBridge),
-    chapterGenerationJobs: arrayOrEmpty<ChapterGenerationJob>(raw.chapterGenerationJobs).map(normalizeChapterGenerationJob),
-    chapterGenerationSteps: arrayOrEmpty(raw.chapterGenerationSteps),
+    chapterGenerationJobs: chapterGenerationJobs.map((job) =>
+      normalizeChapterGenerationJob(job, legacyPipelineModeForJob(job, legacyPipelineModes))
+    ),
+    chapterGenerationSteps,
     generatedChapterDrafts: arrayOrEmpty(raw.generatedChapterDrafts),
     memoryUpdateCandidates: arrayOrEmpty<MemoryUpdateCandidate>(raw.memoryUpdateCandidates).map(normalizeMemoryUpdateCandidate),
+    candidateDecisionReceipts: normalizeCandidateDecisionReceipts(raw.candidateDecisionReceipts),
+    worldManagementReceipts: normalizeWorldManagementReceipts(raw.worldManagementReceipts),
     consistencyReviewReports: arrayOrEmpty<ConsistencyReviewReport>(raw.consistencyReviewReports).map(normalizeConsistencyReviewReport),
     contextBudgetProfiles: arrayOrEmpty(raw.contextBudgetProfiles),
     qualityGateReports: arrayOrEmpty<QualityGateReport>(raw.qualityGateReports).map(normalizeQualityGateReport),
     generationRunTraces: arrayOrEmpty<GenerationRunTrace>(raw.generationRunTraces).map(normalizeGenerationRunTrace),
     runTraceAuthorSummaries: arrayOrEmpty<RunTraceAuthorSummary>(raw.runTraceAuthorSummaries).map(normalizeRunTraceAuthorSummary),
     redundancyReports: arrayOrEmpty<RedundancyReport>(raw.redundancyReports).map(normalizeRedundancyReport),
+    editorialVerdicts: arrayOrEmpty<EditorialVerdict>(raw.editorialVerdicts).map(normalizeEditorialVerdict),
     revisionCandidates: arrayOrEmpty(raw.revisionCandidates),
     revisionSessions: arrayOrEmpty(raw.revisionSessions),
     revisionRequests: arrayOrEmpty(raw.revisionRequests),
     revisionVersions: arrayOrEmpty(raw.revisionVersions),
+    quickRewriteDrafts: normalizeQuickRewriteDrafts(raw.quickRewriteDrafts),
     chapterVersions: arrayOrEmpty(raw.chapterVersions),
     chapterCommitBundles: arrayOrEmpty<ChapterCommitBundle>(raw.chapterCommitBundles),
-    revisionCommitBundles: arrayOrEmpty<RevisionCommitBundle>(raw.revisionCommitBundles)
+    revisionCommitBundles: arrayOrEmpty<RevisionCommitBundle>(raw.revisionCommitBundles),
+    agentRuns: arrayOrEmpty<AgentRun>(raw.agentRuns).map(normalizeAgentRun),
+    agentActionPreviews: arrayOrEmpty<AgentActionPreview>(raw.agentActionPreviews).map(normalizeAgentActionPreview)
   }
 }
 

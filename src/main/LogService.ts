@@ -1,5 +1,5 @@
 import { app, shell } from 'electron'
-import { appendFileSync, existsSync, mkdirSync, renameSync, statSync } from 'node:fs'
+import { appendFileSync, mkdirSync, renameSync, statSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { redactSensitiveText } from '../shared/errorUtils'
 
@@ -81,18 +81,28 @@ export class LogService {
     }
 
     try {
-      mkdirSync(dirname(path), { recursive: true })
       this.rotateIfNeeded(path)
-      appendFileSync(path, line, 'utf-8')
+      try {
+        appendFileSync(path, line, 'utf-8')
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
+        mkdirSync(dirname(path), { recursive: true })
+        appendFileSync(path, line, 'utf-8')
+      }
     } catch (error) {
       if (!app.isPackaged) console.warn('Failed to write log file.', error)
     }
   }
 
   private static rotateIfNeeded(path: string): void {
-    if (!existsSync(path)) return
-    const info = statSync(path)
-    if (info.size < MAX_LOG_SIZE_BYTES) return
+    let size: number
+    try {
+      size = statSync(path).size
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === 'ENOENT') return
+      throw error
+    }
+    if (size < MAX_LOG_SIZE_BYTES) return
     const rotatedPath = `${path}.${Date.now()}.old`
     renameSync(path, rotatedPath)
   }

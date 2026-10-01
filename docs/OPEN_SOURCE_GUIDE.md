@@ -6,7 +6,7 @@
 
 ### 项目定位
 
-Novel Director 是一个实验性的、本地优先桌面工作台，用于 AI 辅助长篇小说创作管理。当前版本是 `0.1.0` 预览版，优先服务本地试用、功能验证和社区贡献。
+Novel Director 是一个实验性的、本地优先桌面工作台，用于 AI 辅助长篇小说创作管理。当前源码版本是 `0.1.6-preview.1` 本地试用候选，优先服务本地试用、功能验证和社区贡献；GitHub 分发版本以 Releases 页面为准。
 
 它不是：
 
@@ -96,7 +96,7 @@ This guide is for people who want to use, fork, contribute to, or release Novel 
 
 ### Project Positioning
 
-Novel Director is an experimental, local-first desktop workbench for AI-assisted long-form fiction management. Version `0.1.0` is a preview for local trials, validation, and community contribution.
+Novel Director is an experimental, local-first desktop workbench for AI-assisted long-form fiction management. Source version `0.1.6-preview.1` is a local trial candidate for validation and community contribution; distributed versions are listed on GitHub Releases.
 
 It is not:
 

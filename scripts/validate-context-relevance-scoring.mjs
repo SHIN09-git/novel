@@ -2,8 +2,9 @@ import { mkdir, readFile, rm, writeFile } from 'node:fs/promises'
 import { dirname, join, resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import ts from 'typescript'
+import { repoRoot } from './utils/repo-root.mjs'
 
-const root = resolve('.')
+const root = repoRoot
 const outDir = join(root, 'tmp', 'context-relevance-scoring-test')
 const timestamp = '2026-01-01T00:00:00.000Z'
 
@@ -44,7 +45,9 @@ async function loadModules() {
     'src/services/contextBudget/types.ts',
     'src/services/contextBudget/scoringEngine.ts',
     'src/services/contextBudget/selectionEngine.ts',
+    'src/services/contextBudget/selectionFinalizer.ts',
     'src/services/contextBudget/traceBuilder.ts',
+    'src/services/ChapterLifecycleService.ts',
     'src/services/ContextBudgetManager.ts'
   ])
   return import(`${pathToFileURL(join(outDir, 'src/services/ContextBudgetManager.mjs')).href}?t=${Date.now()}`)
@@ -205,6 +208,72 @@ function makeData() {
   }
 }
 
+function makeCharacterNeedPlan() {
+  return {
+    id: 'plan-character-certainty',
+    projectId: 'project-1',
+    targetChapterOrder: 4,
+    source: 'auto',
+    chapterIntent: '林默进入钟楼，路人只在旧记录中被提及。',
+    expectedSceneType: 'investigation',
+    expectedCharacters: [
+      {
+        characterId: 'char-lin',
+        roleInChapter: 'protagonist',
+        expectedPresence: 'onstage',
+        involvement: 'must_act',
+        stateCheckRequired: false,
+        uncertain: false,
+        reason: '任务契约要求林默行动。'
+      },
+      {
+        characterId: 'char-passenger',
+        roleInChapter: 'mentioned',
+        expectedPresence: 'referenced',
+        involvement: 'mentioned',
+        stateCheckRequired: false,
+        uncertain: true,
+        reason: '路人只在旧记录中被提及。'
+      }
+    ],
+    requiredCharacterCardFields: { 'char-lin': ['decisionLogic'] },
+    requiredStateFactCategories: {},
+    requiredForeshadowingIds: [],
+    forbiddenForeshadowingIds: [],
+    requiredTimelineEventIds: [],
+    requiredWorldbuildingKeys: [],
+    mustCheckContinuity: ['knowledge'],
+    retrievalPriorities: [
+      { type: 'character_card', id: 'char-lin', priority: 96, reason: '必须行动。' },
+      { type: 'character_card', id: 'char-passenger', priority: 70, reason: '推测性提及。' }
+    ],
+    exclusionRules: [],
+    contextNeeds: [
+      {
+        id: 'need-lin',
+        needType: 'character_card',
+        sourceHint: 'character',
+        sourceId: 'char-lin',
+        priority: 'high',
+        reason: '林默必须行动。',
+        uncertain: false
+      },
+      {
+        id: 'need-passenger',
+        needType: 'character_card',
+        sourceHint: 'character',
+        sourceId: 'char-passenger',
+        priority: 'medium',
+        reason: '路人可能只作为背景提及。',
+        uncertain: true
+      }
+    ],
+    warnings: [],
+    createdAt: timestamp,
+    updatedAt: timestamp
+  }
+}
+
 async function main() {
   const checks = []
   const { ContextBudgetManager } = await loadModules()
@@ -218,12 +287,179 @@ async function main() {
       selection.selectedForeshadowingIds
     )
   )
+
+  const openingTimelinePlan = makeCharacterNeedPlan()
+  openingTimelinePlan.targetChapterOrder = 1
+  openingTimelinePlan.requiredTimelineEventIds = ['timeline-unscoped-future']
+  openingTimelinePlan.contextNeeds.push({
+    id: 'need-opening-unscoped-timeline',
+    needType: 'timeline_anchor',
+    sourceHint: 'timeline',
+    sourceId: 'timeline-unscoped-future',
+    priority: 'must',
+    reason: '模拟旧计划错误强选了空章序时间线。',
+    uncertain: false
+  })
+  const openingTimelineSelection = ContextBudgetManager.selectContext(
+    {
+      ...data,
+      chapters: [],
+      timelineEvents: [
+        {
+          id: 'timeline-unscoped-future',
+          projectId: 'project-1',
+          title: '晚饭后的未来真相',
+          chapterOrder: null,
+          storyTime: '',
+          narrativeOrder: 99,
+          participantCharacterIds: ['char-lin'],
+          result: '未来章节结果',
+          downstreamImpact: '未来章节后效',
+          createdAt: timestamp,
+          updatedAt: timestamp
+        }
+      ]
+    },
+    1,
+    makeProfile(12000),
+    {
+      contextNeedPlan: openingTimelinePlan,
+      isolateOpeningLegacyContext: true
+    }
+  )
+  checks.push(assert(
+    openingTimelineSelection.selectedTimelineEventIds.length === 0,
+    'authoritative opening isolation rejects chapter-unscoped timeline events even when an old need plan forces them',
+    openingTimelineSelection
+  ))
+
+  const futurePlan = makeCharacterNeedPlan()
+  futurePlan.requiredForeshadowingIds = ['fs-future']
+  futurePlan.retrievalPriorities.push({ type: 'foreshadowing', id: 'fs-future', priority: 100, reason: '计划强制要求未来伏笔。' })
+  futurePlan.contextNeeds.push({ id: 'need-future', needType: 'foreshadowing', sourceHint: 'foreshadowing', sourceId: 'fs-future', priority: 'must', reason: '计划强制要求未来伏笔。', uncertain: false })
+  const scheduledData = {
+    ...data,
+    chapters: [],
+    foreshadowings: [
+      makeForeshadowing('fs-future', '未来门禁线索', { firstChapterOrder: 8, treatmentMode: 'payoff', weight: 'payoff' }),
+      makeForeshadowing('fs-current', '本章线索', { firstChapterOrder: 4, treatmentMode: 'advance' }),
+      makeForeshadowing('fs-unscheduled', '未排期线索', { firstChapterOrder: null, treatmentMode: 'advance' })
+    ]
+  }
+  const scheduledSelection = ContextBudgetManager.selectContext(scheduledData, 4, makeProfile(12000), { contextNeedPlan: futurePlan })
+  checks.push(assert(
+    !scheduledSelection.selectedForeshadowingIds.includes('fs-future') &&
+      scheduledSelection.selectedForeshadowingIds.includes('fs-current') &&
+      scheduledSelection.selectedForeshadowingIds.includes('fs-unscheduled') &&
+      scheduledSelection.omittedItems.some((item) => item.id === 'fs-future' && item.reasonCode === 'not_available') &&
+      scheduledSelection.contextSelectionTrace?.droppedBlocks.some((block) => block.sourceId === 'fs-future' && block.forced),
+    'future foreshadowing is gated even when planner-required while current/null schedules remain available',
+    scheduledSelection
+  ))
+  const manualFutureSelection = ContextBudgetManager.selectContext(scheduledData, 4, makeProfile(12000), {
+    foreshadowingIds: ['fs-future'], contextNeedPlan: futurePlan, selectionMode: 'explicit'
+  })
+  checks.push(assert(
+    manualFutureSelection.selectedForeshadowingIds.includes('fs-future') &&
+      manualFutureSelection.warnings.some((warning) => warning.includes('手动强选')) &&
+      manualFutureSelection.contextSelectionTrace?.selectedBlocks.some((block) => block.sourceId === 'fs-future' && block.forced && block.reasonCode === 'manual_selection'),
+    'manual future selection bypasses the schedule gate with warning and forced/manual trace evidence',
+    manualFutureSelection
+  ))
+
+  const certaintyData = {
+    ...data,
+    chapters: [],
+    foreshadowings: [],
+    characters: [
+      makeCharacter('char-lin', '林默', { role: '主角调查钟楼。' }),
+      makeCharacter('char-passenger', '路人', { role: '无关背景。'.repeat(600) })
+    ]
+  }
+  const certaintySelection = ContextBudgetManager.selectContext(
+    certaintyData,
+    4,
+    { ...makeProfile(220), includeRecentChaptersCount: 0, includeRelatedCharacters: false },
+    { chapterTask: task, contextNeedPlan: makeCharacterNeedPlan() }
+  )
+  checks.push(
+    assert(
+      certaintySelection.selectedCharacterIds.includes('char-lin') && !certaintySelection.selectedCharacterIds.includes('char-passenger'),
+      'tight budget preserves confirmed must-act character even without a state-ledger lookup and drops uncertain reference-only character',
+      certaintySelection.selectedCharacterIds
+    )
+  )
+  checks.push(
+    assert(
+      certaintySelection.contextSelectionTrace?.droppedBlocks.some(
+        (block) => block.sourceId === 'char-passenger' && block.uncertain === true
+      ),
+      'dropped uncertain character remains visible as advisory trace evidence',
+      certaintySelection.contextSelectionTrace
+    )
+  )
+  checks.push(
+    assert(
+      certaintySelection.omittedItems.some(
+        (item) => item.id === 'char-passenger' && item.reasonCode === 'budget_exceeded' && item.uncertain === true
+      ),
+      'budget omission keeps a structured reason code and uncertainty metadata',
+      certaintySelection.omittedItems
+    )
+  )
+
+  const exclusionPlan = makeCharacterNeedPlan()
+  exclusionPlan.exclusionRules = [
+    { type: 'character', id: 'char-lin', reason: '用户明确取消本章角色切片。', source: 'user' }
+  ]
+  const exclusionSelection = ContextBudgetManager.selectContext(
+    certaintyData,
+    4,
+    { ...makeProfile(12000), includeRecentChaptersCount: 0 },
+    { chapterTask: task, contextNeedPlan: exclusionPlan, selectionMode: 'explicit' }
+  )
+  checks.push(
+    assert(
+      !exclusionSelection.selectedCharacterIds.includes('char-lin') &&
+        exclusionSelection.omittedItems.some((item) => item.id === 'char-lin' && item.reasonCode === 'manual_exclusion') &&
+        exclusionSelection.contextSelectionTrace?.unmetNeeds.some(
+          (need) => need.sourceId === 'char-lin' && need.reasonCode === 'manual_exclusion'
+        ),
+      'manual character exclusion wins over task mention and remains visible in omission and unmet-need trace',
+      exclusionSelection
+    )
+  )
   checks.push(
     assert(
       !selection.selectedForeshadowingIds.includes('fs-tower') &&
-        selection.omittedItems.some((item) => item.id === 'fs-tower' && item.reason.includes('禁止')),
+        selection.omittedItems.some(
+          (item) => item.id === 'fs-tower' && item.reason.includes('禁止') && item.reasonCode === 'forbidden'
+        ),
       'task-forbidden or paused foreshadowing is omitted with an explanatory reason',
       { selected: selection.selectedForeshadowingIds, omitted: selection.omittedItems }
+    )
+  )
+
+  const cappedForeshadowings = Array.from({ length: 11 }, (_, index) =>
+    makeForeshadowing(`fs-cap-${index + 1}`, `钟楼线索 ${index + 1}`, {
+      description: `林默调查钟楼密室的关键线索 ${index + 1}。`,
+      weight: index < 3 ? 'high' : 'medium',
+      treatmentMode: 'advance',
+      relatedCharacterIds: ['char-lin']
+    })
+  )
+  const cappedSelection = ContextBudgetManager.selectContext(
+    { ...data, chapters: [], foreshadowings: cappedForeshadowings },
+    4,
+    { ...makeProfile(20000), includeRecentChaptersCount: 0 },
+    { chapterTask: task }
+  )
+  checks.push(
+    assert(
+      cappedSelection.selectedForeshadowingIds.length === 10 &&
+        cappedSelection.omittedItems.some((item) => item.type === 'foreshadowing' && item.reasonCode === 'prompt_limit'),
+      'foreshadowing cap keeps ten ranked items and records prompt_limit for the remainder',
+      cappedSelection
     )
   )
   checks.push(

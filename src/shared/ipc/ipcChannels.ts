@@ -1,4 +1,5 @@
 export const IPC_CHANNELS = {
+  DATA_EXECUTE_CANDIDATE_DECISION: 'data:execute-candidate-decision',
   STORAGE_GET: 'storage:get',
   STORAGE_SAVE: 'storage:save',
   DATA_SAVE_GENERATION_RUN_BUNDLE: 'data:save-generation-run-bundle',
@@ -8,6 +9,7 @@ export const IPC_CHANNELS = {
   STORAGE_IMPORT: 'storage:import',
 
   APP_GET_STORAGE_PATH: 'app:get-storage-path',
+  APP_GET_RUNTIME_INFO: 'app:get-runtime-info',
   APP_SELECT_STORAGE_PATH: 'app:select-storage-path',
   APP_MIGRATE_STORAGE_PATH: 'app:migrate-storage-path',
   APP_CREATE_MIGRATION_MERGE_PREVIEW: 'app:create-migration-merge-preview',
@@ -36,6 +38,15 @@ export const IPC_CHANNELS = {
   CREDENTIALS_MIGRATE_LEGACY_API_KEY: 'credentials:migrateLegacyApiKey',
 
   AI_CHAT_COMPLETION: 'ai:chatCompletion',
+  AI_CANCEL_RUN: 'ai:cancel-run',
+  AI_CANCEL_CALL: 'ai:cancel-call',
+  AI_GET_CALL_PROGRESS: 'ai:get-call-progress',
+  AI_LIST_CALL_PROGRESS: 'ai:list-call-progress',
+  AI_CODEX_CLI_STATUS: 'ai:codex-cli-status',
+
+  AGENT_AUTHORIZATION_LIST: 'agent-authorization:list',
+  AGENT_AUTHORIZATION_GRANT: 'agent-authorization:grant',
+  AGENT_AUTHORIZATION_REVOKE: 'agent-authorization:revoke',
 
   DIAGNOSTICS_ANALYZE_REDUNDANCY: 'diagnostics:analyze-redundancy',
   DIAGNOSTICS_AUDIT_NOVELTY: 'diagnostics:audit-novelty',

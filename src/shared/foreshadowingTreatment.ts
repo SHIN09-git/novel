@@ -50,6 +50,13 @@ export function effectiveTreatmentMode(
   return normalizeTreatmentMode(overrides?.[item.id] ?? item.treatmentMode, item.status, item.weight)
 }
 
+export function isForeshadowingAvailableAtChapter(
+  item: Pick<Foreshadowing, 'firstChapterOrder'>,
+  targetChapterOrder: number
+): boolean {
+  return item.firstChapterOrder === null || item.firstChapterOrder <= targetChapterOrder
+}
+
 export function treatmentAllowsDefaultPrompt(mode: ForeshadowingTreatmentMode): boolean {
   return mode === 'hint' || mode === 'advance' || mode === 'mislead' || mode === 'payoff'
 }

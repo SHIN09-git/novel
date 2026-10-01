@@ -34,6 +34,28 @@ export type ContextRetrievalPriorityType =
 
 export type ContextNeedPriority = 'must' | 'high' | 'medium' | 'low'
 
+export type ContextSelectionMode = 'automatic' | 'explicit' | 'prompt_snapshot'
+
+export type ContextDecisionReasonCode =
+  | 'required_need'
+  | 'manual_selection'
+  | 'task_relevance'
+  | 'recency'
+  | 'related_context'
+  | 'profile_default'
+  | 'budget_exceeded'
+  | 'low_relevance'
+  | 'compressed_replacement'
+  | 'forbidden'
+  | 'manual_exclusion'
+  | 'prompt_limit'
+  | 'profile_filter'
+  | 'status_ineligible'
+  | 'snapshot_locked'
+  | 'missing_source'
+  | 'not_available'
+  | 'unknown'
+
 export type ContextNeedSourceHint =
   | 'character'
   | 'character_state'
@@ -84,6 +106,7 @@ export interface ContextExclusionRule {
   type: string
   id: ID
   reason: string
+  source: 'planner' | 'user'
 }
 
 export interface ContextNeedItem {
@@ -135,6 +158,10 @@ export interface PromptContextSnapshot {
   projectId: ID
   targetChapterOrder: number
   mode: ContextBudgetMode
+  promptMode?: PromptMode
+  moduleSelection?: PromptModuleSelection
+  continuityInstructions?: string
+  useContinuityBridge?: boolean
   budgetProfileId: ID | null
   budgetProfile: ContextBudgetProfile
   contextSelectionResult: ContextSelectionResult
@@ -201,6 +228,10 @@ export interface OmittedContextItem {
   type: string
   id: ID | null
   reason: string
+  reasonCode: ContextDecisionReasonCode
+  priority: ContextNeedPriority
+  uncertain: boolean
+  replacementSourceId?: ID | null
   estimatedTokensSaved: number
 }
 
@@ -229,6 +260,7 @@ export interface ContextCompressionRecord {
   replacementText?: string
   replacementTokenEstimate: number
   savedTokenEstimate: number
+  reasonCode: ContextDecisionReasonCode
   reason: string
 }
 
@@ -250,6 +282,11 @@ export interface ContextSelectionTraceBlock {
   blockType: string
   sourceId?: ID | null
   priority: ContextNeedPriority
+  uncertain: boolean
+  reasonCode: ContextDecisionReasonCode
+  forced: boolean
+  compressed: boolean
+  replacementSourceId?: ID | null
   tokenEstimate: number
   reason: string
 }
@@ -258,6 +295,11 @@ export interface ContextSelectionTraceDroppedBlock {
   blockType: string
   sourceId?: ID | null
   priority: ContextNeedPriority
+  uncertain: boolean
+  reasonCode: ContextDecisionReasonCode
+  forced: boolean
+  compressed: boolean
+  replacementSourceId?: ID | null
   tokenEstimate: number
   dropReason: string
 }
@@ -265,6 +307,8 @@ export interface ContextSelectionTraceDroppedBlock {
 export interface ContextSelectionTraceUnmetNeed {
   needType: string
   priority: ContextNeedPriority
+  uncertain: boolean
+  reasonCode: ContextDecisionReasonCode
   reason: string
   sourceId?: ID | null
 }
@@ -273,6 +317,7 @@ export interface ContextSelectionTrace {
   projectId: ID
   chapterId: ID | null
   jobId?: ID
+  selectionMode: ContextSelectionMode
   selectedBlocks: ContextSelectionTraceBlock[]
   droppedBlocks: ContextSelectionTraceDroppedBlock[]
   unmetNeeds: ContextSelectionTraceUnmetNeed[]

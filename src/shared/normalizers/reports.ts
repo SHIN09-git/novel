@@ -37,6 +37,9 @@ import type {
   ConsistencyReviewIssue,
   ConsistencyReviewReport,
   ConsistencySeverity,
+  EditorialVerdict,
+  EditorialVerdictAction,
+  EditorialVerdictIssue,
   Foreshadowing,
   ForeshadowingCandidate,
   ForeshadowingStatus,
@@ -80,8 +83,39 @@ import { arrayOrEmpty, objectOrEmpty, stringArrayValue, stringValue } from './co
 export function normalizeQualityGateReport(value: QualityGateReport | Record<string, unknown>): QualityGateReport {
   const report = objectOrEmpty(value)
   const dimensions = objectOrEmpty(report.dimensions)
+  const telemetry = objectOrEmpty(report.aiTelemetry)
+  const usage = objectOrEmpty(telemetry.usage)
+  const normalizedTelemetry = Object.keys(telemetry).length
+    ? {
+        callId: stringValue(telemetry.callId) || undefined,
+        runId: stringValue(telemetry.runId) || undefined,
+        provider:
+          telemetry.provider === 'openai' || telemetry.provider === 'compatible' || telemetry.provider === 'local' || telemetry.provider === 'codex_cli'
+            ? telemetry.provider
+            : 'local',
+        model: stringValue(telemetry.model) || 'unknown',
+        durationMs: typeof telemetry.durationMs === 'number' && Number.isFinite(telemetry.durationMs) ? Math.max(0, telemetry.durationMs) : 0,
+        attempts: typeof telemetry.attempts === 'number' && Number.isFinite(telemetry.attempts) ? Math.max(0, Math.round(telemetry.attempts)) : 0,
+        responseFormatFallback: telemetry.responseFormatFallback === true,
+        finishReason: stringValue(telemetry.finishReason) || undefined,
+        usage: Object.keys(usage).length
+          ? {
+              promptTokens: typeof usage.promptTokens === 'number' && Number.isFinite(usage.promptTokens) ? Math.max(0, usage.promptTokens) : undefined,
+              completionTokens: typeof usage.completionTokens === 'number' && Number.isFinite(usage.completionTokens) ? Math.max(0, usage.completionTokens) : undefined,
+              totalTokens: typeof usage.totalTokens === 'number' && Number.isFinite(usage.totalTokens) ? Math.max(0, usage.totalTokens) : undefined,
+              reasoningTokens: typeof usage.reasoningTokens === 'number' && Number.isFinite(usage.reasoningTokens) ? Math.max(0, usage.reasoningTokens) : undefined,
+              cachedPromptTokens: typeof usage.cachedPromptTokens === 'number' && Number.isFinite(usage.cachedPromptTokens) ? Math.max(0, usage.cachedPromptTokens) : undefined
+            }
+          : undefined,
+        terminationCategory:
+          telemetry.terminationCategory === 'cancelled' || telemetry.terminationCategory === 'timeout'
+            ? telemetry.terminationCategory
+            : 'none'
+      } as const
+    : undefined
   return {
     ...(value as QualityGateReport),
+    draftContentHash: stringValue(report.draftContentHash) || null,
     dimensions: {
       plotCoherence: typeof dimensions.plotCoherence === 'number' ? dimensions.plotCoherence : 70,
       characterConsistency: typeof dimensions.characterConsistency === 'number' ? dimensions.characterConsistency : 70,
@@ -98,7 +132,8 @@ export function normalizeQualityGateReport(value: QualityGateReport | Record<str
     },
     issues: Array.isArray(report.issues) ? (report.issues as QualityGateReport['issues']) : [],
     requiredFixes: stringArrayValue(report.requiredFixes),
-    optionalSuggestions: stringArrayValue(report.optionalSuggestions)
+    optionalSuggestions: stringArrayValue(report.optionalSuggestions),
+    aiTelemetry: normalizedTelemetry
   }
 }
 
@@ -110,6 +145,7 @@ export function normalizeRedundancyReport(value: RedundancyReport | Record<strin
     projectId: stringValue(report.projectId),
     chapterId: stringValue(report.chapterId) || null,
     draftId: stringValue(report.draftId) || null,
+    draftContentHash: stringValue(report.draftContentHash) || null,
     repeatedPhrases: stringArrayValue(report.repeatedPhrases),
     repeatedSceneDescriptions: stringArrayValue(report.repeatedSceneDescriptions),
     repeatedExplanations: stringArrayValue(report.repeatedExplanations),
@@ -214,6 +250,8 @@ export function normalizeConsistencyReviewReport(value: ConsistencyReviewReport 
     projectId: stringValue(report.projectId),
     jobId: stringValue(report.jobId),
     chapterId: stringValue(report.chapterId) || null,
+    draftId: stringValue(report.draftId) || null,
+    draftContentHash: stringValue(report.draftContentHash) || null,
     promptContextSnapshotId: stringValue(report.promptContextSnapshotId) || null,
     issues,
     legacyIssuesText,
@@ -254,6 +292,7 @@ function normalizeNoveltyFindingSeverity(value: unknown): NoveltyFinding['severi
 
 function normalizeNoveltyFinding(value: unknown): NoveltyFinding {
   const finding = objectOrEmpty(value)
+  const semanticEvidence = objectOrEmpty(finding.semanticEvidence)
   return {
     kind: normalizeNoveltyFindingKind(finding.kind),
     text: stringValue(finding.text),
@@ -263,7 +302,20 @@ function normalizeNoveltyFinding(value: unknown): NoveltyFinding {
     allowedByTask: typeof finding.allowedByTask === 'boolean' ? finding.allowedByTask : false,
     hasPriorForeshadowing: typeof finding.hasPriorForeshadowing === 'boolean' ? finding.hasPriorForeshadowing : false,
     sourceHint: stringValue(finding.sourceHint) || null,
-    suggestedAction: stringValue(finding.suggestedAction)
+    suggestedAction: stringValue(finding.suggestedAction),
+    confidence: finding.confidence === 'high' || finding.confidence === 'medium' || finding.confidence === 'low'
+      ? finding.confidence
+      : undefined,
+    semanticEvidence: Object.keys(semanticEvidence).length
+      ? {
+          ruleTarget: stringValue(semanticEvidence.ruleTarget) || null,
+          beneficiary: stringValue(semanticEvidence.beneficiary) || null,
+          crisisCue: stringValue(semanticEvidence.crisisCue) || null,
+          resolutionCue: stringValue(semanticEvidence.resolutionCue) || null,
+          costOrLimitCue: stringValue(semanticEvidence.costOrLimitCue) || null,
+          sourceMediumCue: stringValue(semanticEvidence.sourceMediumCue) || null
+        }
+      : undefined
   }
 }
 
@@ -279,6 +331,98 @@ export function normalizeNoveltyAuditResult(value: unknown): NoveltyAuditResult 
     suspiciousDeusExRules: arrayOrEmpty<NoveltyFinding>(audit.suspiciousDeusExRules).map(normalizeNoveltyFinding),
     untracedNames: arrayOrEmpty<NoveltyFinding>(audit.untracedNames).map(normalizeNoveltyFinding),
     severity: normalizeNoveltyAuditSeverity(audit.severity),
-    summary: stringValue(audit.summary)
+    summary: stringValue(audit.summary),
+    sourceDraftId: stringValue(audit.sourceDraftId) || null,
+    sourceContentHash: stringValue(audit.sourceContentHash) || null,
+    auditedAt: stringValue(audit.auditedAt) || null
+  }
+}
+
+function normalizeEditorialVerdictIssue(value: unknown, level: EditorialVerdictIssue['level']): EditorialVerdictIssue {
+  const issue = objectOrEmpty(value)
+  const source = issue.source
+  return {
+    id: stringValue(issue.id),
+    level,
+    source:
+      source === 'quality_gate' ||
+      source === 'consistency_review' ||
+      source === 'novelty_audit' ||
+      source === 'redundancy_report' ||
+      source === 'character_state' ||
+      source === 'diagnostic_binding'
+        ? source
+        : 'diagnostic_binding',
+    code: stringValue(issue.code) || 'unknown',
+    title: stringValue(issue.title) || '待复核问题',
+    evidence: stringArrayValue(issue.evidence).slice(0, 3),
+    recommendation: stringValue(issue.recommendation),
+    sourceId: stringValue(issue.sourceId) || null
+  }
+}
+
+function normalizeEditorialVerdictAction(value: unknown): EditorialVerdictAction | null {
+  const action = objectOrEmpty(value)
+  const actionType = action.actionType
+  if (
+    actionType !== 'accept_draft' &&
+    actionType !== 'revise_draft' &&
+    actionType !== 'rerun_diagnostics' &&
+    actionType !== 'review_novelty' &&
+    actionType !== 'update_character_state'
+  ) return null
+  return {
+    actionType,
+    label: stringValue(action.label),
+    reason: stringValue(action.reason),
+    priority: action.priority === 1 || action.priority === 2 || action.priority === 3 ? action.priority : 3
+  }
+}
+
+export function normalizeEditorialVerdict(value: EditorialVerdict | Record<string, unknown>): EditorialVerdict {
+  const verdict = objectOrEmpty(value)
+  const sourceRefs = objectOrEmpty(verdict.sourceRefs)
+  const coverage = objectOrEmpty(verdict.coverage)
+  const status = verdict.status
+  const normalizedStatus = status === 'approved' || status === 'advisory' || status === 'blocked' || status === 'incomplete' ? status : 'incomplete'
+  const createdAt = stringValue(verdict.createdAt) || new Date().toISOString()
+  return {
+    ...(value as EditorialVerdict),
+    id: stringValue(verdict.id),
+    projectId: stringValue(verdict.projectId),
+    chapterId: stringValue(verdict.chapterId) || null,
+    jobId: stringValue(verdict.jobId),
+    draftId: stringValue(verdict.draftId),
+    draftContentHash: stringValue(verdict.draftContentHash),
+    draftRevision: stringValue(verdict.draftRevision),
+    status: normalizedStatus,
+    coverage: {
+      quality: coverage.quality === 'current' || coverage.quality === 'not_requested' || coverage.quality === 'stale'
+        ? coverage.quality
+        : 'unavailable',
+      consistency: coverage.consistency === 'current' || coverage.consistency === 'not_requested' || coverage.consistency === 'stale'
+        ? coverage.consistency
+        : 'unavailable'
+    },
+    canAccept: normalizedStatus === 'approved' || normalizedStatus === 'advisory',
+    summary: stringValue(verdict.summary),
+    blockers: arrayOrEmpty(verdict.blockers).map((item) => normalizeEditorialVerdictIssue(item, 'blocker')),
+    advisories: arrayOrEmpty(verdict.advisories).map((item) => normalizeEditorialVerdictIssue(item, 'advisory')),
+    actions: arrayOrEmpty(verdict.actions)
+      .map(normalizeEditorialVerdictAction)
+      .filter((item): item is EditorialVerdictAction => Boolean(item))
+      .slice(0, 3),
+    sourceRefs: {
+      qualityGateReportId: stringValue(sourceRefs.qualityGateReportId) || null,
+      consistencyReviewReportId: stringValue(sourceRefs.consistencyReviewReportId) || null,
+      redundancyReportId: stringValue(sourceRefs.redundancyReportId) || null,
+      noveltyAuditTraceId: stringValue(sourceRefs.noveltyAuditTraceId) || null,
+      generationRunTraceId: stringValue(sourceRefs.generationRunTraceId) || null,
+      characterStateIssueIds: stringArrayValue(sourceRefs.characterStateIssueIds),
+      ignoredStaleReportIds: stringArrayValue(sourceRefs.ignoredStaleReportIds)
+    },
+    schemaVersion: typeof verdict.schemaVersion === 'number' ? verdict.schemaVersion : 1,
+    createdAt,
+    updatedAt: stringValue(verdict.updatedAt) || createdAt
   }
 }

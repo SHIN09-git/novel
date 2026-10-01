@@ -1,0 +1,114 @@
+{
+  "benchmark": "novelty-audit-memo",
+  "measuredAt": "2026-09-27T16:22:46.638Z",
+  "runtime": {
+    "node": "v24.14.0",
+    "platform": "win32",
+    "arch": "x64",
+    "cpu": "AMD Ryzen 7 7800X3D 8-Core Processor           "
+  },
+  "methodology": {
+    "warmups": 2,
+    "iterations": 7,
+    "clock": "performance.now()",
+    "order": "alternating",
+    "baseline": "identical source with only the audit memo wrapper bypassed"
+  },
+  "note": "Synthetic local inputs; no models, storage or IPC. Only the benchmark JSON is written; timings are not pass/fail thresholds.",
+  "results": [
+    {
+      "bodyCharacters": 2000,
+      "contextCharacters": 1000,
+      "original": {
+        "p50Ms": 24.531,
+        "p95Ms": 26.298,
+        "samplesMs": [
+          26.298,
+          26.181,
+          24.517,
+          24.531,
+          25.831,
+          24.357,
+          24.46
+        ]
+      },
+      "memo": {
+        "p50Ms": 11.48,
+        "p95Ms": 12.413,
+        "samplesMs": [
+          11.652,
+          11.298,
+          11.514,
+          11.37,
+          11.48,
+          12.413,
+          10.982
+        ]
+      }
+    },
+    {
+      "bodyCharacters": 2000,
+      "contextCharacters": 8000,
+      "original": {
+        "p50Ms": 190.644,
+        "p95Ms": 197.303,
+        "samplesMs": [
+          190.409,
+          197.303,
+          193.856,
+          190.644,
+          189.46,
+          190.608,
+          191.718
+        ]
+      },
+      "memo": {
+        "p50Ms": 81.028,
+        "p95Ms": 81.624,
+        "samplesMs": [
+          81.028,
+          79.525,
+          81.575,
+          80.69,
+          81.624,
+          79.388,
+          81.034
+        ]
+      }
+    },
+    {
+      "bodyCharacters": 2000,
+      "contextCharacters": 24000,
+      "original": {
+        "p50Ms": 592.965,
+        "p95Ms": 686.976,
+        "samplesMs": [
+          585.464,
+          588.357,
+          588.976,
+          592.965,
+          686.976,
+          664.049,
+          649.949
+        ]
+      },
+      "memo": {
+        "p50Ms": 255.035,
+        "p95Ms": 280.65,
+        "samplesMs": [
+          255.035,
+          249.895,
+          242.072,
+          244.444,
+          280.65,
+          277.317,
+          271.016
+        ]
+      }
+    }
+  ],
+  "sourceHashes": {
+    "src/services/NoveltyDetector.ts": "0bbb0ca2ee057a84a055ca633bdcbef7b0376bfd882915942024a17f70b50f8c",
+    "src/services/novelty/noveltyText.ts": "d3810ab33a897426c602e22eb8449e197e6304a76ffeb3d097361263cf47e61f"
+  }
+}

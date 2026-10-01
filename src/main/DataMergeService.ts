@@ -1,248 +1,59 @@
-import { randomUUID } from 'node:crypto'
-import { copyFile, mkdir, readFile, stat } from 'node:fs/promises'
-import { dirname } from 'node:path'
 import { normalizeAppData, sanitizeAppDataForPersistence } from '../shared/defaults'
 import type {
   AppData,
-  DataFileSummary,
   DataMergeConflict,
   DataMergeOperation,
   DataMergePreview,
   ID
 } from '../shared/types'
-import { JsonStorageService } from '../storage/JsonStorageService'
-import { SqliteStorageService } from '../storage/SqliteStorageService'
+import { StorageRevisionConflictError } from '../storage/StorageService'
+import {
+  backupBeforeMerge,
+  backupFileForOverwrite,
+  loadDataFileSnapshot,
+  saveDataFile
+} from './dataMerge/dataFileStorage'
+import {
+  ALL_ENTITY_COLLECTIONS,
+  collectionName,
+  DEPENDENT_COLLECTIONS,
+  PROJECT_SCOPED_COLLECTIONS
+} from './dataMerge/mergeCollections'
+import {
+  asEntity,
+  clone,
+  deepEqualEntity,
+  equalForMerge,
+  getId,
+  getProjectId,
+  indexById,
+  makeImportedId,
+  pushConflict,
+  pushOperation,
+  shouldSkipDuplicateSource,
+  summarizeDataFile
+} from './dataMerge/mergeEntityUtils'
+import {
+  createIdRemaps,
+  rememberId,
+  remapReferencesDeep,
+  type AppDataArrayKey,
+  type Entity,
+  type IdRemaps
+} from './dataMerge/referenceRemapping'
 
-type AppDataArrayKey = {
-  [K in keyof AppData]: AppData[K] extends Array<unknown> ? K : never
-}[keyof AppData]
+export { backupBeforeMerge, backupFileForOverwrite, deepEqualEntity }
 
-type Entity = Record<string, unknown>
-type IdMap = Map<ID, ID>
-type IdRemaps = Partial<Record<AppDataArrayKey, IdMap>> & { any: IdMap }
+type ImportedEntities = WeakSet<object>
 
-const PROJECT_SCOPED_COLLECTIONS: AppDataArrayKey[] = [
-  'storyBibles',
-  'chapters',
-  'characters',
-  'characterStateLogs',
-  'characterStateFacts',
-  'characterStateTransactions',
-  'characterStateChangeCandidates',
-  'foreshadowings',
-  'timelineEvents',
-  'stageSummaries',
-  'promptVersions',
-  'promptContextSnapshots',
-  'chapterContinuityBridges',
-  'chapterGenerationJobs',
-  'generatedChapterDrafts',
-  'memoryUpdateCandidates',
-  'consistencyReviewReports',
-  'contextBudgetProfiles',
-  'qualityGateReports',
-  'generationRunTraces',
-  'redundancyReports',
-  'revisionCandidates',
-  'revisionSessions',
-  'chapterVersions',
-  'chapterCommitBundles',
-  'revisionCommitBundles'
-]
-
-const DEPENDENT_COLLECTIONS: AppDataArrayKey[] = ['chapterGenerationSteps', 'revisionRequests', 'revisionVersions']
-
-const ALL_ENTITY_COLLECTIONS: AppDataArrayKey[] = [
-  'projects',
-  ...PROJECT_SCOPED_COLLECTIONS,
-  ...DEPENDENT_COLLECTIONS
-]
-
-const COLLECTION_LABELS: Record<string, string> = {
-  projects: '项目',
-  storyBibles: '小说圣经',
-  chapters: '章节',
-  characters: '角色',
-  characterStateLogs: '角色状态日志',
-  foreshadowings: '伏笔',
-  timelineEvents: '时间线事件',
-  stageSummaries: '阶段摘要',
-  promptVersions: 'Prompt 版本',
-  promptContextSnapshots: '上下文快照',
-  chapterContinuityBridges: '章节衔接',
-  chapterGenerationJobs: '生产流水线任务',
-  chapterGenerationSteps: '生产流水线步骤',
-  generatedChapterDrafts: '章节草稿',
-  memoryUpdateCandidates: '记忆更新候选',
-  consistencyReviewReports: '一致性报告',
-  contextBudgetProfiles: '上下文预算',
-  qualityGateReports: '质量门禁报告',
-  generationRunTraces: '生成追踪',
-  redundancyReports: '冗余报告',
-  revisionCandidates: '修订候选',
-  revisionSessions: '修订会话',
-  revisionRequests: '修订请求',
-  revisionVersions: '修订版本',
-  chapterVersions: '章节历史版本'
-}
-
-function clone<T>(value: T): T {
-  return structuredClone(value)
-}
-
-function asEntity(value: unknown): Entity {
-  return value && typeof value === 'object' ? (value as Entity) : {}
-}
-
-function getId(value: unknown): ID | null {
-  const id = asEntity(value).id
-  return typeof id === 'string' && id ? id : null
-}
-
-function getProjectId(value: unknown): ID | null {
-  const projectId = asEntity(value).projectId
-  return typeof projectId === 'string' && projectId ? projectId : null
-}
-
-function getTitle(value: unknown): string | undefined {
-  const entity = asEntity(value)
-  const title = entity.title ?? entity.name ?? entity.note ?? entity.source
-  if (typeof title === 'string' && title.trim()) return title
-  if (typeof entity.order === 'number') return `第 ${entity.order} 章`
-  return getId(value) ?? undefined
-}
-
-function sortDeep(value: unknown): unknown {
-  if (Array.isArray(value)) return value.map(sortDeep)
-  if (!value || typeof value !== 'object') return value
-  return Object.keys(value as Record<string, unknown>)
-    .sort()
-    .reduce<Record<string, unknown>>((acc, key) => {
-      acc[key] = sortDeep((value as Record<string, unknown>)[key])
-      return acc
-    }, {})
-}
-
-export function deepEqualEntity(a: unknown, b: unknown): boolean {
-  return JSON.stringify(sortDeep(a)) === JSON.stringify(sortDeep(b))
-}
-
-function makeImportedId(oldId: ID, collection: string): ID {
-  return `${oldId}-import-${collection}-${randomUUID()}`
-}
-
-function getRemap(remaps: IdRemaps, collection: AppDataArrayKey): IdMap {
-  remaps[collection] ??= new Map<ID, ID>()
-  return remaps[collection] as IdMap
-}
-
-function rememberId(remaps: IdRemaps, collection: AppDataArrayKey, oldId: ID, newId: ID) {
-  getRemap(remaps, collection).set(oldId, newId)
-  remaps.any.set(oldId, newId)
-}
-
-function remapId(remaps: IdRemaps, id: unknown, collection?: AppDataArrayKey): unknown {
-  if (typeof id !== 'string') return id
-  if (collection && remaps[collection]?.has(id)) return remaps[collection]?.get(id)
-  return remaps.any.get(id) ?? id
-}
-
-function isIdKey(key: string): boolean {
-  return key === 'id' || key.endsWith('Id')
-}
-
-function isIdsKey(key: string): boolean {
-  return key.endsWith('Ids')
-}
-
-function remapReferencesDeep(value: unknown, remaps: IdRemaps, key = ''): unknown {
-  if (Array.isArray(value)) {
-    if (isIdsKey(key)) return value.map((entry) => remapId(remaps, entry))
-    return value.map((entry) => remapReferencesDeep(entry, remaps))
+function remapImportedEntityReferences(data: AppData, remaps: IdRemaps, importedEntities: ImportedEntities) {
+  for (const collection of ALL_ENTITY_COLLECTIONS) {
+    const items = getCollection(data, collection).map((item) => {
+      if (!item || typeof item !== 'object' || !importedEntities.has(item)) return item
+      return remapReferencesDeep(item, remaps)
+    })
+    setCollection(data, collection, items)
   }
-  if (!value || typeof value !== 'object') {
-    return isIdKey(key) ? remapId(remaps, value) : value
-  }
-  return Object.entries(value as Entity).reduce<Entity>((acc, [entryKey, entryValue]) => {
-    if (entryKey === 'id') {
-      acc[entryKey] = entryValue
-    } else if (entryKey === 'projectId') {
-      acc[entryKey] = remapId(remaps, entryValue, 'projects')
-    } else if (isIdKey(entryKey)) {
-      acc[entryKey] = remapId(remaps, entryValue)
-    } else if (isIdsKey(entryKey) && Array.isArray(entryValue)) {
-      acc[entryKey] = entryValue.map((entry) => remapId(remaps, entry))
-    } else {
-      acc[entryKey] = remapReferencesDeep(entryValue, remaps, entryKey)
-    }
-    return acc
-  }, {})
-}
-
-function summarizeDataFile(data: AppData): DataFileSummary {
-  const updatedAt =
-    data.projects
-      .map((project) => project.updatedAt)
-      .filter(Boolean)
-      .sort()
-      .at(-1) ?? null
-  return {
-    projectCount: data.projects.length,
-    chapterCount: data.chapters.length,
-    characterCount: data.characters.length,
-    foreshadowingCount: data.foreshadowings.length,
-    memoryCandidateCount: data.memoryUpdateCandidates.length,
-    promptVersionCount: data.promptVersions.length,
-    pipelineJobCount: data.chapterGenerationJobs.length,
-    updatedAt
-  }
-}
-
-function collectionName(collection: AppDataArrayKey): string {
-  return COLLECTION_LABELS[collection] ?? String(collection)
-}
-
-function indexById(items: unknown[]): Map<ID, unknown> {
-  const map = new Map<ID, unknown>()
-  for (const item of items) {
-    const id = getId(item)
-    if (id) map.set(id, item)
-  }
-  return map
-}
-
-function pushOperation(
-  operations: DataMergeOperation[],
-  collection: AppDataArrayKey,
-  action: DataMergeOperation['action'],
-  entity: unknown,
-  reason: string
-) {
-  operations.push({
-    collection: collectionName(collection),
-    action,
-    entityId: getId(entity) ?? getProjectId(entity) ?? undefined,
-    entityTitle: getTitle(entity),
-    reason
-  })
-}
-
-function pushConflict(
-  conflicts: DataMergeConflict[],
-  collection: AppDataArrayKey,
-  source: unknown,
-  target: unknown,
-  reason: string,
-  resolution: DataMergeConflict['resolution']
-) {
-  conflicts.push({
-    collection: collectionName(collection),
-    entityId: getId(source) ?? getProjectId(source) ?? 'unknown',
-    sourceTitle: getTitle(source),
-    targetTitle: getTitle(target),
-    reason,
-    resolution
-  })
 }
 
 function getCollection(data: AppData, collection: AppDataArrayKey): unknown[] {
@@ -263,14 +74,20 @@ function mergeProjects(
   sourceData: AppData,
   mergedData: AppData,
   remaps: IdRemaps,
-  operations: DataMergeOperation[]
+  importedEntities: ImportedEntities,
+  operations: DataMergeOperation[],
+  conflicts: DataMergeConflict[]
 ) {
   const targetProjects = indexById(mergedData.projects)
+  const seenSource = new Map<string, unknown>()
   for (const sourceProject of sourceData.projects) {
+    if (shouldSkipDuplicateSource('projects', sourceProject, seenSource, operations, conflicts)) continue
     const sourceId = sourceProject.id
     const targetProject = targetProjects.get(sourceId)
     if (!targetProject) {
-      mergedData.projects.push(clone(sourceProject))
+      const copiedProject = clone(sourceProject)
+      mergedData.projects.push(copiedProject)
+      importedEntities.add(copiedProject)
       rememberId(remaps, 'projects', sourceId, sourceId)
       pushOperation(operations, 'projects', 'add_from_source', sourceProject, '目标文件中不存在该项目，已追加。')
       continue
@@ -288,6 +105,7 @@ function mergeProjects(
       updatedAt: new Date().toISOString()
     }
     mergedData.projects.push(copiedProject)
+    importedEntities.add(copiedProject)
     rememberId(remaps, 'projects', sourceId, newId)
     pushOperation(
       operations,
@@ -304,6 +122,7 @@ function mergeProjectScopedCollection(
   sourceData: AppData,
   mergedData: AppData,
   remaps: IdRemaps,
+  importedEntities: ImportedEntities,
   operations: DataMergeOperation[],
   conflicts: DataMergeConflict[]
 ) {
@@ -311,19 +130,21 @@ function mergeProjectScopedCollection(
   const mergedItems = getCollection(mergedData, collection)
   const targetById = indexById(mergedItems)
   const targetByProjectId = new Map<string, unknown>()
+  const seenSource = new Map<string, unknown>()
   for (const item of mergedItems) {
     const projectId = getProjectId(item)
     if (projectId && !getId(item)) targetByProjectId.set(projectId, item)
   }
 
   for (const sourceItem of sourceItems) {
+    if (shouldSkipDuplicateSource(collection, sourceItem, seenSource, operations, conflicts)) continue
     const sourceEntity = asEntity(sourceItem)
     const sourceId = getId(sourceEntity)
     const sourceProjectId = getProjectId(sourceEntity)
     const projectWasRemapped = hasProjectRemap(remaps, sourceProjectId)
     const targetItem = sourceId ? targetById.get(sourceId) : sourceProjectId ? targetByProjectId.get(sourceProjectId) : undefined
 
-    if (targetItem && !projectWasRemapped && deepEqualEntity(sourceItem, targetItem)) {
+    if (targetItem && !projectWasRemapped && equalForMerge(collection, sourceItem, targetItem)) {
       if (sourceId) rememberId(remaps, collection, sourceId, sourceId)
       pushOperation(operations, collection, 'dedupe_same_id', sourceItem, '同 ID 且内容一致，保留目标文件中的记录。')
       continue
@@ -359,6 +180,7 @@ function mergeProjectScopedCollection(
       pushOperation(operations, collection, 'add_from_source', remappedEntity, '目标文件中不存在该项目级记录，已追加。')
     }
     mergedItems.push(remappedEntity)
+    importedEntities.add(remappedEntity)
   }
   setCollection(mergedData, collection, mergedItems)
 }
@@ -368,18 +190,21 @@ function mergeDependentCollection(
   sourceData: AppData,
   mergedData: AppData,
   remaps: IdRemaps,
+  importedEntities: ImportedEntities,
   operations: DataMergeOperation[],
   conflicts: DataMergeConflict[]
 ) {
   const sourceItems = getCollection(sourceData, collection)
   const mergedItems = getCollection(mergedData, collection)
   const targetById = indexById(mergedItems)
+  const seenSource = new Map<string, unknown>()
 
   for (const sourceItem of sourceItems) {
+    if (shouldSkipDuplicateSource(collection, sourceItem, seenSource, operations, conflicts)) continue
     const sourceId = getId(sourceItem)
     if (!sourceId) continue
     const targetItem = targetById.get(sourceId)
-    if (targetItem && deepEqualEntity(sourceItem, targetItem)) {
+    if (targetItem && equalForMerge(collection, sourceItem, targetItem)) {
       rememberId(remaps, collection, sourceId, sourceId)
       pushOperation(operations, collection, 'dedupe_same_id', sourceItem, '同 ID 且内容一致，保留目标文件中的记录。')
       continue
@@ -396,6 +221,7 @@ function mergeDependentCollection(
     remappedEntity.id = newId
     rememberId(remaps, collection, sourceId, newId)
     mergedItems.push(remappedEntity)
+    importedEntities.add(remappedEntity)
     pushOperation(
       operations,
       collection,
@@ -432,14 +258,30 @@ export function mergeAppData(
   const operations: DataMergeOperation[] = []
   const conflicts: DataMergeConflict[] = []
   const warnings: string[] = ['合并采用保守追加策略：目标文件为主，源文件不会静默覆盖目标数据。']
-  const remaps: IdRemaps = { any: new Map<ID, ID>() }
+  const remaps = createIdRemaps()
+  const importedEntities: ImportedEntities = new WeakSet<object>()
 
-  mergeProjects(sourceData, mergedData, remaps, operations)
+  mergeProjects(sourceData, mergedData, remaps, importedEntities, operations, conflicts)
   for (const collection of PROJECT_SCOPED_COLLECTIONS) {
-    mergeProjectScopedCollection(collection, sourceData, mergedData, remaps, operations, conflicts)
+    mergeProjectScopedCollection(collection, sourceData, mergedData, remaps, importedEntities, operations, conflicts)
   }
   for (const collection of DEPENDENT_COLLECTIONS) {
-    mergeDependentCollection(collection, sourceData, mergedData, remaps, operations, conflicts)
+    mergeDependentCollection(collection, sourceData, mergedData, remaps, importedEntities, operations, conflicts)
+  }
+  // Some payloads embed full entities (for example commit bundles and prompt snapshots),
+  // while their target IDs may only be discovered later in the first merge pass.
+  remapImportedEntityReferences(mergedData, remaps, importedEntities)
+  if (remaps.unresolvedGenericReferences.size > 0) {
+    const unresolvedIds = [...remaps.unresolvedGenericReferences]
+    warnings.push(
+      `源文件跨集合复用了 ID，且存在无法按字段类型判定的引用：${unresolvedIds.slice(0, 5).join('、')}${unresolvedIds.length > 5 ? '…' : ''}`
+    )
+    conflicts.push({
+      collection: '全局引用',
+      entityId: unresolvedIds[0],
+      reason: '跨集合重复 ID 出现在 affectedIds、sourceId 等混合引用中，自动重映射可能连接到错误实体。',
+      resolution: 'unresolved'
+    })
   }
 
   const sanitizedMergedData = sanitizeAppDataForPersistence(mergedData)
@@ -469,75 +311,35 @@ export function mergeAppData(
   return { mergedData: sanitizedMergedData, preview }
 }
 
-function isSqliteDataPath(path: string): boolean {
-  return /\.(sqlite|db)$/i.test(path)
-}
-
-async function loadDataFile(path: string): Promise<AppData> {
-  if (isSqliteDataPath(path)) {
-    return new SqliteStorageService(path).load()
-  }
-  const raw = await readFile(path, 'utf-8')
-  const parsed = JSON.parse(raw) as AppData
-  return normalizeAppData(parsed)
-}
-
-async function saveDataFile(path: string, data: AppData): Promise<AppData> {
-  const storage = isSqliteDataPath(path) ? new SqliteStorageService(path) : new JsonStorageService(path)
-  await storage.save(data)
-  return storage.load()
-}
-
 export async function createMigrationMergePreview(sourcePath: string, targetPath: string): Promise<DataMergePreview> {
-  const sourceData = await loadDataFile(sourcePath)
-  const targetData = await loadDataFile(targetPath)
-  return mergeAppData(sourceData, targetData, { sourcePath, targetPath }).preview
+  const sourceSnapshot = await loadDataFileSnapshot(sourcePath)
+  const targetSnapshot = await loadDataFileSnapshot(targetPath)
+  return mergeAppData(sourceSnapshot.data, targetSnapshot.data, { sourcePath, targetPath }).preview
 }
 
-function timestampForFile(): string {
-  return new Date().toISOString().replace(/[-:]/g, '').replace(/\..+$/, '').replace('T', '-')
-}
-
-async function assertFileExists(path: string) {
-  const fileStat = await stat(path)
-  if (!fileStat.isFile()) throw new Error(`路径不是数据文件：${path}`)
-}
-
-export async function backupFileForOverwrite(path: string): Promise<string> {
-  await assertFileExists(path)
-  const backupPath = `${path}.target.before-overwrite.${timestampForFile()}.json.bak`
-  await mkdir(dirname(backupPath), { recursive: true })
-  await copyFile(path, backupPath)
-  return backupPath
-}
-
-export async function backupBeforeMerge(
+export async function confirmMigrationMerge(
   sourcePath: string,
-  targetPath: string
-): Promise<{ sourceBackupPath: string; targetBackupPath: string }> {
-  await assertFileExists(sourcePath)
-  await assertFileExists(targetPath)
-  const stamp = timestampForFile()
-  const sourceBackupPath = `${sourcePath}.source.before-merge.${stamp}.json.bak`
-  const targetBackupPath = `${targetPath}.target.before-merge.${stamp}.json.bak`
-  await mkdir(dirname(sourceBackupPath), { recursive: true })
-  await mkdir(dirname(targetBackupPath), { recursive: true })
-  await copyFile(sourcePath, sourceBackupPath)
-  await copyFile(targetPath, targetBackupPath)
-  return { sourceBackupPath, targetBackupPath }
-}
-
-export async function confirmMigrationMerge(sourcePath: string, targetPath: string) {
-  const sourceData = await loadDataFile(sourcePath)
-  const targetData = await loadDataFile(targetPath)
-  const { mergedData, preview } = mergeAppData(sourceData, targetData, { sourcePath, targetPath })
+  targetPath: string,
+  expectedSourceRevision?: string
+) {
+  const sourceSnapshot = await loadDataFileSnapshot(sourcePath)
+  if (expectedSourceRevision !== undefined && sourceSnapshot.revision !== expectedSourceRevision) {
+    throw new StorageRevisionConflictError()
+  }
+  const targetSnapshot = await loadDataFileSnapshot(targetPath)
+  const { mergedData, preview } = mergeAppData(sourceSnapshot.data, targetSnapshot.data, { sourcePath, targetPath })
   if (!preview.canAutoMerge) {
     throw new Error('合并预览存在未解决冲突，已阻止自动合并。')
   }
   const backups = await backupBeforeMerge(sourcePath, targetPath)
-  const savedData = await saveDataFile(targetPath, mergedData)
+  const latestSourceSnapshot = await loadDataFileSnapshot(sourcePath)
+  if (latestSourceSnapshot.revision !== sourceSnapshot.revision) {
+    throw new StorageRevisionConflictError()
+  }
+  const savedSnapshot = await saveDataFile(targetPath, mergedData, targetSnapshot.revision)
   return {
-    data: savedData,
+    data: savedSnapshot.data,
+    revision: savedSnapshot.revision,
     preview,
     ...backups
   }

@@ -108,19 +108,23 @@ function renderMemoryPatchDetails(candidate: MemoryUpdateCandidate, scoped: Proj
   return <pre>{JSON.stringify(patch, null, 2).slice(0, 900)}</pre>
 }
 
-export function PipelineMemoryCandidatesPanel({
-  candidates,
-  scoped,
-  onAccept,
-  onAcceptAll,
-  onReject
-}: {
+export interface PipelineMemoryCandidatesPanelProps {
   candidates: MemoryUpdateCandidate[]
   scoped: ProjectDataSnapshot
   onAccept: (candidate: MemoryUpdateCandidate) => void
   onAcceptAll: (candidates: MemoryUpdateCandidate[]) => void
   onReject: (candidate: MemoryUpdateCandidate) => void
-}) {
+  disabled?: boolean
+}
+
+export function PipelineMemoryCandidatesPanel({
+  candidates,
+  scoped,
+  onAccept,
+  onAcceptAll,
+  onReject,
+  disabled = false
+}: PipelineMemoryCandidatesPanelProps) {
   const pending = candidates.filter((candidate) => candidate.status === 'pending')
   const handled = candidates.filter((candidate) => candidate.status !== 'pending')
   const pendingByType = pending.reduce<Record<string, MemoryUpdateCandidate[]>>((groups, candidate) => {
@@ -137,7 +141,7 @@ export function PipelineMemoryCandidatesPanel({
       </div>
       {pending.length ? (
         <div className="row-actions">
-          <button className="primary-button" onClick={() => onAcceptAll(pending)}>
+          <button className="primary-button" disabled={disabled} onClick={() => onAcceptAll(pending)}>
             一键通过待确认
           </button>
         </div>
@@ -157,10 +161,10 @@ export function PipelineMemoryCandidatesPanel({
                 <p className="muted">{candidate.evidence || '暂无证据文本'}</p>
                 {renderMemoryPatchDetails(candidate, scoped)}
                 <div className="row-actions">
-                  <button className="primary-button" onClick={() => onAccept(candidate)}>
+                  <button className="primary-button" disabled={disabled} onClick={() => onAccept(candidate)}>
                     接受
                   </button>
-                  <button className="danger-button" onClick={() => onReject(candidate)}>
+                  <button className="danger-button" disabled={disabled} onClick={() => onReject(candidate)}>
                     拒绝
                   </button>
                 </div>

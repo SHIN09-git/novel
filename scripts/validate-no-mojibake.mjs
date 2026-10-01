@@ -1,7 +1,9 @@
 import fs from 'node:fs'
 import path from 'node:path'
+import { fileURLToPath } from 'node:url'
 
-const root = process.cwd()
+const root = path.dirname(path.dirname(fileURLToPath(import.meta.url)))
+
 const scanRoots = [
   'README.md',
   'ROADMAP.md',
@@ -11,6 +13,8 @@ const scanRoots = [
   'TESTING.md',
   'QUICKSTART.md',
   'PUBLIC_RELEASE_CHECKLIST.md',
+  'docs',
+  'scripts',
   'src'
 ]
 
@@ -36,7 +40,7 @@ const publicDocFiles = new Set([
   'PUBLIC_RELEASE_CHECKLIST.md'
 ])
 
-const chineseTerms = [
+const cleanChineseTerms = [
   '简体中文',
   '路线图',
   '当前状态',
@@ -76,57 +80,54 @@ const chineseTerms = [
   '圣经',
   '公开',
   '安装包',
-  '本地'
+  '本地',
+  '接受',
+  '覆盖',
+  '章节复盘',
+  '角色更新',
+  '伏笔更新',
+  '提取失败',
+  '正式修订提交',
+  '未命名修订',
+  '状态事实',
+  '缺少章节正文草稿',
+  '无法复盘',
+  '无法提取角色更新',
+  '无法提取伏笔更新'
 ]
 
+function decodeUtf8BytesAs(encoding, text) {
+  const bytes = Buffer.from(text, 'utf8')
+  return new TextDecoder(encoding, { fatal: false }).decode(bytes)
+}
+
 function mojibakeVariants(term) {
-  const bytes = Buffer.from(term, 'utf8')
   return [
-    // Common symptom: UTF-8 bytes decoded as GBK/GB18030 before being saved again.
-    new TextDecoder('gb18030', { fatal: false }).decode(bytes),
-    // Common symptom: UTF-8 bytes decoded as Windows-1252 before being saved again.
-    new TextDecoder('windows-1252', { fatal: false }).decode(bytes)
+    decodeUtf8BytesAs('gb18030', term),
+    decodeUtf8BytesAs('windows-1252', term)
   ].filter((value) => value && value !== term && value.length >= 2)
 }
 
-const mojibakePatterns = [...new Set(chineseTerms.flatMap(mojibakeVariants))]
-const hardFailurePatterns = [
-  '\uFFFD',
-  'Ã',
-  'Â',
-  'â€™',
-  'â€œ',
-  'â€',
-  '鈥',
-  '銆',
-  '锛',
-  '鐨',
-  '鍦',
-  '绔犺',
-  '浼忕',
-  '瑙掕',
-  '闇€',
-  '鏈',
-  '鍓ф',
-  '纭',
-  '棰勭'
-]
+function fromCodePoints(values) {
+  return String.fromCodePoint(...values)
+}
 
-const extraHardFailurePatterns = [
-  '搴旂敤妗ユ帴',
-  '璇诲彇鏁版嵁',
-  '淇濆瓨澶辫触',
-  '姝ｅ湪淇濆瓨',
-  '姝ｅ湪鎻愪氦',
-  '鐢熸垚杩愯',
-  'AI 璋冪敤',
-  'AI 杈撳嚭',
-  'AI 杩斿洖',
-  '瑙ｆ瀽澶辫触',
-  'AI 妯″瀷',
-  '鏈厤缃',
-  '璺宠繃杩滅▼'
-]
+const generatedMojibakePatterns = [...new Set(cleanChineseTerms.flatMap(mojibakeVariants))]
+
+// Keep literal mojibake out of this source file; construct high-confidence markers
+// from code points so the validator can also scan itself safely.
+const highConfidenceMarkers = [
+  [0xfffd],
+  [0x93ba, 0x30e5],
+  [0x947d, 0x592f],
+  [0x7f02, 0x54c4],
+  [0x7455, 0x55d9],
+  [0x6dc7, 0xe186],
+  [0x59dd, 0x548c],
+  [0x9418, 0x8216],
+  [0x936e, 0x5d86],
+  [0x9435, 0x7190]
+].map(fromCodePoints)
 
 function walk(target, files = []) {
   const absolute = path.join(root, target)
@@ -157,6 +158,17 @@ function assert(condition, message) {
   if (!condition) throw new Error(message)
 }
 
+function findMojibakeMarker(line) {
+  const privateUseMatch = line.match(/[\uE000-\uF8FF]/u)
+  if (privateUseMatch) return `private-use marker ${JSON.stringify(privateUseMatch[0])}`
+  const marker = [...highConfidenceMarkers, ...generatedMojibakePatterns].find((pattern) => line.includes(pattern))
+  return marker ? `marker ${JSON.stringify(marker)}` : null
+}
+
+for (const term of cleanChineseTerms) {
+  assert(!findMojibakeMarker(term), `validate-no-mojibake clean term list contains corrupted text: ${JSON.stringify(term)}`)
+}
+
 const files = [...new Set(scanRoots.flatMap((target) => walk(target)))]
 const failures = []
 
@@ -164,18 +176,12 @@ for (const file of files) {
   const rel = relative(file)
   const buffer = fs.readFileSync(file)
   const text = buffer.toString('utf8')
-
-  if (text.includes('\uFFFD')) {
-    failures.push(`${rel}: contains UTF-8 replacement character U+FFFD`)
-    continue
-  }
-
   const lines = text.split(/\r?\n/)
+
   for (let index = 0; index < lines.length; index += 1) {
-    const line = lines[index]
-    const match = [...hardFailurePatterns, ...extraHardFailurePatterns, ...mojibakePatterns].find((pattern) => line.includes(pattern))
-    if (match) {
-      failures.push(`${rel}:${index + 1}: suspicious mojibake marker ${JSON.stringify(match)} in ${JSON.stringify(line.slice(0, 180))}`)
+    const marker = findMojibakeMarker(lines[index])
+    if (marker) {
+      failures.push(`${rel}:${index + 1}: suspicious mojibake ${marker} in ${JSON.stringify(lines[index].slice(0, 180))}`)
       break
     }
   }

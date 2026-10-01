@@ -40,6 +40,52 @@ function parseCandidate<T>(rawText: string, candidate: string, source: JsonParse
   }
 }
 
+function escapeControlCharactersInsideJsonStrings(candidate: string): string | null {
+  let inString = false
+  let escaped = false
+  let changed = false
+  let repaired = ''
+
+  for (const character of candidate) {
+    if (!inString) {
+      repaired += character
+      if (character === '"') inString = true
+      continue
+    }
+
+    if (escaped) {
+      repaired += character
+      escaped = false
+      continue
+    }
+    if (character === '\\') {
+      repaired += character
+      escaped = true
+      continue
+    }
+    if (character === '"') {
+      repaired += character
+      inString = false
+      continue
+    }
+
+    const code = character.charCodeAt(0)
+    if (code > 0x1f) {
+      repaired += character
+      continue
+    }
+    changed = true
+    if (character === '\b') repaired += '\\b'
+    else if (character === '\f') repaired += '\\f'
+    else if (character === '\n') repaired += '\\n'
+    else if (character === '\r') repaired += '\\r'
+    else if (character === '\t') repaired += '\\t'
+    else repaired += `\\u${code.toString(16).padStart(4, '0')}`
+  }
+
+  return changed ? repaired : null
+}
+
 export function safeParseJson<T = unknown>(text: string, schemaName = 'AI JSON'): JsonParseResult<T> {
   const rawText = typeof text === 'string' ? text : String(text ?? '')
   const trimmed = rawText.trim()
@@ -83,7 +129,33 @@ export function safeParseJson<T = unknown>(text: string, schemaName = 'AI JSON')
 }
 
 export function parseWithFallback<T = unknown>(text: string, schemaName = 'AI JSON'): JsonParseResult<T> {
-  return safeParseJson<T>(text, schemaName)
+  const parsed = safeParseJson<T>(text, schemaName)
+  if (parsed.ok) return parsed
+
+  const rawText = typeof text === 'string' ? text : String(text ?? '')
+  const trimmed = rawText.trim()
+  const fenced = stripCodeFences(trimmed)
+  const candidates: Array<{ text: string; source: JsonParseSuccess['source'] }> = [
+    { text: trimmed, source: 'direct' },
+    ...(fenced !== trimmed ? [{ text: fenced, source: 'code_fence' as const }] : []),
+    ...(() => {
+      const value = sliceBetween(trimmed, '{', '}')
+      return value ? [{ text: value, source: 'object_slice' as const }] : []
+    })(),
+    ...(() => {
+      const value = sliceBetween(trimmed, '[', ']')
+      return value ? [{ text: value, source: 'array_slice' as const }] : []
+    })()
+  ]
+  const attempted = new Set<string>()
+  for (const candidate of candidates) {
+    const repaired = escapeControlCharactersInsideJsonStrings(candidate.text)
+    if (!repaired || attempted.has(repaired)) continue
+    attempted.add(repaired)
+    const result = parseCandidate<T>(rawText, repaired, candidate.source)
+    if (result) return result
+  }
+  return parsed
 }
 
 export function normalizeAIError(error: unknown): string {

@@ -1,4 +1,5 @@
 import type { ID, RedundancyReport } from '../shared/types'
+import { draftContentHash } from './DraftDiagnosticBindingService'
 
 const COMMON_INTENSIFIERS = ['极其', '彻底', '完全', '深不见底', '令人牙酸', '无法形容', '某种', '仿佛', '像是']
 
@@ -53,6 +54,7 @@ export function analyzeRedundancy(options: {
     projectId: options.projectId,
     chapterId: options.chapterId,
     draftId: options.draftId,
+    draftContentHash: draftContentHash(options.body),
     repeatedPhrases,
     repeatedSceneDescriptions,
     repeatedExplanations,

@@ -1,4 +1,5 @@
 import type { ReactNode } from 'react'
+import { useBufferedField } from '../hooks/useBufferedField'
 
 export function Field({
   label,
@@ -22,16 +23,31 @@ export function TextInput({
   label,
   value,
   onChange,
-  placeholder
+  placeholder,
+  onBlur,
+  debounceMs,
+  bufferKey
 }: {
   label: string
   value: string
-  onChange: (value: string) => void
+  onChange: (value: string) => void | Promise<unknown>
   placeholder?: string
+  onBlur?: () => void
+  debounceMs?: number
+  bufferKey?: string | number | null
 }) {
+  const buffered = useBufferedField({ value, onCommit: onChange, delayMs: debounceMs, resetKey: bufferKey })
   return (
     <Field label={label}>
-      <input value={value} placeholder={placeholder} onChange={(event) => onChange(event.target.value)} />
+      <input
+        value={buffered.value}
+        placeholder={placeholder}
+        onBlur={() => {
+          buffered.flush()
+          onBlur?.()
+        }}
+        onChange={(event) => buffered.onChange(event.target.value)}
+      />
     </Field>
   )
 }
@@ -40,18 +56,23 @@ export function NumberInput({
   label,
   value,
   onChange,
-  min
+  min,
+  max,
+  hint
 }: {
   label: string
   value: number | null
   onChange: (value: number | null) => void
   min?: number
+  max?: number
+  hint?: string
 }) {
   return (
-    <Field label={label}>
+    <Field label={label} hint={hint}>
       <input
         type="number"
         min={min}
+        max={max}
         value={value ?? ''}
         onChange={(event) => {
           const raw = event.target.value
@@ -70,26 +91,34 @@ export function TextArea({
   hint,
   placeholder,
   onBlur,
-  className
+  className,
+  debounceMs,
+  bufferKey
 }: {
   label: string
   value: string
-  onChange: (value: string) => void
+  onChange: (value: string) => void | Promise<unknown>
   rows?: number
   hint?: string
   placeholder?: string
   onBlur?: () => void
   className?: string
+  debounceMs?: number
+  bufferKey?: string | number | null
 }) {
+  const buffered = useBufferedField({ value, onCommit: onChange, delayMs: debounceMs, resetKey: bufferKey })
   return (
     <Field label={label} hint={hint}>
       <textarea
         className={className}
         rows={rows}
-        value={value}
+        value={buffered.value}
         placeholder={placeholder}
-        onBlur={onBlur}
-        onChange={(event) => onChange(event.target.value)}
+        onBlur={() => {
+          buffered.flush()
+          onBlur?.()
+        }}
+        onChange={(event) => buffered.onChange(event.target.value)}
       />
     </Field>
   )

@@ -133,7 +133,22 @@ function fallbackGeneration(input: GenerateStoryDirectionGuideInput): StoryDirec
 function summaryForPrompt(stageSummaries: StageSummary[]): string {
   return stageSummaries
     .slice(-6)
-    .map((summary) => `${StageSummaryService.coveredChapterRange(summary)}：${StageSummaryService.compressedPlotSummary(summary) || summary.endingCarryoverState || ''}`)
+    .map((summary) => {
+      const content = StageSummaryService.compressedPlotSummary(summary) || summary.endingCarryoverState || ''
+      return content.trim() ? `${StageSummaryService.coveredChapterRange(summary)}：${content}` : ''
+    })
+    .filter(Boolean)
+    .join('\n')
+}
+
+function chapterSummaryForPrompt(chapters: Chapter[]): string {
+  return chapters
+    .slice(-5)
+    .map((chapter) => {
+      const summary = [chapter.summary, chapter.endingHook].map((item) => item?.trim()).filter(Boolean).join('；')
+      return summary ? `第 ${chapter.order} 章 ${chapter.title}：${summary}` : ''
+    })
+    .filter(Boolean)
     .join('\n')
 }
 
@@ -145,8 +160,12 @@ export class StoryDirectionAI {
       '你是长篇小说总纲编辑。请把用户粗写的未来剧情想法润色为中期剧情纲领。只整理、澄清、压缩和增强执行性，不新增硬设定，不写正文，不替用户擅自决定不可逆重大转折。必须返回 strict JSON。'
     const userPrompt = [
       `项目：${input.project.name}`,
-      `用户原始想法：${input.userRawIdea || '（无）'}`,
-      `近期阶段摘要：\n${summaryForPrompt(input.recentStageSummaries) || '（暂无）'}`,
+      input.userRawIdea.trim()
+        ? `用户原始想法：${input.userRawIdea.trim()}`
+        : '用户未输入原始想法；请只基于已提供的阶段摘要整理导向，不要替用户新增硬设定或不可逆转折。',
+      summaryForPrompt(input.recentStageSummaries)
+        ? `近期阶段摘要：\n${summaryForPrompt(input.recentStageSummaries)}`
+        : '未提供近期阶段摘要；请在 warnings 中提示历史上下文不足，不要编造已经发生的剧情。',
       input.activeGuide ? `当前 active 导向：${input.activeGuide.title}\n${input.activeGuide.aiGuidance}` : '',
       '请返回 JSON：{"polishedIdea":"","preservedUserIntent":"","assumptions":[],"constraints":[],"warnings":[]}'
     ]
@@ -158,17 +177,23 @@ export class StoryDirectionAI {
   async generateStoryDirectionGuide(input: GenerateStoryDirectionGuideInput): Promise<AIResult<StoryDirectionGenerationResult>> {
     const systemPrompt =
       '你是长篇小说剧情导演。请基于用户纲领、阶段摘要、近期章节、角色、伏笔、时间线和硬设定，生成未来 5/10 章的中期剧情指导。这不是正文，不是详细大纲，而是供章节生成使用的方向性 beat sheet。不得违反已有事实；新角色、新机制、新组织、新世界观只能作为候选，不能当成稳定 canon。必须返回 strict JSON。'
+    const stageSummaryText = summaryForPrompt(input.stageSummaries)
+    const recentChapterText = chapterSummaryForPrompt(input.recentChapters)
+    const characterText = input.characters.map((character) => character.name).filter(Boolean).join('、')
+    const foreshadowingText = input.activeForeshadowings.map((item) => `${item.title}(${item.treatmentMode}/${item.status})`).join('、')
+    const timelineText = input.timelineEvents.slice(-10).map((event) => event.title).filter(Boolean).join('、')
+    const hardCanonText = input.storyBible?.immutableFacts?.trim() || input.storyBible?.worldbuilding?.trim() || ''
     const userPrompt = [
       `项目：${input.project.name}`,
       `覆盖范围：从第 ${input.startChapterOrder} 章开始，未来 ${input.horizonChapters} 章`,
-      `用户原始想法：${input.userRawIdea || '（无）'}`,
-      `润色纲领：${input.userPolishedIdea || '（无）'}`,
-      `阶段摘要：\n${summaryForPrompt(input.stageSummaries) || '（暂无）'}`,
-      `近期章节：\n${input.recentChapters.slice(-5).map((chapter) => `第 ${chapter.order} 章 ${chapter.title}：${chapter.summary}`).join('\n')}`,
-      `角色：${input.characters.map((character) => character.name).join('、')}`,
-      `活跃伏笔：${input.activeForeshadowings.map((item) => `${item.title}(${item.treatmentMode}/${item.status})`).join('、')}`,
-      `时间线事件：${input.timelineEvents.slice(-10).map((event) => event.title).join('、')}`,
-      `硬设定：${input.storyBible?.immutableFacts || input.storyBible?.worldbuilding || '（暂无）'}`,
+      input.userRawIdea.trim() ? `用户原始想法：${input.userRawIdea.trim()}` : '',
+      input.userPolishedIdea.trim() ? `润色纲领：${input.userPolishedIdea.trim()}` : '',
+      stageSummaryText ? `阶段摘要：\n${stageSummaryText}` : '未提供阶段摘要；请在 warnings 中提示历史上下文不足，不要编造已发生剧情。',
+      recentChapterText ? `近期章节：\n${recentChapterText}` : '未提供近期章节摘要；不要假定上一章发生过未给出的事件。',
+      characterText ? `角色：${characterText}` : '未提供角色清单；不得擅自新增命名角色作为稳定设定。',
+      foreshadowingText ? `活跃伏笔：${foreshadowingText}` : '未提供活跃伏笔；不要替用户新增必须回收的伏笔。',
+      timelineText ? `时间线事件：${timelineText}` : '未提供时间线事件；不要新增不可逆时间锚点。',
+      hardCanonText ? `硬设定：${hardCanonText}` : '未提供硬设定；不得自行补充新世界规则或系统机制。',
       '每个 chapterBeat 必须包含 chapterOffset、chapterOrder、goal、conflict、characterFocus、foreshadowingToUse、foreshadowingNotToReveal、suspenseToKeep、endingHook、readerEmotion、mustAvoid、notes。',
       '请返回 JSON：{"title":"","aiGuidance":"","strategicTheme":"","coreDramaticPromise":"","emotionalCurve":"","characterArcDirectives":"","foreshadowingDirectives":"","constraints":"","forbiddenTurns":"","chapterBeats":[],"warnings":[]}'
     ]

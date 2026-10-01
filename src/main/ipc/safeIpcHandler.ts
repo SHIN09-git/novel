@@ -17,9 +17,13 @@ export function safeIpcHandler<TArgs extends unknown[], TResult>(
     } catch (error) {
       LogService.error('IPC handler failed', error)
       logSafeError('IPC handler failed', error)
+      const code = error && typeof error === 'object' && 'code' in error && typeof error.code === 'string'
+        ? error.code
+        : undefined
       return {
         ok: false,
-        error: redactSensitiveText(getUserFriendlyError(error)).slice(0, 800)
+        error: redactSensitiveText(getUserFriendlyError(error)).slice(0, 800),
+        code
       }
     }
   }

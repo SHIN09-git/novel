@@ -12,6 +12,7 @@ tmp/
 .env*
 !.env.example
 *.local
+.claude/
 
 # Generated launchers, packaged apps, and local release artifacts
 dist-launcher/
@@ -26,9 +27,13 @@ releases/
 ui-audit/screenshots/
 exports/
 local-exports/
+authoring/
+experiments/
+/QUICKSTART.docx
 
 # Storage safety files and backups
 *.bak
 *.corrupt.*.json
 *.tmp
 novel-director-data*.json
+novel-director-data*.sqlite*

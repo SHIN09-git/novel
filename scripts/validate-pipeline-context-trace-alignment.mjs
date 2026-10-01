@@ -1,7 +1,8 @@
 import { readFile } from 'node:fs/promises'
 import { join, resolve } from 'node:path'
+import { repoRoot } from './utils/repo-root.mjs'
 
-const root = resolve('.')
+const root = repoRoot
 
 function assert(condition, message, details = {}) {
   return condition ? { ok: true, message } : { ok: false, message, details }
@@ -27,6 +28,7 @@ async function main() {
     await readFile(join(root, 'src', 'services', 'PromptBuilderService.ts'), 'utf-8'),
     await readFile(join(root, 'src', 'services', 'promptFormatters', 'chapterFormatters.ts'), 'utf-8')
   ].join('\n')
+  const promptContractSource = await readFile(join(root, 'src', 'services', 'PromptContractReplayService.ts'), 'utf-8')
   const fixture = JSON.parse(await readFile(join(root, 'tmp', 'rc-regression', 'novel-director-data.json'), 'utf-8'))
 
   checks.push(
@@ -38,6 +40,15 @@ async function main() {
         typesSource.includes('noveltyAuditResult: NoveltyAuditResult | null') &&
         typesSource.includes('contextTokenEstimate: number'),
       'GenerationRunTrace models forced context blocks and compression records separately from budget-selected ids'
+    )
+  )
+
+  checks.push(
+    assert(
+      runnerSource.includes('ensureContinuityBridgeInPrompt') &&
+        promptContractSource.includes('insertSectionBeforeLowerPriority') &&
+        promptContractSource.includes("priority: 2"),
+      'forced continuity bridge is inserted before lower-priority sections and retains bridge authority priority'
     )
   )
 

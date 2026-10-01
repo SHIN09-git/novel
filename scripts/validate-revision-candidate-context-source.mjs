@@ -1,7 +1,8 @@
 import { readFile } from 'node:fs/promises'
 import { join, resolve } from 'node:path'
+import { repoRoot } from './utils/repo-root.mjs'
 
-const root = resolve('.')
+const root = repoRoot
 
 function assert(condition, message, details = {}) {
   return condition ? { ok: true, message } : { ok: false, message, details }
@@ -10,6 +11,10 @@ function assert(condition, message, details = {}) {
 async function main() {
   const checks = []
   const viewSource = await readFile(join(root, 'src', 'renderer', 'src', 'views', 'GenerationPipelineView.tsx'), 'utf-8')
+  const revisionActionsSource = [
+    await readFile(join(root, 'src', 'renderer', 'src', 'views', 'generation', 'usePipelineRevisionActions.ts'), 'utf-8'),
+    await readFile(join(root, 'src', 'renderer', 'src', 'views', 'generation', 'pipelineRevisionActionHandlers.ts'), 'utf-8')
+  ].join('\n')
   const revisionContextSource = await readFile(join(root, 'src', 'renderer', 'src', 'views', 'generation', 'revisionCandidateContext.ts'), 'utf-8')
   const promptContextSource = await readFile(join(root, 'src', 'renderer', 'src', 'utils', 'promptContext.ts'), 'utf-8')
   const promptBuilderSource = await readFile(join(root, 'src', 'services', 'PromptBuilderService.ts'), 'utf-8')
@@ -27,10 +32,11 @@ async function main() {
 
   checks.push(
     assert(
-      viewSource.includes("import('./generation/revisionCandidateContext')") &&
+      viewSource.includes('usePipelineRevisionActions') &&
+        revisionActionsSource.includes("import('./revisionCandidateContext')") &&
         !viewSource.includes("from '../utils/promptContext'") &&
         !viewSource.includes('buildPipelineContextFromSelection(project, data, targetOrder'),
-      'GenerationPipelineView lazy-loads revision candidate context rebuild logic instead of importing prompt builders'
+      'GenerationPipelineView delegates revision candidate context rebuild logic to a lazy action hook instead of importing prompt builders'
     )
   )
 
@@ -74,9 +80,9 @@ async function main() {
   checks.push(
     assert(
       revisionContextSource.includes("kind: 'quality_gate_issue'") &&
-        viewSource.includes('appendGenerationRunTraceForcedContextBlocks') &&
-        viewSource.includes('contextSource: revisionContext.contextSource') &&
-        viewSource.includes('contextWarnings: revisionContext.contextWarnings'),
+        revisionActionsSource.includes('appendGenerationRunTraceForcedContextBlocks') &&
+        revisionActionsSource.includes('contextSource: revisionContext.contextSource') &&
+        revisionActionsSource.includes('contextWarnings: revisionContext.contextWarnings'),
       'quality issue details are recorded as forced context and candidate metadata'
     )
   )
@@ -87,6 +93,14 @@ async function main() {
         typesSource.includes('contextSource?: RevisionCandidateContextSource') &&
         typesSource.includes('contextWarnings?: string[]'),
       'RevisionCandidate has optional context source metadata for traceability'
+    )
+  )
+
+  checks.push(
+    assert(
+      revisionActionsSource.includes("resolvePipelineRoleSettings(sourceJob?.aiRunConfig, data.settings, 'revision')") &&
+        revisionActionsSource.includes("new AIService(runSettings, { runId: sourceJob?.id ?? draft.jobId })"),
+      'revision candidate generation inherits the frozen source-run revision role and run identity'
     )
   )
 

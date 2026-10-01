@@ -2,8 +2,9 @@ import { mkdir, readFile, rm } from 'node:fs/promises'
 import { join, resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { build } from 'esbuild'
+import { repoRoot } from './utils/repo-root.mjs'
 
-const root = resolve('.')
+const root = repoRoot
 const outDir = join(root, 'tmp', 'hard-canon-pack-test')
 
 function assert(condition, message, details = {}) {
@@ -167,6 +168,25 @@ const tinyPack = makePack({ maxPromptTokens: 12 })
 const tiny = service.HardCanonPackService.compressHardCanonPackForPrompt(tinyPack)
 checks.push(assert(tiny.includedItemIds.includes('canon-must'), 'over budget keeps must items first'))
 
+const openingScoped = service.HardCanonPackService.compressHardCanonPackForPrompt(pack, {
+  allowedItemIds: ['canon-high'],
+  isOpeningChapter: true
+})
+checks.push(assert(
+  openingScoped.includedItemIds.length === 1 && openingScoped.includedItemIds[0] === 'canon-high' && !openingScoped.body.includes('副本规则不可无代价救命'),
+  'need-plan allowlist prevents unrelated must canon from entering an opening prompt',
+  openingScoped
+))
+checks.push(assert(
+  !openingScoped.body.includes('短规则') &&
+    !openingScoped.body.includes(pack.title) &&
+    openingScoped.body.includes('标题：第一章最小硬设定') &&
+    !openingScoped.body.includes('上一章结尾衔接') &&
+    openingScoped.body.includes('第一章自然开场'),
+  'opening HardCanon block hides the legacy pack title/description and uses opening-specific precedence',
+  openingScoped.body
+))
+
 data = service.HardCanonPackService.upsertHardCanonItem(data, {
   ...pack.items[1],
   content: '主角身份不可被复制体无解释替换。',
@@ -214,7 +234,8 @@ const runTraceSource = [
 ].join('\n')
 checks.push(assert(runTraceSource.includes('hardCanonPackItemCount') && runTraceSource.includes('includedHardCanonItemIds'), 'pipeline runner writes HardCanon trace fields'))
 const tracePanelSource = [
-  await read('src/renderer/src/views/generation/RunTracePanel.tsx'),
+  await read('src/renderer/src/components/pipeline/PipelineTracePanel.tsx'),
+  await read('src/renderer/src/components/pipeline/PromptContractReplayPanel.tsx'),
   await read('src/renderer/src/views/generation/runTraceSummary.ts')
 ].join('\n')
 checks.push(assert(tracePanelSource.includes('hardCanonPackItemCount'), 'Run Trace summary can copy HardCanon trace fields'))

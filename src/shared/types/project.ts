@@ -36,6 +36,7 @@ export interface Project {
   style: string
   createdAt: string
   updatedAt: string
+  lastOpenedAt?: string | null
 }
 
 export interface StoryBible {
@@ -105,6 +106,7 @@ export interface Chapter {
   endingHook: string
   riskWarnings: string
   includedInStageSummary: boolean
+  archivedAt?: string | null
   createdAt: string
   updatedAt: string
 }

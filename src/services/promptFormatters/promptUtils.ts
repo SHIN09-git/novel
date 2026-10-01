@@ -19,6 +19,8 @@ import type {
 } from '../../shared/types'
 import { TokenEstimator } from '../TokenEstimator'
 
+export { parseChapterNumbersFromText, parseChapterRangesFromText } from '../../shared/chapterText'
+
 const PLACEHOLDER_PATTERNS = [
   /待补充/i,
   /暂无/i,
@@ -85,6 +87,40 @@ export function valueOrEmpty(value: string | number | null | undefined): string 
 export function fieldLine(label: string, value: unknown): string {
   const text = valueOrEmpty(value as string | number | null | undefined)
   return text ? `${label}${text}` : ''
+}
+
+export function promptExclusionTerms(value: string | undefined): string[] {
+  if (!value?.trim()) return []
+  return [...new Set(
+    value
+      .split(/[\r\n,，、;；|:：]+/)
+      .map((term) =>
+        term
+          .trim()
+          .replace(/^(?:不得|不要|禁止|不能|不可|不应|避免)\s*(?:提前)?\s*(?:回收|揭示|使用|提及|出现|写出|引用)?\s*/u, '')
+          .replace(/[。.!！?？]+$/u, '')
+          .trim()
+      )
+      .filter((term) => term.length >= 2 && term.length <= 80)
+  )]
+}
+
+export function filterPromptLinesByExclusionText(
+  text: string,
+  exclusionText: string | undefined
+): { text: string; omittedLineCount: number; matchedTerms: string[] } {
+  const terms = promptExclusionTerms(exclusionText)
+  if (!terms.length || !text.trim()) return { text, omittedLineCount: 0, matchedTerms: [] }
+  const matchedTerms = new Set<string>()
+  let omittedLineCount = 0
+  const lines = text.split('\n').filter((line) => {
+    const matched = terms.find((term) => line.includes(term))
+    if (!matched) return true
+    matchedTerms.add(matched)
+    omittedLineCount += 1
+    return false
+  })
+  return { text: lines.join('\n'), omittedLineCount, matchedTerms: [...matchedTerms] }
 }
 
 export function cleanPromptBody(raw: string): string {
@@ -159,13 +195,52 @@ export function blockToOrderItem(block: PromptBlockDraft): PromptBlockOrderItem 
   }
 }
 
+export function promptBlockOrderFromFinalPrompt(
+  blocks: PromptBlockDraft[],
+  finalPrompt: string
+): PromptBlockOrderItem[] {
+  const matches = [...finalPrompt.matchAll(/^##\s+(.+)$/gm)]
+  const renderedSections = new Map<string, string>()
+  matches.forEach((match, index) => {
+    const title = match[1].trim()
+    const start = match.index ?? 0
+    const end = matches[index + 1]?.index ?? finalPrompt.length
+    renderedSections.set(title, finalPrompt.slice(start, end).trim())
+  })
+
+  return blocks.map((block) => {
+    const base = blockToOrderItem(block)
+    if (!base.included) return base
+    const rendered = renderedSections.get(block.title)
+    if (!rendered) {
+      return {
+        ...base,
+        included: false,
+        tokenEstimate: 0,
+        omittedReason: '运行时 Prompt guard 已移除该区块。'
+      }
+    }
+    return {
+      ...base,
+      tokenEstimate: TokenEstimator.estimate(rendered),
+      omittedReason: null
+    }
+  })
+}
+
 function inferBlockKind(title: string): string {
+  if (title.includes('上下文冲突优先级')) return 'priority_rules'
+  if (title.includes('写作任务声明')) return 'writing_task'
   if (title.includes('上一章')) return 'continuity_bridge'
   if (title.includes('任务')) return 'chapter_task'
   if (title.includes('角色')) return 'character_state'
   if (title.includes('伏笔')) return 'foreshadowing_rules'
+  if (title.includes('剧情导向')) return 'story_direction'
+  if (title.includes('当前剧情')) return 'current_progress'
   if (title.includes('近期') || title.includes('最近')) return 'recent_chapters'
   if (title.includes('远期') || title.includes('阶段')) return 'remote_summary'
+  if (title.includes('时间线')) return 'timeline'
+  if (title.includes('NoveltyPolicy') || title.includes('写作限制') || title.includes('禁止事项')) return 'forbidden_and_novelty'
   if (title.includes('设定') || title.includes('Canon')) return 'hard_canon'
   if (title.includes('风格')) return 'style'
   if (title.includes('输出')) return 'output_format'
@@ -242,125 +317,66 @@ export function formatHardCanonPack(project: PromptBuildInput['project'], bible:
   ].join('\n')
 }
 
-export function formatStyleEnvelope(project: PromptBuildInput['project'], bible: PromptBuildInput['bible'], styleSample: string): string {
+export function formatStyleEnvelope(
+  project: PromptBuildInput['project'],
+  bible: PromptBuildInput['bible'],
+  styleSample: string,
+  isOpeningChapter = false
+): string {
   return [
     `类型/题材：${valueOrEmpty(project.genre)}`,
     `目标读者：${valueOrEmpty(project.targetReaders)}`,
     `核心爽点/情绪体验：${valueOrEmpty(project.coreAppeal)}`,
     `整体风格：${valueOrEmpty(project.style)}`,
     `叙事基调：${valueOrEmpty(bible?.narrativeTone)}`,
-    `文风要求：${styleSample || '待补充'}`,
-    '风格只作为表达滤镜，不得覆盖上一章衔接、本章任务、角色硬状态和伏笔 treatmentMode。'
-  ].join('\n')
+    fieldLine('文风要求：', styleSample),
+    isOpeningChapter
+      ? '风格只作为表达滤镜，不得覆盖第一章自然开场、本章任务、人物关系和信息边界。'
+      : '风格只作为表达滤镜，不得覆盖上一章衔接、本章任务、角色硬状态和伏笔 treatmentMode。'
+  ].filter(Boolean).join('\n')
 }
 
-export function priorityRuleText(): string {
+export function priorityRuleText(isOpeningChapter = false): string {
+  if (isOpeningChapter) {
+    return [
+      '如果上下文之间存在冲突，必须按以下优先级处理：',
+      '1. 第一章自然开场约束（不存在上一章，不得伪造前情）',
+      '2. 本章任务契约及其信息边界',
+      '3. 本章任务明确点名的人物与当下关系',
+      '4. 本章任务明确要求的文风',
+      '权威第一章不使用旧章节、阶段摘要、时间线、既有伏笔或中期剧情导向；不得暗示这些资料存在。'
+    ].join('\n')
+  }
+
   return [
-    '如果上下文之间存在冲突，必须按以下优先级处理：',
+    '写作任务声明只说明本次产出范围；若事实或指令之间存在冲突，必须按以下优先级处理：',
     '1. 上一章结尾衔接 Bridge',
     '2. 本章任务契约',
-    '3. 角色硬状态账本',
-    '4. 伏笔 treatmentMode 操作规则',
-    '5. 近期章节事实',
-    '6. 远期压缩摘要',
-    '7. 最小硬设定',
-    '8. 风格要求',
-    '不得用低优先级内容改写高优先级事实；不得让世界观说明或文风样例覆盖章节承接、角色状态和伏笔规则。'
+    '3. HardCanonPack 不可违背硬设定（如与前两项冲突，必须报告冲突，不得静默覆盖）',
+    '4. 角色硬状态账本',
+    '5. 伏笔 treatmentMode 操作规则',
+    '6. 中期剧情导向 StoryDirectionGuide（只决定推进方向）',
+    '7. 近期章节事实',
+    '8. 远期压缩摘要',
+    '9. 时间线校验参考',
+    '10. 风格要求',
+    '写作限制与输出要求在末尾统一补充，不得用低优先级内容改写高优先级事实；不得让世界观说明或文风样例覆盖章节承接、角色状态和伏笔规则。'
   ].join('\n')
 }
 
-const CHINESE_DIGITS: Record<string, number> = {
-  零: 0,
-  〇: 0,
-  一: 1,
-  二: 2,
-  两: 2,
-  三: 3,
-  四: 4,
-  五: 5,
-  六: 6,
-  七: 7,
-  八: 8,
-  九: 9
-}
-
-function parseChineseNumber(input: string): number | null {
-  const text = input.trim()
-  if (!text) return null
-  if (/^\d+$/.test(text)) return Number(text)
-
-  if (!/[十百千万]/.test(text)) {
-    let value = 0
-    for (const char of text) {
-      const digit = CHINESE_DIGITS[char]
-      if (digit === undefined) return null
-      value = value * 10 + digit
-    }
-    return value
-  }
-
-  let total = 0
-  let section = 0
-  let number = 0
-  const unitMap: Record<string, number> = { 十: 10, 百: 100, 千: 1000, 万: 10000 }
-
-  for (const char of text) {
-    const digit = CHINESE_DIGITS[char]
-    if (digit !== undefined) {
-      number = digit
-      continue
-    }
-
-    const unit = unitMap[char]
-    if (!unit) return null
-    if (unit === 10000) {
-      section = (section + number) * unit
-      total += section
-      section = 0
-    } else {
-      section += (number || 1) * unit
-    }
-    number = 0
-  }
-
-  return total + section + number
-}
-
-function numberPattern(): string {
-  return String.raw`(?:\d+|[零〇一二两三四五六七八九十百千万]+)`
-}
-
-function normalizeChapterNumber(value: string): number | null {
-  return parseChineseNumber(value.replace(/^第/, '').replace(/章$/, ''))
-}
-
-export function parseChapterRangesFromText(text: string): Array<{ start: number; end: number }> {
-  const pattern = numberPattern()
-  const ranges: Array<{ start: number; end: number }> = []
-  const rangeRegex = new RegExp(`第?(${pattern})\\s*(?:-|—|~|到|至)\\s*第?(${pattern})\\s*章?`, 'g')
-  for (const match of text.matchAll(rangeRegex)) {
-    const start = normalizeChapterNumber(match[1])
-    const end = normalizeChapterNumber(match[2])
-    if (start !== null && end !== null) {
-      ranges.push({ start: Math.min(start, end), end: Math.max(start, end) })
-    }
-  }
-  return ranges
-}
-
-export function parseChapterNumbersFromText(text: string): number[] {
-  const pattern = numberPattern()
-  const numbers = new Set<number>()
-  const chapterRegex = new RegExp(`第?(${pattern})\\s*章`, 'g')
-  for (const match of text.matchAll(chapterRegex)) {
-    const value = normalizeChapterNumber(match[1])
-    if (value !== null) numbers.add(value)
-  }
-
-  for (const range of parseChapterRangesFromText(text)) {
-    numbers.add(range.start)
-    numbers.add(range.end)
-  }
-
-  return [...numbers].sort((a, b) => a - b)
+export function chapterNoveltyPolicyLines(isOpeningChapter: boolean): string[] {
+  return isOpeningChapter
+    ? [
+        'NoveltyPolicy：第一章采用封闭式剧情范围；专名、背景、人物关系、剧情事件、线索和机制只能来自任务契约。',
+        '可以自然补充不带专名、不承担剧情功能的普通食材、器具、摊贩或路人、环境细节和生活动作，让日常场景完整可感。',
+        '不得让这些日常补充承载悬疑信息、后续钩子或便利解法；不得新增任务未授权的专名、背景、规则、机制、组织或关键道具。',
+        '若任务明确允许新增内容，也必须自然出现，不能抢占本章生活主线。'
+      ]
+    : [
+        'NoveltyPolicy：不得新增任务未授权的人物、地点、组织、规则、机制或关键道具。',
+        '不得为了让角色脱困而临时新增刚好可用的设定；解决危机必须来自已提供规则、已铺垫伏笔、角色已有能力或本章任务明确许可。',
+        '任务明确允许的新内容必须带来合理代价、风险或复杂度，不能只提供便利。',
+        '不得给未知人物擅自命名；不得将未授权新设定写成已经存在的长期事实。',
+        '不得提前解释 hidden / pause 状态伏笔。'
+      ]
 }

@@ -1,7 +1,8 @@
 import { readFile } from 'node:fs/promises'
-import { join, resolve } from 'node:path'
+import { dirname, join } from 'node:path'
+import { fileURLToPath } from 'node:url'
 
-const root = resolve('.')
+const root = dirname(dirname(fileURLToPath(import.meta.url)))
 
 function assert(condition, message, details = {}) {
   return condition ? { ok: true, message } : { ok: false, message, details }
@@ -17,8 +18,11 @@ async function main() {
   const preload = await read('src/preload/index.ts')
   const globalTypes = await read('src/renderer/src/global.d.ts')
   const ipcHandlers = await read('src/main/ipc/registerIpcHandlers.ts')
+  const storageManagementIpc = await read('src/main/ipc/storageManagementIpcHandlers.ts')
+  const storagePathHelper = await read('src/main/ipc/storagePath.ts')
   const safeIpcHandler = await read('src/main/ipc/safeIpcHandler.ts')
   const errorUtils = await read('src/shared/errorUtils.ts')
+  const bridgeHelper = await read('src/renderer/src/platform/novelDirectorBridge.ts')
   const runTests = await read('scripts/run-tests.mjs')
   const sourceForLegacyApiSearch = [preload, globalTypes].join('\n')
 
@@ -72,6 +76,15 @@ async function main() {
 
   checks.push(
     assert(
+      globalTypes.includes('novelDirector?: NovelDirectorAPI') &&
+        bridgeHelper.includes("NonNullable<Window['novelDirector']>") &&
+        bridgeHelper.includes('throw new Error'),
+      'renderer treats the preload bridge as optional until guarded by the bridge helper'
+    )
+  )
+
+  checks.push(
+    assert(
       errorUtils.includes('Authorization') &&
         errorUtils.includes('x-api-key') &&
         errorUtils.includes('sk-ant') &&
@@ -83,20 +96,22 @@ async function main() {
 
   checks.push(
     assert(
-      ipcHandlers.includes('assertSafeDataStoragePath') &&
-        ipcHandlers.includes('getForbiddenStorageRoots') &&
-        ipcHandlers.includes('localDataFileExtensions') &&
-        ipcHandlers.includes('parse(targetDir).root === targetDir') &&
-        ipcHandlers.includes('Data storage path must end with .sqlite, .db, or .json.'),
+      ipcHandlers.includes("from './storageManagementIpcHandlers'") &&
+        storageManagementIpc.includes("from './storagePath'") &&
+        storagePathHelper.includes('assertSafeDataStoragePath') &&
+        storagePathHelper.includes('getForbiddenStorageRoots') &&
+        storagePathHelper.includes('localDataFileExtensions') &&
+        storagePathHelper.includes('parse(targetDir).root === targetDir') &&
+        storagePathHelper.includes('Data storage path must end with .sqlite, .db, or .json.'),
       'storage path inputs are normalized and checked before use'
     )
   )
 
   checks.push(
     assert(
-      ipcHandlers.includes('const sourcePath = await resolveDataStoragePath(request.sourcePath)') &&
-        ipcHandlers.includes('const targetPath = await resolveDataStoragePath(request.targetPath)') &&
-        ipcHandlers.includes('storagePath ? await resolveDataStoragePath(storagePath)'),
+      storageManagementIpc.includes('const sourcePath = await resolveDataStoragePath(request.sourcePath)') &&
+        storageManagementIpc.includes('const targetPath = await resolveDataStoragePath(request.targetPath)') &&
+        storageManagementIpc.includes('storagePath ? await resolveDataStoragePath(storagePath)'),
       'migration preview, merge, and open-folder IPC paths use main-process validation'
     )
   )

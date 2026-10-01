@@ -8,10 +8,11 @@ interface PipelinePromptConfigInput {
   projectStyle: string
   modules: PromptModuleSelection
   selection: Pick<ContextSelectionResult, 'selectedCharacterIds' | 'selectedForeshadowingIds'>
+  chapterTask?: ChapterTask | null
 }
 
 export function createPipelinePromptConfigFromSelection(input: PipelinePromptConfigInput): PromptConfig {
-  const task: ChapterTask = {
+  const fallbackTask: ChapterTask = {
     goal: `生成第 ${input.targetChapterOrder} 章草稿`,
     conflict: '',
     suspenseToKeep: '',
@@ -22,6 +23,7 @@ export function createPipelinePromptConfigFromSelection(input: PipelinePromptCon
     targetWordCount: input.wordCount,
     styleRequirement: input.projectStyle
   }
+  const task: ChapterTask = input.chapterTask ? { ...input.chapterTask } : fallbackTask
 
   return {
     projectId: input.projectId,

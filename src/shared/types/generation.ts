@@ -1,6 +1,14 @@
-import type { ID } from './base'
+import type { ApiProvider, ID } from './base'
+import type { ChapterTask } from './project'
 
 export type PipelineMode = 'conservative' | 'standard' | 'aggressive'
+
+export type PipelineRecipeId = 'fast' | 'standard' | 'strict' | 'custom'
+
+export type PipelineRecipeVersion = 1
+
+// Disabled steps may still run when their escalation condition is met.
+export type PipelineStepEscalation = 'never' | 'on_warning' | 'on_failure'
 
 export type PipelineContextSource = 'auto' | 'prompt_snapshot'
 
@@ -22,9 +30,56 @@ export type ChapterGenerationStepType =
   | 'quality_gate'
   | 'await_user_confirmation'
 
+export interface PipelineRecipeStep {
+  type: ChapterGenerationStepType
+  // Enabled steps run in the recipe's normal path.
+  enabled: boolean
+  // Required steps cannot be manually skipped once selected to run.
+  required: boolean
+  escalation: PipelineStepEscalation
+}
+
+export interface PipelineRecipe {
+  id: PipelineRecipeId
+  version: PipelineRecipeVersion
+  name: string
+  description: string
+  steps: PipelineRecipeStep[]
+}
+
 export type ChapterGenerationStepStatus = 'pending' | 'running' | 'completed' | 'failed' | 'skipped'
 
 export type GeneratedChapterDraftStatus = 'draft' | 'accepted' | 'rejected'
+
+export type PipelineAIRole = 'planner' | 'prose' | 'extraction' | 'reviewer' | 'revision'
+
+/** Credential-free request configuration shared by the default and role snapshots. */
+export interface PipelineAIModelConfig {
+  apiProvider: ApiProvider
+  baseUrl: string
+  modelName: string
+  codexCliPath: string
+  codexCliModel: string
+  temperature: number
+  maxTokens: number
+  retryEnabled: boolean
+  maxRetries: number
+  requestTimeoutMs: number
+}
+
+/** Missing fields inherit the current settings when a run is created, never on retry. */
+export type PipelineAIRoleConfigs = Partial<Record<PipelineAIRole, Partial<PipelineAIModelConfig>>>
+
+export interface PipelineAIRunConfig extends PipelineAIModelConfig {
+  // Optional for jobs persisted before role snapshots were introduced.
+  roles?: Readonly<Record<PipelineAIRole, Readonly<PipelineAIModelConfig>>>
+  schemaVersion?: 1
+}
+
+export interface ResolvedPipelineAIRunConfig extends PipelineAIRunConfig {
+  roles: Readonly<Record<PipelineAIRole, Readonly<PipelineAIModelConfig>>>
+  schemaVersion: 1
+}
 
 export interface ChapterAllowedNovelty {
   allowedNewCharacters: string[]
@@ -63,6 +118,11 @@ export interface ChapterPlan {
   forbiddenNovelty: string | ChapterForbiddenNovelty
 }
 
+export interface QualityGateReviewScope {
+  targetChapterOrder?: number
+  hasAuthoritativeChapterTask?: boolean
+}
+
 export interface ChapterDraftResult {
   title: string
   body: string
@@ -72,13 +132,30 @@ export interface ChapterGenerationJob {
   id: ID
   projectId: ID
   targetChapterOrder: number
+  chapterTaskSnapshot?: ChapterTask | null
+  taskEdit?: ChapterTaskEdit | null
   promptContextSnapshotId?: ID | null
   contextSource: PipelineContextSource
+  aiRunConfig?: PipelineAIRunConfig | null
+  pipelineMode?: PipelineMode | null
+  pipelineRecipeId?: PipelineRecipeId | null
+  pipelineRecipeVersion?: PipelineRecipeVersion | null
+  pipelineRecipe?: PipelineRecipe | null
   status: ChapterGenerationJobStatus
   currentStep: ChapterGenerationStepType | null
   createdAt: string
   updatedAt: string
   errorMessage: string
+}
+
+export interface ChapterTaskEdit {
+  sourceJobId: ID | null
+  sourcePromptContextSnapshotId?: ID | null
+  changedFields: (keyof ChapterTask)[]
+  scope: 'expression' | 'budget' | 'context'
+  resumeStep: ChapterGenerationStepType
+  reusableArtifacts: string[]
+  warnings: string[]
 }
 
 export interface ChapterGenerationStep {

@@ -3,6 +3,9 @@ import react from '@vitejs/plugin-react'
 
 export default defineConfig({
   main: {
+    define: {
+      __NOVEL_DIRECTOR_BUILD_TIME__: JSON.stringify(new Date().toISOString())
+    },
     plugins: [externalizeDepsPlugin()],
     build: {
       rollupOptions: {
@@ -24,6 +27,17 @@ export default defineConfig({
     }
   },
   renderer: {
-    plugins: [react()]
+    plugins: [react()],
+    build: {
+      rollupOptions: {
+        output: {
+          manualChunks(id) {
+            if (!id.includes('node_modules')) return undefined
+            if (/[\\/]node_modules[\\/](react|react-dom|scheduler)[\\/]/.test(id)) return 'vendor-react'
+            return 'vendor'
+          }
+        }
+      }
+    }
   }
 })

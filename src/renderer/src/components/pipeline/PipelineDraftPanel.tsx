@@ -1,9 +1,12 @@
-import type { ChapterGenerationJob, GeneratedChapterDraft } from '../../../../shared/types'
+import type { ChapterAcceptanceReview, ChapterGenerationJob, GeneratedChapterDraft } from '../../../../shared/types'
 
 export function PipelineDraftPanel({
   draft,
   job,
+  isRunning,
   onAccept,
+  onAcceptUnreviewed,
+  acceptanceReview,
   onReject,
   onRetryDraft,
   onCopyDraft,
@@ -11,7 +14,10 @@ export function PipelineDraftPanel({
 }: {
   draft: GeneratedChapterDraft | null
   job: ChapterGenerationJob | null
+  isRunning: boolean
   onAccept: (draft: GeneratedChapterDraft) => void
+  onAcceptUnreviewed?: (draft: GeneratedChapterDraft) => void
+  acceptanceReview?: ChapterAcceptanceReview
   onReject: (draft: GeneratedChapterDraft) => void
   onRetryDraft: (job: ChapterGenerationJob) => void
   onCopyDraft: (draft: GeneratedChapterDraft) => void
@@ -30,10 +36,10 @@ export function PipelineDraftPanel({
     <article className="pipeline-draft-preview">
       <div className="pipeline-draft-header">
         <div>
-          <span className="chapter-kicker">Generated Draft</span>
+          <span className="chapter-kicker">章节草稿</span>
           <h3>{draft.title || '未命名章节草稿'}</h3>
           <p className="muted">
-            {draft.status} · {draft.tokenEstimate} token · {draft.chapterId ? '已关联章节' : '尚未关联正式章节'}
+            {{ draft: '待采纳', accepted: '已采纳', rejected: '已拒绝' }[draft.status]} · {draft.tokenEstimate} token · {draft.chapterId ? '已关联章节' : '尚未关联正式章节'}
           </p>
         </div>
         <div className="row-actions">
@@ -41,24 +47,35 @@ export function PipelineDraftPanel({
             复制草稿
           </button>
           {onOpenRevision ? (
-            <button className="ghost-button" onClick={() => onOpenRevision(draft)}>
+            <button className="ghost-button" disabled={isRunning} onClick={() => onOpenRevision(draft)}>
               进入修订
             </button>
           ) : null}
         </div>
       </div>
-      <textarea className="prompt-editor pipeline-draft-body" value={draft.body} readOnly />
+      <textarea className="prompt-editor pipeline-draft-body" aria-label="章节草稿正文" value={draft.body} readOnly />
       <div className="row-actions pipeline-draft-actions">
-        <button className="primary-button" disabled={draft.status === 'accepted'} onClick={() => onAccept(draft)}>
+        <button className="primary-button" disabled={isRunning || draft.status !== 'draft'} onClick={() => onAccept(draft)}>
           接受章节草稿
         </button>
-        <button className="danger-button" disabled={draft.status === 'rejected'} onClick={() => onReject(draft)}>
+        {onAcceptUnreviewed && draft.status === 'draft' ? (
+          <button className="ghost-button" disabled={isRunning} onClick={() => onAcceptUnreviewed(draft)}>
+            未完成审稿，直接采纳
+          </button>
+        ) : null}
+        <button className="danger-button" disabled={isRunning || draft.status !== 'draft'} onClick={() => onReject(draft)}>
           拒绝章节草稿
         </button>
-        <button className="ghost-button" disabled={!job} onClick={() => job && onRetryDraft(job)}>
+        <button className="ghost-button" disabled={isRunning || !job} onClick={() => job && onRetryDraft(job)}>
           重新生成正文
         </button>
       </div>
+      {draft.status === 'accepted' ? (
+        <p className="notice pipeline-draft-accepted">
+          {acceptanceReview?.mode === 'unreviewed' ? '本次为未审稿采纳，已有诊断结果仍保留。' : ''}
+          该草稿已经写入正式章节和版本链，可从页面顶部继续生成下一章。
+        </p>
+      ) : null}
     </article>
   )
 }

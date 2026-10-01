@@ -1,16 +1,17 @@
+import { useMemo } from 'react'
 import type { ID, TimelineEvent } from '../../../shared/types'
 import { useConfirm } from '../components/ConfirmDialog'
-import { EmptyState, NumberInput, TextArea, Toggle } from '../components/FormFields'
+import { EmptyState, NumberInput, TextArea, TextInput, Toggle } from '../components/FormFields'
 import { Header } from '../components/Layout'
+import { useProjectData } from '../hooks/useProjectData'
 import { newId, now } from '../utils/format'
-import { projectData } from '../utils/projectData'
 import type { ProjectProps } from './viewTypes'
 import { updateProjectTimestamp } from './viewTypes'
 
 export function TimelineView({ data, project, saveData }: ProjectProps) {
   const confirmAction = useConfirm()
-  const scoped = projectData(data, project.id)
-  const events = [...scoped.timelineEvents].sort((a, b) => a.narrativeOrder - b.narrativeOrder)
+  const scoped = useProjectData(data, project.id)
+  const events = useMemo(() => [...scoped.timelineEvents].sort((a, b) => a.narrativeOrder - b.narrativeOrder), [scoped.timelineEvents])
 
   async function addEvent() {
     const timestamp = now()
@@ -35,7 +36,7 @@ export function TimelineView({ data, project, saveData }: ProjectProps) {
   }
 
   async function updateEvent(id: ID, patch: Partial<TimelineEvent>) {
-    await saveData((current) => ({
+    return saveData((current) => ({
       ...current,
       projects: updateProjectTimestamp(current, project.id),
       timelineEvents: current.timelineEvents.map((event) => (event.id === id ? { ...event, ...patch, updatedAt: now() } : event))
@@ -67,14 +68,14 @@ export function TimelineView({ data, project, saveData }: ProjectProps) {
           events.map((event) => (
             <article key={event.id} className="timeline-item">
               <div className="timeline-head">
-                <input value={event.title} onChange={(change) => updateEvent(event.id, { title: change.target.value })} />
+                <TextInput label="事件标题" value={event.title} debounceMs={500} bufferKey={event.id} onChange={(title) => updateEvent(event.id, { title })} />
                 <NumberInput label="叙事顺序" value={event.narrativeOrder} onChange={(narrativeOrder) => updateEvent(event.id, { narrativeOrder: narrativeOrder ?? event.narrativeOrder })} />
                 <NumberInput label="所属章节" value={event.chapterOrder} onChange={(chapterOrder) => updateEvent(event.id, { chapterOrder })} />
               </div>
               <div className="form-grid">
-                <TextArea label="故事内时间" value={event.storyTime} rows={2} onChange={(storyTime) => updateEvent(event.id, { storyTime })} />
-                <TextArea label="事件结果" value={event.result} rows={2} onChange={(result) => updateEvent(event.id, { result })} />
-                <TextArea label="对后续剧情的影响" value={event.downstreamImpact} rows={2} onChange={(downstreamImpact) => updateEvent(event.id, { downstreamImpact })} />
+                <TextArea label="故事内时间" value={event.storyTime} rows={2} debounceMs={500} bufferKey={event.id} onChange={(storyTime) => updateEvent(event.id, { storyTime })} />
+                <TextArea label="事件结果" value={event.result} rows={2} debounceMs={500} bufferKey={event.id} onChange={(result) => updateEvent(event.id, { result })} />
+                <TextArea label="对后续剧情的影响" value={event.downstreamImpact} rows={2} debounceMs={500} bufferKey={event.id} onChange={(downstreamImpact) => updateEvent(event.id, { downstreamImpact })} />
               </div>
               <div className="checkbox-grid">
                 {scoped.characters.map((character) => (

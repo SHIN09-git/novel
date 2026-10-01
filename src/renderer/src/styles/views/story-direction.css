@@ -1,0 +1,93 @@
+/* Story direction: idea in, guide out, then one card per chapter beat. */
+.story-direction-view .panel h2 {
+  font-size: var(--text-xl);
+}
+
+.story-direction-view .section-heading .action-row {
+  gap: 2px;
+  padding: 3px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  background: var(--color-surface-soft);
+}
+
+.story-direction-view .section-heading .action-row button {
+  min-height: 30px;
+  padding: 4px 12px;
+  border: 0;
+  box-shadow: none;
+  font-size: var(--text-xs);
+}
+
+.story-direction-view .section-heading .action-row .secondary-button {
+  background: transparent;
+  color: var(--muted);
+}
+
+.story-direction-view .section-heading .action-row .primary-button {
+  background: var(--color-surface-elevated);
+  color: var(--color-accent-strong);
+  box-shadow: 0 1px 2px rgba(23, 27, 36, 0.12), 0 0 0 1px var(--line);
+}
+
+.story-direction-view .form-grid.compact {
+  max-width: 240px;
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.story-direction-editor {
+  display: grid;
+  gap: 16px;
+  margin-top: 18px;
+  padding-top: 18px;
+  border-top: 1px solid var(--line);
+}
+
+.story-direction-editor > h3 {
+  margin: 8px 0 0;
+  font-size: var(--text-lg);
+}
+
+.story-direction-editor .summary-list {
+  display: grid;
+  gap: 14px;
+  counter-reset: story-beat;
+}
+
+.story-direction-editor .subtle-panel {
+  position: relative;
+  padding-left: 64px;
+  counter-increment: story-beat;
+}
+
+.story-direction-editor .subtle-panel + .subtle-panel {
+  margin-top: 0;
+}
+
+.story-direction-editor .subtle-panel::before {
+  content: counter(story-beat, decimal-leading-zero);
+  position: absolute;
+  left: 18px;
+  top: 18px;
+  display: grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  border-radius: var(--radius-md);
+  background: var(--sidebar);
+  color: var(--rail-accent);
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  font-weight: 600;
+}
+
+.story-direction-editor .subtle-panel h4 {
+  margin: 4px 0 14px;
+  font-size: var(--text-md);
+}
+
+@media (min-width: 1280px) {
+  .story-direction-editor .subtle-panel .form-grid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}

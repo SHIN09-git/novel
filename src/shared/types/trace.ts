@@ -1,11 +1,34 @@
-import type { ContinuitySource, ID, TimelineEvent } from './base'
-import type { CharacterCardField, CharacterStateChangeCandidate, CharacterStateFact, StateFactCategory } from './character'
-import type { ContextCompressionRecord, ContextSelectionTrace, OmittedContextItem, PromptContextSnapshot } from './context'
+import type { AiCallTelemetry, ContinuitySource, ID, TimelineEvent } from './base'
+import type {
+  CharacterCardField,
+  CharacterStateChangeCandidate,
+  CharacterStateFact,
+  CharacterStateTransaction,
+  StateFactCategory
+} from './character'
+import type {
+  ContextBudgetProfile,
+  ContextCompressionRecord,
+  ContextDecisionReasonCode,
+  ContextNeedPlan,
+  ContextSelectionTrace,
+  OmittedContextItem,
+  PromptContextSnapshot
+} from './context'
 import type { Foreshadowing, ForeshadowingTreatmentMode } from './foreshadowing'
-import type { ChapterGenerationJob, ChapterGenerationStep, GeneratedChapterDraft, PipelineContextSource } from './generation'
+import type {
+  ChapterGenerationJob,
+  ChapterGenerationStep,
+  ChapterGenerationStepType,
+  GeneratedChapterDraft,
+  PipelineAIRole,
+  PipelineContextSource,
+  PipelineRecipeId,
+  PipelineRecipeVersion
+} from './generation'
 import type { MemoryUpdateCandidate } from './memory'
 import type { Chapter } from './project'
-import type { ConsistencyReviewReport, ConsistencySeverity, NoveltyAuditResult, QualityGateReport, RedundancyReport } from './quality'
+import type { ConsistencyReviewReport, ConsistencySeverity, EditorialVerdict, NoveltyAuditResult, QualityGateReport, RedundancyReport } from './quality'
 import type { ChapterVersion } from './revision'
 import type { StoryDirectionGuideSource, StoryDirectionHorizon } from './storyDirection'
 
@@ -17,6 +40,19 @@ export interface ForcedContextBlock {
   sourceChapterOrder?: number | null
   title: string
   tokenEstimate: number
+}
+
+export type AIWorkflowCallOutcome = 'success' | 'failed'
+
+/** Safe per-call metadata. Prompt, prose, reasoning, credentials, and raw responses are deliberately excluded. */
+export interface AIWorkflowCallTrace extends AiCallTelemetry {
+  id: ID
+  stepId: ID
+  stepType: ChapterGenerationStepType
+  role: PipelineAIRole
+  logicalCallIndex: number
+  outcome: AIWorkflowCallOutcome
+  createdAt: string
 }
 
 export interface PromptBlockOrderItem {
@@ -34,6 +70,52 @@ export interface PromptBlockOrderItem {
   reason: string
 }
 
+export type PromptCompositionCategory = 'positive_task' | 'factual_context' | 'constraints' | 'review_tone' | 'other'
+
+export type PromptCompositionAlertKind = 'repeated_sentence' | 'similar_constraint'
+
+export interface PromptCompositionBlockMetric {
+  id: string
+  tokenEstimate: number
+  tokenSharePercent: number
+  category: PromptCompositionCategory
+  // Legacy fields remain optional so persisted P0 metrics still normalize safely.
+  title?: string
+  kind?: string
+  priority?: number
+  source?: string
+  sourceIds?: ID[]
+  included?: boolean
+  compressed?: boolean
+  forced?: boolean
+}
+
+export interface PromptCompositionAlert {
+  kind: PromptCompositionAlertKind
+  severity: 'warning'
+  sample: string
+  relatedBlockIds: string[]
+  fingerprints?: string[]
+  occurrences?: number
+  similarity?: number
+  reason: string
+}
+
+export interface PromptCompositionMetrics {
+  totalTokenEstimate: number
+  attributedTokenEstimate: number
+  unattributedTokenEstimate: number
+  categoryTokenEstimates: Record<PromptCompositionCategory, number>
+  categoryShares: Record<PromptCompositionCategory, number>
+  blockMetrics: PromptCompositionBlockMetric[]
+  repeatedSentences: PromptCompositionAlert[]
+  similarConstraints: PromptCompositionAlert[]
+  alerts: PromptCompositionAlert[]
+  constraintLineCount: number
+  reviewToneLineCount: number
+  summary: string
+}
+
 export interface GenerationRunTrace {
   id: ID
   projectId: ID
@@ -41,6 +123,10 @@ export interface GenerationRunTrace {
   targetChapterOrder: number
   promptContextSnapshotId: ID | null
   contextSource: PipelineContextSource
+  pipelineRecipeId: PipelineRecipeId | null
+  pipelineRecipeVersion: PipelineRecipeVersion | null
+  pipelineRecipeExplanation: string
+  aiCalls: AIWorkflowCallTrace[]
   selectedChapterIds: ID[]
   selectedStageSummaryIds: ID[]
   selectedCharacterIds: ID[]
@@ -56,11 +142,15 @@ export interface GenerationRunTrace {
   compressionRecords: ContextCompressionRecord[]
   promptBlockOrder: PromptBlockOrderItem[]
   finalPromptTokenEstimate: number
+  promptCompositionMetrics: PromptCompositionMetrics | null
   promptLintWarnings: string[]
   promptLintIssueCount: number
   generatedDraftId: ID | null
   consistencyReviewReportId: ID | null
   qualityGateReportId: ID | null
+  editorialVerdictId?: ID | null
+  editorialVerdictDraftId?: ID | null
+  editorialVerdictDraftContentHash?: string | null
   revisionSessionIds: ID[]
   acceptedRevisionVersionId: ID | null
   acceptedMemoryCandidateIds: ID[]
@@ -133,6 +223,64 @@ export interface RunTraceAuthorNextAction {
   reason: string
 }
 
+export type PromptContractReplayStatus = 'complete' | 'needs_attention' | 'incomplete'
+
+export type PromptContractReplayIssueCode =
+  | 'missing_block_order'
+  | 'opaque_snapshot'
+  | 'missing_continuity_bridge'
+  | 'missing_chapter_task'
+  | 'duplicate_block_id'
+  | 'forced_context_untracked'
+  | 'forced_bridge_after_task'
+  | 'compression_untracked'
+  | 'confirmed_need_unmet'
+  | 'hard_canon_truncated'
+  | 'prompt_lint_cleanup'
+  | 'token_accounting_gap'
+
+export interface PromptContractReplayIssue {
+  code: PromptContractReplayIssueCode
+  severity: 'info' | 'warning' | 'error'
+  message: string
+  evidence: string[]
+}
+
+export interface PromptContractReplayBlock {
+  position: number
+  id: string
+  title: string
+  kind: string
+  authorityPriority: number
+  tokenEstimate: number
+  tokenSharePercent: number
+  source: string
+  sourceIds: ID[]
+  forced: boolean
+  compressed: boolean
+  reason: string
+  omittedReason: string | null
+  decisionReasonCodes: ContextDecisionReasonCode[]
+}
+
+export interface PromptContractReplay {
+  traceId: ID
+  targetChapterOrder: number
+  contextSource: PipelineContextSource
+  status: PromptContractReplayStatus
+  summary: string
+  finalPromptTokenEstimate: number
+  accountedBlockTokenEstimate: number
+  tokenAccountingDelta: number
+  includedBlocks: PromptContractReplayBlock[]
+  omittedBlocks: PromptContractReplayBlock[]
+  selectedContextCount: number
+  droppedContextCount: number
+  unmetNeedCount: number
+  promptLintIssueCount: number
+  issues: PromptContractReplayIssue[]
+}
+
 export interface RunTraceAuthorSummary {
   id: ID
   projectId: ID
@@ -183,13 +331,26 @@ export interface GenerationRunBundle {
   job: ChapterGenerationJob
   steps: ChapterGenerationStep[]
   promptContextSnapshot?: PromptContextSnapshot
+  contextNeedPlans?: ContextNeedPlan[]
+  contextBudgetProfiles?: ContextBudgetProfile[]
   generatedDrafts: GeneratedChapterDraft[]
   qualityGateReports: QualityGateReport[]
   consistencyReviewReports: ConsistencyReviewReport[]
   memoryUpdateCandidates: MemoryUpdateCandidate[]
   characterStateChangeCandidates: CharacterStateChangeCandidate[]
   redundancyReports: RedundancyReport[]
+  editorialVerdicts?: EditorialVerdict[]
   runTrace?: GenerationRunTrace
+}
+
+export interface ChapterAcceptanceReview {
+  mode: 'reviewed' | 'unreviewed'
+  draftContentHash: string
+  editorialRequired: boolean
+  qualityGateReportId: ID | null
+  editorialVerdictId: ID | null
+  qualityStatus: 'not_available' | 'passed' | 'needs_review' | 'blocked'
+  editorialStatus: 'not_available' | 'approved' | 'advisory' | 'blocked' | 'incomplete'
 }
 
 export interface ChapterCommitBundle {
@@ -201,13 +362,18 @@ export interface ChapterCommitBundle {
   jobId?: ID | null
   generatedDraftId?: ID | null
   acceptedAt: string
-  acceptedBy: 'user'
+  acceptedBy: 'user' | 'agent'
+  actor?: { kind: 'agent'; agentRunId: ID; actionPreviewId: ID; authorizationGrantId?: ID }
+  /** Missing on legacy commits; never infer a passed review from that absence. */
+  acceptanceReview?: ChapterAcceptanceReview
   chapter: Chapter
   chapterVersion?: ChapterVersion
+  previousChapterVersion?: ChapterVersion
   generatedDraft?: GeneratedChapterDraft
   acceptedMemoryUpdateCandidates?: MemoryUpdateCandidate[]
   acceptedCharacterStateChangeCandidates?: CharacterStateChangeCandidate[]
   appliedCharacterStateFacts?: CharacterStateFact[]
+  appliedCharacterStateTransactions?: CharacterStateTransaction[]
   appliedForeshadowingUpdates?: Foreshadowing[]
   appliedTimelineEvents?: TimelineEvent[]
   qualityGateReportId?: ID | null

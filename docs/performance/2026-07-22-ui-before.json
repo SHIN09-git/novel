@@ -1,0 +1,176 @@
+{
+  "benchmark": "production-electron-ui",
+  "measuredAt": "2026-07-21T16:25:13.418Z",
+  "buildMode": "production electron-vite output loaded by the real Electron main/preload/renderer processes",
+  "readyDefinition": "React has loaded persisted isolated data, preload data.load exists, project row is visible and clickable, and no loading boundary remains.",
+  "machine": {
+    "platform": "win32",
+    "arch": "x64",
+    "node": "v24.14.0",
+    "electron": "^39.2.7",
+    "cpu": "AMD Ryzen 7 7800X3D 8-Core Processor           ",
+    "logicalCpuCount": 16,
+    "totalMemoryBytes": 33397133312
+  },
+  "methodology": {
+    "runCount": 5,
+    "data": "synthetic fixture in isolated NOVEL_DIRECTOR_SMOKE_USER_DATA; bootstrapped before measurement",
+    "coldMeaning": "new Electron process and renderer for every run; OS disk cache is not flushed",
+    "memory": "CDP renderer JS heap observation only; not a whole-process peak and not a hard conclusion",
+    "cleanup": "each owned Electron process receives Browser.close and is verified exited before the next run"
+  },
+  "aggregate": {
+    "processColdToRendererInteractiveMs": {
+      "minMs": 814.115,
+      "p50Ms": 829.801,
+      "p95Ms": 863.92,
+      "maxMs": 863.92,
+      "meanMs": 836.701
+    },
+    "projectWorkbenchRenderMs": {
+      "minMs": 329.064,
+      "p50Ms": 331.537,
+      "p95Ms": 340.625,
+      "maxMs": 340.625,
+      "meanMs": 333.43
+    },
+    "firstGenerationPipelineMs": {
+      "minMs": 329.972,
+      "p50Ms": 331.692,
+      "p95Ms": 340.656,
+      "maxMs": 340.656,
+      "meanMs": 333.209
+    },
+    "warmGenerationPipelineMs": {
+      "minMs": 2.113,
+      "p50Ms": 3.167,
+      "p95Ms": 8.356,
+      "maxMs": 8.356,
+      "meanMs": 4.07
+    },
+    "firstPromptBuilderMs": {
+      "minMs": 346.514,
+      "p50Ms": 359.162,
+      "p95Ms": 360.127,
+      "maxMs": 360.127,
+      "meanMs": 355.598
+    }
+  },
+  "runs": [
+    {
+      "runNumber": 1,
+      "timings": {
+        "processColdToRendererInteractiveMs": 863.92,
+        "projectWorkbenchRenderMs": 340.625,
+        "firstGenerationPipelineMs": 331.692,
+        "warmGenerationPipelineMs": 2.113,
+        "firstPromptBuilderMs": 360.127
+      },
+      "rendererMemoryObservation": {
+        "jsHeapUsedBytes": 4465292,
+        "jsHeapTotalBytes": 9699328,
+        "nodes": 4560
+      },
+      "browserVersion": {
+        "protocolVersion": "1.3",
+        "product": "Chrome/142.0.7444.265",
+        "revision": "@eb900db0de64ac530da6a076524223e35e86d156",
+        "userAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) NovelDirector/0.1.0 Chrome/142.0.7444.265 Electron/39.8.9 Safari/537.36",
+        "jsVersion": "14.2.231.22"
+      },
+      "loadedScriptResources": []
+    },
+    {
+      "runNumber": 2,
+      "timings": {
+        "processColdToRendererInteractiveMs": 846.842,
+        "projectWorkbenchRenderMs": 329.064,
+        "firstGenerationPipelineMs": 340.656,
+        "warmGenerationPipelineMs": 4.279,
+        "firstPromptBuilderMs": 346.514
+      },
+      "rendererMemoryObservation": {
+        "jsHeapUsedBytes": 4609704,
+        "jsHeapTotalBytes": 8126464,
+        "nodes": 4560
+      },
+      "browserVersion": {
+        "protocolVersion": "1.3",
+        "product": "Chrome/142.0.7444.265",
+        "revision": "@eb900db0de64ac530da6a076524223e35e86d156",
+        "userAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) NovelDirector/0.1.0 Chrome/142.0.7444.265 Electron/39.8.9 Safari/537.36",
+        "jsVersion": "14.2.231.22"
+      },
+      "loadedScriptResources": []
+    },
+    {
+      "runNumber": 3,
+      "timings": {
+        "processColdToRendererInteractiveMs": 829.801,
+        "projectWorkbenchRenderMs": 331.537,
+        "firstGenerationPipelineMs": 330.73,
+        "warmGenerationPipelineMs": 3.167,
+        "firstPromptBuilderMs": 359.79
+      },
+      "rendererMemoryObservation": {
+        "jsHeapUsedBytes": 4612428,
+        "jsHeapTotalBytes": 7864320,
+        "nodes": 4560
+      },
+      "browserVersion": {
+        "protocolVersion": "1.3",
+        "product": "Chrome/142.0.7444.265",
+        "revision": "@eb900db0de64ac530da6a076524223e35e86d156",
+        "userAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) NovelDirector/0.1.0 Chrome/142.0.7444.265 Electron/39.8.9 Safari/537.36",
+        "jsVersion": "14.2.231.22"
+      },
+      "loadedScriptResources": []
+    },
+    {
+      "runNumber": 4,
+      "timings": {
+        "processColdToRendererInteractiveMs": 828.825,
+        "projectWorkbenchRenderMs": 331.013,
+        "firstGenerationPipelineMs": 329.972,
+        "warmGenerationPipelineMs": 8.356,
+        "firstPromptBuilderMs": 352.395
+      },
+      "rendererMemoryObservation": {
+        "jsHeapUsedBytes": 4610868,
+        "jsHeapTotalBytes": 7602176,
+        "nodes": 4563
+      },
+      "browserVersion": {
+        "protocolVersion": "1.3",
+        "product": "Chrome/142.0.7444.265",
+        "revision": "@eb900db0de64ac530da6a076524223e35e86d156",
+        "userAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) NovelDirector/0.1.0 Chrome/142.0.7444.265 Electron/39.8.9 Safari/537.36",
+        "jsVersion": "14.2.231.22"
+      },
+      "loadedScriptResources": []
+    },
+    {
+      "runNumber": 5,
+      "timings": {
+        "processColdToRendererInteractiveMs": 814.115,
+        "projectWorkbenchRenderMs": 334.91,
+        "firstGenerationPipelineMs": 332.995,
+        "warmGenerationPipelineMs": 2.434,
+        "firstPromptBuilderMs": 359.162
+      },
+      "rendererMemoryObservation": {
+        "jsHeapUsedBytes": 4485656,
+        "jsHeapTotalBytes": 8126464,
+        "nodes": 4560
+      },
+      "browserVersion": {
+        "protocolVersion": "1.3",
+        "product": "Chrome/142.0.7444.265",
+        "revision": "@eb900db0de64ac530da6a076524223e35e86d156",
+        "userAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) NovelDirector/0.1.0 Chrome/142.0.7444.265 Electron/39.8.9 Safari/537.36",
+        "jsVersion": "14.2.231.22"
+      },
+      "loadedScriptResources": []
+    }
+  ]
+}

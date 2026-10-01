@@ -1,0 +1,40 @@
+/* Stage summaries: a builder bar, then one card per covered chapter range. */
+.stage-summary-view .stage-builder {
+  align-items: end;
+  margin-bottom: 20px;
+  border-top: 3px solid var(--color-accent);
+}
+
+.stage-summary-view .stage-builder .field {
+  width: 160px;
+}
+
+.stage-summary-view .summary-list {
+  display: grid;
+  gap: 16px;
+}
+
+.stage-summary-view .summary-list > .panel {
+  display: grid;
+  gap: 16px;
+  margin-top: 0;
+}
+
+.stage-summary-view .summary-list .form-grid.compact {
+  grid-template-columns: repeat(2, 160px);
+  padding-bottom: 14px;
+  border-bottom: 1px dashed var(--line);
+}
+
+.stage-summary-view .summary-list > .panel > .danger-button {
+  justify-self: end;
+  min-height: 30px;
+  padding: 4px 11px;
+  font-size: var(--text-xs);
+}
+
+@media (min-width: 1280px) {
+  .stage-summary-view .summary-list .form-grid:not(.compact) {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}

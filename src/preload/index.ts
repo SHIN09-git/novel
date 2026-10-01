@@ -2,12 +2,25 @@ import { contextBridge, ipcRenderer } from 'electron'
 import { IPC_CHANNELS } from '../shared/ipc/ipcChannels'
 import type {
   ChatCompletionRequest,
+  CancelAiCallResult,
+  CandidateDecisionWriteResult,
   ChatCompletionResult,
+  AgentAuthorizationGrantRequest,
+  AgentAuthorizationGrantResult,
+  AgentAuthorizationListResult,
+  AgentAuthorizationRevokeRequest,
+  AgentAuthorizationRevokeResult,
+  CodexCliStatusResult,
+  CancelAiRunResult,
+  GetRuntimeInfoResult,
+  GetAiCallProgressRequest,
+  GetAiCallProgressResult,
   BackupCreateResult,
   BackupDeleteResult,
   BackupListResult,
   BackupOpenFolderResult,
   BackupRestoreResult,
+  BackupRestoreRequest,
   ConfirmMigrationMergeResult,
   CredentialDeleteApiKeyResult,
   CredentialHasApiKeyResult,
@@ -22,9 +35,12 @@ import type {
   ExportDataResult,
   GetStoragePathResult,
   ImportDataResult,
+  ImportDataRequest,
+  ImportDataStrategy,
   IpcFailure,
   LogsGetPathResult,
   LogsOpenResult,
+  ListAiCallProgressResult,
   MigrateStoragePathResult,
   MigrationMergePreviewResult,
   OpenStorageFolderResult,
@@ -34,7 +50,7 @@ import type {
   StorageGetResult,
   StorageSaveResult
 } from '../shared/ipc/ipcTypes'
-import type { AppData, ChapterCommitBundle, GenerationRunBundle, RevisionCommitBundle } from '../shared/types'
+import type { AppData, CandidateDecisionCommand, ChapterCommitBundle, GenerationRunBundle, RevisionCommitBundle } from '../shared/types'
 
 function isIpcFailure(value: unknown): value is IpcFailure {
   return Boolean(
@@ -48,7 +64,11 @@ function isIpcFailure(value: unknown): value is IpcFailure {
 
 async function invokeOrThrow<T>(channel: string, ...args: unknown[]): Promise<T> {
   const result = await ipcRenderer.invoke(channel, ...args)
-  if (isIpcFailure(result)) throw new Error(result.error)
+  if (isIpcFailure(result)) {
+    const error = new Error(result.error) as Error & { code?: string }
+    error.code = result.code
+    throw error
+  }
   return result as T
 }
 
@@ -57,40 +77,94 @@ function assertText(value: unknown, label: string): string {
   return value
 }
 
+let storageRevision: string | undefined
+
+async function loadStorageData(): Promise<StorageGetResult> {
+  const result = await invokeOrThrow<StorageGetResult>(IPC_CHANNELS.STORAGE_GET)
+  storageRevision = result.revision
+  return result
+}
+
+async function saveStorageData(data: AppData): Promise<StorageSaveResult> {
+  const result = await invokeOrThrow<StorageSaveResult>(IPC_CHANNELS.STORAGE_SAVE, {
+    data,
+    expectedRevision: storageRevision
+  })
+  storageRevision = result.revision
+  return result
+}
+
+async function saveStorageBundle<T extends StorageWriteResult>(channel: string, bundle: unknown): Promise<T> {
+  const result = await invokeOrThrow<T>(channel, { bundle, expectedRevision: storageRevision })
+  storageRevision = result.revision
+  return result
+}
+
+function rememberStorageRevision(result: { revision?: string }): void {
+  if (result.revision) storageRevision = result.revision
+}
+
 const novelDirector = {
   data: {
-    load: () => invokeOrThrow<StorageGetResult>(IPC_CHANNELS.STORAGE_GET),
-    save: (data: AppData) => invokeOrThrow<StorageSaveResult>(IPC_CHANNELS.STORAGE_SAVE, data),
+    load: loadStorageData,
+    save: saveStorageData,
+    executeCandidateDecision: async (command: CandidateDecisionCommand) => {
+      const result = await invokeOrThrow<CandidateDecisionWriteResult>(IPC_CHANNELS.DATA_EXECUTE_CANDIDATE_DECISION,
+        { command, expectedRevision: storageRevision })
+      storageRevision = result.revision
+      return result
+    },
     saveGenerationRunBundle: (bundle: GenerationRunBundle) =>
-      invokeOrThrow<StorageWriteResult>(IPC_CHANNELS.DATA_SAVE_GENERATION_RUN_BUNDLE, { bundle }),
+      saveStorageBundle<StorageWriteResult>(IPC_CHANNELS.DATA_SAVE_GENERATION_RUN_BUNDLE, bundle),
     saveChapterCommitBundle: (bundle: ChapterCommitBundle) =>
-      invokeOrThrow<StorageWriteResult>(IPC_CHANNELS.DATA_SAVE_CHAPTER_COMMIT_BUNDLE, { bundle }),
+      saveStorageBundle<StorageWriteResult>(IPC_CHANNELS.DATA_SAVE_CHAPTER_COMMIT_BUNDLE, bundle),
     saveRevisionCommitBundle: (bundle: RevisionCommitBundle) =>
-      invokeOrThrow<StorageWriteResult>(IPC_CHANNELS.DATA_SAVE_REVISION_COMMIT_BUNDLE, { bundle }),
+      saveStorageBundle<StorageWriteResult>(IPC_CHANNELS.DATA_SAVE_REVISION_COMMIT_BUNDLE, bundle),
     export: (data: AppData) => invokeOrThrow<ExportDataResult>(IPC_CHANNELS.STORAGE_EXPORT, data),
-    import: () => invokeOrThrow<ImportDataResult>(IPC_CHANNELS.STORAGE_IMPORT)
+    import: async (strategy: ImportDataStrategy = 'replace') => {
+      const request: ImportDataRequest = { expectedRevision: storageRevision, strategy }
+      const result = await invokeOrThrow<ImportDataResult>(IPC_CHANNELS.STORAGE_IMPORT, request)
+      rememberStorageRevision(result)
+      return result
+    }
   },
   app: {
     getStoragePath: () => invokeOrThrow<GetStoragePathResult>(IPC_CHANNELS.APP_GET_STORAGE_PATH),
+    getRuntimeInfo: () => invokeOrThrow<GetRuntimeInfoResult>(IPC_CHANNELS.APP_GET_RUNTIME_INFO),
     selectStoragePath: () => invokeOrThrow<SelectStoragePathResult>(IPC_CHANNELS.APP_SELECT_STORAGE_PATH),
-    migrateStoragePath: (storagePath: string, data: AppData, overwrite = false) =>
-      invokeOrThrow<MigrateStoragePathResult>(IPC_CHANNELS.APP_MIGRATE_STORAGE_PATH, {
+    migrateStoragePath: async (storagePath: string, data: AppData, overwrite = false) => {
+      const result = await invokeOrThrow<MigrateStoragePathResult>(IPC_CHANNELS.APP_MIGRATE_STORAGE_PATH, {
         storagePath: assertText(storagePath, 'storagePath'),
         data,
-        overwrite
-      }),
+        overwrite,
+        expectedRevision: storageRevision
+      })
+      rememberStorageRevision(result)
+      return result
+    },
     createMigrationMergePreview: (sourcePath: string, targetPath: string) =>
       invokeOrThrow<MigrationMergePreviewResult>(IPC_CHANNELS.APP_CREATE_MIGRATION_MERGE_PREVIEW, {
         sourcePath: assertText(sourcePath, 'sourcePath'),
         targetPath: assertText(targetPath, 'targetPath')
       }),
-    confirmMigrationMerge: (sourcePath: string, targetPath: string) =>
-      invokeOrThrow<ConfirmMigrationMergeResult>(IPC_CHANNELS.APP_CONFIRM_MIGRATION_MERGE, {
+    confirmMigrationMerge: async (sourcePath: string, targetPath: string) => {
+      const result = await invokeOrThrow<ConfirmMigrationMergeResult>(IPC_CHANNELS.APP_CONFIRM_MIGRATION_MERGE, {
         sourcePath: assertText(sourcePath, 'sourcePath'),
-        targetPath: assertText(targetPath, 'targetPath')
-      }),
-    resetStoragePath: (data: AppData, overwrite = false) =>
-      invokeOrThrow<MigrateStoragePathResult>(IPC_CHANNELS.APP_RESET_STORAGE_PATH, { data, overwrite }),
+        targetPath: assertText(targetPath, 'targetPath'),
+        expectedRevision: storageRevision
+      })
+      rememberStorageRevision(result)
+      return result
+    },
+    resetStoragePath: async (data: AppData, overwrite = false) => {
+      const result = await invokeOrThrow<MigrateStoragePathResult>(IPC_CHANNELS.APP_RESET_STORAGE_PATH, {
+        data,
+        overwrite,
+        expectedRevision: storageRevision
+      })
+      rememberStorageRevision(result)
+      return result
+    },
     openStorageFolder: (storagePath?: string) =>
       ipcRenderer.invoke(
         IPC_CHANNELS.APP_OPEN_STORAGE_FOLDER,
@@ -100,8 +174,18 @@ const novelDirector = {
   backup: {
     create: () => invokeOrThrow<BackupCreateResult>(IPC_CHANNELS.BACKUP_CREATE),
     list: () => invokeOrThrow<BackupListResult>(IPC_CHANNELS.BACKUP_LIST),
-    restore: (backupPath: string) =>
-      invokeOrThrow<BackupRestoreResult>(IPC_CHANNELS.BACKUP_RESTORE, assertText(backupPath, 'backupPath')),
+    restore: async (backupPath: string) => {
+      const request: BackupRestoreRequest = {
+        backupPath: assertText(backupPath, 'backupPath'),
+        expectedRevision: storageRevision
+      }
+      const result = await invokeOrThrow<BackupRestoreResult>(
+        IPC_CHANNELS.BACKUP_RESTORE,
+        request
+      )
+      rememberStorageRevision(result)
+      return result
+    },
     delete: (backupPath: string) =>
       invokeOrThrow<BackupDeleteResult>(IPC_CHANNELS.BACKUP_DELETE, assertText(backupPath, 'backupPath')),
     openFolder: () => invokeOrThrow<BackupOpenFolderResult>(IPC_CHANNELS.BACKUP_OPEN_FOLDER)
@@ -141,7 +225,20 @@ const novelDirector = {
   },
   ai: {
     chatCompletion: (request: ChatCompletionRequest) =>
-      ipcRenderer.invoke(IPC_CHANNELS.AI_CHAT_COMPLETION, request) as Promise<ChatCompletionResult>
+      ipcRenderer.invoke(IPC_CHANNELS.AI_CHAT_COMPLETION, request) as Promise<ChatCompletionResult>,
+    cancelRun: (runId: string) =>
+      invokeOrThrow<CancelAiRunResult>(IPC_CHANNELS.AI_CANCEL_RUN, assertText(runId, 'runId')),
+    cancelCall: (runId: string, callId: string) =>
+      invokeOrThrow<CancelAiCallResult>(IPC_CHANNELS.AI_CANCEL_CALL, {
+        runId: assertText(runId, 'runId'),
+        callId: assertText(callId, 'callId')
+      }),
+    getCallProgress: (request: GetAiCallProgressRequest = {}) =>
+      invokeOrThrow<GetAiCallProgressResult>(IPC_CHANNELS.AI_GET_CALL_PROGRESS, request),
+    listCallProgress: (runId: string) =>
+      invokeOrThrow<ListAiCallProgressResult>(IPC_CHANNELS.AI_LIST_CALL_PROGRESS, assertText(runId, 'runId')),
+    getCodexCliStatus: (command = 'codex') =>
+      invokeOrThrow<CodexCliStatusResult>(IPC_CHANNELS.AI_CODEX_CLI_STATUS, assertText(command, 'Codex CLI path'))
   },
   diagnostics: {
     analyzeRedundancy: (request: DiagnosticsAnalyzeRedundancyRequest) =>
@@ -150,6 +247,22 @@ const novelDirector = {
       invokeOrThrow<DiagnosticsAuditNoveltyResult>(IPC_CHANNELS.DIAGNOSTICS_AUDIT_NOVELTY, request),
     evaluateQualityGate: (request: DiagnosticsEvaluateQualityGateRequest) =>
       invokeOrThrow<DiagnosticsEvaluateQualityGateResult>(IPC_CHANNELS.DIAGNOSTICS_EVALUATE_QUALITY_GATE, request)
+  },
+  agentAuthorization: {
+    list: (projectId: string) =>
+      invokeOrThrow<AgentAuthorizationListResult>(IPC_CHANNELS.AGENT_AUTHORIZATION_LIST, {
+        projectId: assertText(projectId, 'projectId')
+      }),
+    grant: (request: AgentAuthorizationGrantRequest) =>
+      invokeOrThrow<AgentAuthorizationGrantResult>(IPC_CHANNELS.AGENT_AUTHORIZATION_GRANT, {
+        ...request,
+        projectId: assertText(request.projectId, 'projectId')
+      }),
+    revoke: (request: AgentAuthorizationRevokeRequest) =>
+      invokeOrThrow<AgentAuthorizationRevokeResult>(IPC_CHANNELS.AGENT_AUTHORIZATION_REVOKE, {
+        projectId: assertText(request.projectId, 'projectId'),
+        grantId: assertText(request.grantId, 'grantId')
+      })
   }
 }
 

@@ -1,7 +1,8 @@
 import { readFile } from 'node:fs/promises'
-import { join, resolve } from 'node:path'
+import { dirname, join } from 'node:path'
+import { fileURLToPath } from 'node:url'
 
-const root = resolve('.')
+const root = dirname(dirname(fileURLToPath(import.meta.url)))
 const rcDataPath = join(root, 'tmp', 'rc-regression', 'novel-director-data.json')
 const migratedDataPath = join(root, 'tmp', 'rc-regression', 'migrated-storage', 'novel-director-data.json')
 const sentinelKey = 'TEST_PLAINTEXT_KEY_SHOULD_NEVER_APPEAR'
@@ -29,6 +30,11 @@ async function main() {
   const ipcTypes = await read('src/shared/ipc/ipcTypes.ts')
   const preload = await read('src/preload/index.ts')
   const handlers = await read('src/main/ipc/registerIpcHandlers.ts')
+  const aiIpc = await read('src/main/ipc/aiIpcHandlers.ts')
+  const credentialIpc = await read('src/main/ipc/credentialIpcHandlers.ts')
+  const dataIpc = await read('src/main/ipc/dataIpcHandlers.ts')
+  const storageOps = await read('src/main/ipc/storageDataOperations.ts')
+  const credentialSanitizer = await read('src/main/ipc/appDataCredentialSanitizer.ts')
   const mainAiService = await read('src/main/services/AIService.ts')
   const mainAiHttpClient = await read('src/main/services/AIHttpClient.ts')
   const defaults = [
@@ -38,13 +44,21 @@ async function main() {
   ].join('\n')
   const storage = await read('src/storage/JsonStorageService.ts')
   const sqliteStorage = await read('src/storage/SqliteStorageService.ts')
-  const dataMerge = await read('src/main/DataMergeService.ts')
-  const settingsView = await read('src/renderer/src/views/SettingsView.tsx')
+  const dataMerge = [
+    await read('src/main/DataMergeService.ts'),
+    await read('src/main/dataMerge/dataFileStorage.ts')
+  ].join('\n')
+  const settingsView = [
+    await read('src/renderer/src/views/SettingsView.tsx'),
+    await read('src/renderer/src/views/settings/SettingsCorePanels.tsx'),
+    await read('src/renderer/src/views/settings/useSettingsCredentials.ts')
+  ].join('\n')
   const aiClient = await read('src/services/ai/AIClient.ts')
+  const aiTransport = await read('src/services/ai/AITransport.ts')
   const fixtureData = await readJson(rcDataPath)
   const migratedData = await readJson(migratedDataPath)
-  const aiMainSource = [handlers, mainAiService, mainAiHttpClient].join('\n')
-  const combinedSource = [secureService, aiMainSource, defaults, storage, sqliteStorage, dataMerge, settingsView, aiClient].join('\n')
+  const aiMainSource = [handlers, aiIpc, credentialIpc, dataIpc, storageOps, credentialSanitizer, mainAiService, mainAiHttpClient].join('\n')
+  const combinedSource = [secureService, aiMainSource, defaults, storage, sqliteStorage, dataMerge, settingsView, aiClient, aiTransport].join('\n')
 
   checks.push(
     assert(
@@ -78,12 +92,31 @@ async function main() {
 
   checks.push(
     assert(
-      handlers.includes('secureAndSanitizeAppData') &&
-        handlers.includes('migrateLegacyApiKey') &&
+      dataIpc.includes('secureAndSanitizeAppData') &&
+        credentialSanitizer.includes('migrateLegacyApiKey') &&
         mainAiService.includes('credentialService.getApiKey()') &&
-        mainAiService.includes('sanitizeAiErrorText(message, apiKey)') &&
+        /sanitizeAiErrorText\(\s*message\s*,\s*apiKey(?:\s*,[^)]*)?\)/.test(mainAiService) &&
         !aiMainSource.includes('headers.Authorization = `Bearer ${settings.apiKey'),
       'main process migrates legacy keys, injects secure key for AI calls, and redacts AI errors'
+    )
+  )
+
+  checks.push(
+    assert(
+      handlers.includes('registerCredentialIpcHandlers(context.credentialService)') &&
+        credentialIpc.includes('validateApiKey') &&
+        credentialIpc.includes('CREDENTIALS_SET_API_KEY') &&
+        !handlers.includes('IPC_CHANNELS.CREDENTIALS_SET_API_KEY'),
+      'credential IPC registration is isolated and validates API keys in the main process'
+    )
+  )
+
+  checks.push(
+    assert(
+      handlers.includes('registerAiIpcHandlers(context.aiService)') &&
+        aiIpc.includes('redactSensitiveText(message)') &&
+        !handlers.includes('IPC_CHANNELS.AI_CHAT_COMPLETION'),
+      'AI chat IPC registration is isolated and redacts main-process errors'
     )
   )
 
@@ -105,16 +138,16 @@ async function main() {
 
   checks.push(
     assert(
-      handlers.includes('JSON.stringify(sanitizeAppDataForPersistence(data), null, 2)'),
+      dataIpc.includes('JSON.stringify(sanitizeAppDataForPersistence(data), null, 2)'),
       'data export path sanitizes AppData before writing JSON'
     )
   )
 
   checks.push(
     assert(
-      handlers.includes('await storage.save(secured.data)') &&
-        handlers.includes('await nextStorage.save(secured.data)') &&
-        handlers.includes('backupFileForOverwrite(targetPath)'),
+      dataIpc.includes('storage.saveIfCurrent(secured.data') &&
+        storageOps.includes('nextStorage.saveIfCurrent(secured.data)') &&
+        storageOps.includes('backupFileForOverwrite(targetPath)'),
       'storage migration overwrite path saves sanitized data and backs up target data'
     )
   )
@@ -129,18 +162,26 @@ async function main() {
     assert(
       dataMerge.includes('const sanitizedMergedData = sanitizeAppDataForPersistence(mergedData)') &&
         dataMerge.includes('mergedSummary: summarizeDataFile(sanitizedMergedData)') &&
-        dataMerge.includes('await saveDataFile(targetPath, mergedData)'),
+        dataMerge.includes('await saveDataFile(targetPath, mergedData, targetSnapshot.revision)'),
       'DataMergeService sanitizes merged AppData and writes through the active storage backend'
     )
   )
 
   checks.push(
     assert(
-      handlers.includes('const legacyApiKey = normalized.settings.apiKey.trim()') &&
-        handlers.includes('await context.credentialService.migrateLegacyApiKey(legacyApiKey)') &&
-        handlers.includes('apiKey: \'\',') &&
-        handlers.includes('await storage.save(secured.data)'),
+      credentialSanitizer.includes('const legacyApiKey = normalized.settings.apiKey.trim()') &&
+        credentialSanitizer.includes('await context.credentialService.migrateLegacyApiKey(legacyApiKey)') &&
+        credentialSanitizer.includes('apiKey: \'\',') &&
+        dataIpc.includes('storage.saveIfCurrent(secured.data'),
       'legacy AppData apiKey is migrated to secure storage and removed before persistence'
+    )
+  )
+
+  checks.push(
+    assert(
+      dataIpc.includes('createBackup(currentSnapshot.data, false)') &&
+        dataIpc.indexOf('createBackup(currentSnapshot.data, false)') < dataIpc.lastIndexOf('storage.saveIfCurrent('),
+      'JSON import creates a current-data backup before replacing storage'
     )
   )
 
@@ -155,8 +196,8 @@ async function main() {
 
   checks.push(
     assert(
-      settingsView.includes('async function updateSettings(patch: Partial<AppSettings>)') &&
-        settingsView.includes('await saveData((current) => ({') &&
+      settingsView.includes('const updateSettings = useCallback') &&
+        settingsView.includes('return saveData((current) => ({') &&
         settingsView.includes('...current.settings') &&
         settingsView.includes("apiKey: ''") &&
         !settingsView.includes('await saveData({ ...data, settings: { ...data.settings'),
@@ -168,6 +209,7 @@ async function main() {
     assert(
       settingsView.includes('apiKeyInput') &&
         settingsView.includes('hasStoredApiKey') &&
+        settingsView.includes('本地状态同步失败') &&
         !settingsView.includes('value={data.settings.apiKey}'),
       'settings UI displays saved-key state without binding to plaintext AppData apiKey'
     )
@@ -176,8 +218,11 @@ async function main() {
   checks.push(
     assert(
       aiClient.includes('settings.hasApiKey') &&
-        aiClient.includes('window.novelDirector.ai.chatCompletion'),
-      'renderer AI client checks saved-key state and delegates network calls to main process'
+        aiClient.includes('this.transport.chatCompletion') &&
+        !aiClient.includes('window.novelDirector') &&
+        aiTransport.includes('window.novelDirector') &&
+        aiTransport.includes('bridge.ai.chatCompletion'),
+      'renderer AI client checks saved-key state and delegates network calls through guarded transport to main process'
     )
   )
 

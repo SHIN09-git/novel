@@ -1,8 +1,9 @@
 #!/usr/bin/env node
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
+import { repoRoot } from './utils/repo-root.mjs'
 
-const root = process.cwd()
+const root = repoRoot
 const promptBuilder = [
   'src/services/PromptBuilderService.ts',
   'src/services/promptFormatters/foreshadowingFormatters.ts'
@@ -11,7 +12,8 @@ const promptBuilder = [
   .join('\n')
 const budgetManager = [
   'src/services/ContextBudgetManager.ts',
-  'src/services/contextBudget/scoringEngine.ts'
+  'src/services/contextBudget/scoringEngine.ts',
+  'src/services/contextBudget/selectionFinalizer.ts'
 ]
   .map((file) => readFileSync(join(root, file), 'utf8'))
   .join('\n')

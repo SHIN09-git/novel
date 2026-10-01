@@ -55,8 +55,8 @@
 }
 
 .generation-view .reader-emotion-chip {
-  border: 1px solid rgba(40, 118, 111, 0.22);
-  background: rgba(255, 255, 255, 0.68);
+  border: 1px solid color-mix(in srgb, var(--color-accent) 22%, transparent);
+  background: color-mix(in srgb, var(--color-surface-elevated) 68%, transparent);
   color: var(--ink);
   border-radius: 999px;
   padding: 7px 11px;
@@ -67,7 +67,7 @@
 
 .generation-view .reader-emotion-chip:hover,
 .generation-view .reader-emotion-chip.active {
-  border-color: rgba(40, 118, 111, 0.44);
+  border-color: color-mix(in srgb, var(--color-accent) 44%, transparent);
   background: var(--color-accent-soft);
   color: var(--color-accent-strong);
 }
@@ -93,7 +93,7 @@
 .generation-view .pipeline-stepper-panel {
   grid-column: 1;
   position: sticky;
-  top: 22px;
+  top: var(--workspace-sticky-offset);
 }
 
 .generation-view .pipeline-workbench .editor-pane > .panel:not(.pipeline-stepper-panel):not(.draft-panel) {
@@ -134,16 +134,16 @@
 
 .generation-view .pipeline-step.running {
   border-color: var(--teal);
-  background: rgba(46, 113, 108, 0.08);
+  background: color-mix(in srgb, var(--color-accent) 8%, transparent);
 }
 
 .generation-view .pipeline-step.completed {
-  border-color: rgba(46, 113, 108, 0.32);
+  border-color: color-mix(in srgb, var(--color-accent) 32%, transparent);
 }
 
 .generation-view .pipeline-step.failed {
-  border-color: rgba(169, 67, 67, 0.45);
-  background: rgba(169, 67, 67, 0.08);
+  border-color: color-mix(in srgb, var(--color-danger) 45%, transparent);
+  background: color-mix(in srgb, var(--color-danger) 8%, transparent);
 }
 
 .generation-view .pipeline-step pre,
@@ -177,13 +177,14 @@
 
 .generation-view .pipeline-top-status {
   position: sticky;
-  top: 72px;
+  top: var(--workspace-sticky-offset);
   z-index: 4;
-  border: 1px solid rgba(45, 130, 120, 0.18);
-  border-radius: 18px;
-  background: rgba(255, 253, 248, 0.92);
-  box-shadow: var(--shadow-soft);
-  backdrop-filter: blur(14px);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+  background: color-mix(in srgb, var(--surface) 94%, transparent);
+  backdrop-filter: blur(12px) saturate(1.2);
+  box-shadow: inset 0 2px 0 var(--color-accent), var(--shadow-raised);
+  overflow: hidden;
 }
 
 .generation-view .pipeline-top-status-inner {
@@ -191,7 +192,7 @@
   grid-template-columns: minmax(190px, 0.8fr) minmax(0, 2.4fr) auto;
   gap: var(--space-4);
   align-items: center;
-  padding: 15px 16px;
+  padding: 13px 14px;
 }
 
 .generation-view .pipeline-top-status-main h2 {
@@ -208,10 +209,9 @@
   display: grid;
   gap: 3px;
   min-width: 0;
-  padding: 9px 10px;
-  border: 1px solid rgba(218, 212, 200, 0.72);
-  border-radius: 12px;
-  background: rgba(255, 255, 255, 0.45);
+  padding: 4px 8px 4px 12px;
+  border-left: 1px solid var(--line);
+  background: transparent;
 }
 
 .generation-view .pipeline-status-cluster span,
@@ -230,18 +230,32 @@
 
 .generation-view .pipeline-console-grid {
   display: grid;
-  grid-template-columns: minmax(300px, 340px) minmax(580px, 1fr) minmax(320px, 380px);
-  gap: 18px;
+  grid-template-columns: minmax(0, 1fr) minmax(300px, 340px);
+  grid-template-areas:
+    "tools tools"
+    "main inspector";
+  gap: 14px;
   align-items: start;
 }
 
 .generation-view .pipeline-sidebar,
-.generation-view .pipeline-inspector {
+.generation-view .pipeline-inspector,
+.generation-view .pipeline-inspector-stack {
   display: grid;
   gap: var(--space-4);
 }
 
+.generation-view .pipeline-sidebar {
+  grid-area: tools;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.generation-view .pipeline-inspector {
+  grid-area: inspector;
+}
+
 .generation-view .pipeline-main {
+  grid-area: main;
   display: grid;
   gap: var(--space-4);
   min-width: 0;
@@ -249,10 +263,81 @@
 
 .generation-view .pipeline-card {
   border: 1px solid var(--line);
-  border-radius: 16px;
-  background: rgba(255, 253, 248, 0.94);
-  box-shadow: var(--shadow-soft);
-  padding: 17px;
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  padding: 15px;
+}
+
+.generation-view .pipeline-tool-details {
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  min-width: 0;
+}
+
+.generation-view .pipeline-tool-summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-height: 54px;
+  padding: 9px 12px;
+  color: var(--ink);
+  cursor: pointer;
+}
+
+.generation-view .pipeline-tool-summary > span:first-child {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.generation-view .pipeline-tool-summary strong {
+  font-size: 0.9rem;
+}
+
+.generation-view .pipeline-tool-summary small {
+  color: var(--muted);
+  font-size: 0.75rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.generation-view .pipeline-tool-summary-action {
+  color: var(--color-accent-strong);
+  font-size: 0.75rem;
+  font-weight: 650;
+}
+
+.generation-view .pipeline-tool-details[open] > .pipeline-tool-summary {
+  border-bottom: 1px solid var(--line);
+}
+
+.generation-view .pipeline-config-tools > .pipeline-config-stack {
+  padding: 0 12px 12px;
+}
+
+.generation-view .pipeline-config-tools .pipeline-card {
+  border: 0;
+  border-bottom: 1px solid var(--line);
+  border-radius: 0;
+  padding: 14px 0;
+}
+
+.generation-view .pipeline-config-tools .pipeline-card:last-child {
+  border-bottom: 0;
+  padding-bottom: 0;
+}
+
+.generation-view .pipeline-job-list {
+  padding: 0;
+}
+
+.generation-view .pipeline-job-list > .muted,
+.generation-view .pipeline-job-list > .pipeline-job-items {
+  margin: 0;
+  padding: 12px;
 }
 
 .generation-view .pipeline-card-title,
@@ -295,7 +380,7 @@
 
 .generation-view .pipeline-job-item {
   border: 1px solid var(--line);
-  border-radius: 13px;
+  border-radius: var(--radius-md);
   background: var(--surface-strong);
   color: var(--ink);
   text-align: left;
@@ -306,7 +391,7 @@
 }
 
 .generation-view .pipeline-job-item.active {
-  border-color: rgba(45, 130, 120, 0.42);
+  border-color: color-mix(in srgb, var(--color-accent) 42%, transparent);
   background: var(--color-accent-soft);
   box-shadow: inset 3px 0 var(--color-accent);
 }
@@ -315,7 +400,7 @@
   margin-top: 12px;
   display: grid;
   gap: 8px;
-  border: 1px solid rgba(40, 118, 111, 0.16);
+  border: 1px solid color-mix(in srgb, var(--color-accent) 16%, transparent);
   border-radius: var(--radius);
   background: var(--surface-strong);
   padding: 12px;
@@ -323,12 +408,12 @@
 
 .generation-view .pipeline-context-snapshot.warning,
 .generation-view .pipeline-risk-banner {
-  border-color: rgba(185, 111, 54, 0.36);
-  background: rgba(255, 246, 235, 0.86);
+  border-color: color-mix(in srgb, var(--color-warning) 36%, transparent);
+  background: var(--color-warning-soft);
 }
 
 .generation-view .pipeline-context-snapshot.compact {
-  background: rgba(40, 118, 111, 0.06);
+  background: color-mix(in srgb, var(--color-accent) 6%, transparent);
 }
 
 .generation-view .pipeline-mini-metrics {
@@ -340,7 +425,7 @@
 .generation-view .pipeline-mini-metrics span {
   border: 1px solid var(--line);
   border-radius: 999px;
-  background: rgba(255, 255, 255, 0.66);
+  background: color-mix(in srgb, var(--color-surface-elevated) 66%, transparent);
   color: var(--muted);
   font-size: 12px;
   font-weight: 700;
@@ -359,41 +444,261 @@
   gap: 12px;
 }
 
+.generation-view .pipeline-stage-board {
+  display: grid;
+  gap: 12px;
+  border-top: 1px solid var(--line);
+  border-bottom: 1px solid var(--line);
+  padding: 12px 0;
+}
+
+.generation-view .pipeline-stage-board-header {
+  display: grid;
+  gap: 4px;
+}
+
+.generation-view .pipeline-stage-board-header > div {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.generation-view .pipeline-stage-board-header strong {
+  color: var(--ink);
+  font-size: 0.95rem;
+}
+
+.generation-view .pipeline-stage-board-header p {
+  color: var(--muted);
+  font-size: 0.84rem;
+  line-height: 1.5;
+  margin: 0;
+}
+
+.generation-view .pipeline-stage-eyebrow {
+  color: var(--muted);
+  font-size: 0.72rem;
+  font-weight: 650;
+}
+
+/* Stages hang on one thread; the index nodes sit on the line. */
+.generation-view .pipeline-stage-list {
+  position: relative;
+  display: grid;
+  gap: 4px;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.generation-view .pipeline-stage-list::before {
+  content: "";
+  position: absolute;
+  left: 20px;
+  top: 18px;
+  bottom: 18px;
+  width: 1px;
+  background: var(--line);
+}
+
+.generation-view .pipeline-stage-item {
+  position: relative;
+  display: grid;
+  grid-template-columns: 26px minmax(0, 1fr);
+  gap: 10px;
+  align-items: start;
+  padding: 8px 8px 8px 8px;
+  border-radius: var(--radius-md);
+  transition: background var(--duration-base) ease;
+}
+
+.generation-view .pipeline-stage-item.active {
+  background: var(--color-accent-soft);
+}
+
+.generation-view .pipeline-stage-index {
+  display: grid;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  border: 1px solid var(--line);
+  position: relative;
+  border-radius: 50%;
+  background: var(--surface);
+  color: var(--muted);
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+  font-weight: 600;
+  transition:
+    background var(--duration-base) ease,
+    color var(--duration-base) ease,
+    border-color var(--duration-base) ease;
+}
+
+.generation-view .pipeline-stage-item.completed .pipeline-stage-index {
+  border-color: transparent;
+  background: var(--color-success-soft);
+  color: var(--color-success);
+}
+
+.generation-view .pipeline-stage-item.running .pipeline-stage-index {
+  border-color: var(--color-accent);
+  background: var(--color-accent-soft);
+  color: var(--color-accent-strong);
+  animation: nd-pulse-ring 1.4s var(--ease-out) infinite;
+}
+
+.generation-view .pipeline-stage-item.failed .pipeline-stage-index {
+  border-color: color-mix(in srgb, var(--color-danger) 35%, transparent);
+  background: var(--color-danger-soft);
+  color: var(--danger);
+}
+
+.generation-view .pipeline-stage-item.ready_for_decision .pipeline-stage-index {
+  border-color: color-mix(in srgb, var(--color-warning) 40%, transparent);
+  background: var(--color-warning-soft);
+  color: var(--color-warning);
+}
+
+.generation-view .pipeline-stage-item.accepted .pipeline-stage-index {
+  border-color: transparent;
+  background: var(--color-success-soft);
+  color: var(--color-success);
+}
+
+.generation-view .pipeline-stage-copy {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.generation-view .pipeline-stage-copy > div {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.generation-view .pipeline-stage-copy strong {
+  color: var(--ink);
+  font-size: 0.87rem;
+}
+
+.generation-view .pipeline-stage-copy span,
+.generation-view .pipeline-stage-copy small {
+  color: var(--muted);
+  font-size: 0.72rem;
+}
+
+.generation-view .pipeline-stage-item.running .pipeline-stage-copy span {
+  color: var(--color-accent-strong);
+}
+
+.generation-view .pipeline-stage-item.failed .pipeline-stage-copy span {
+  color: var(--danger);
+}
+
+.generation-view .pipeline-stage-item.ready_for_decision .pipeline-stage-copy span {
+  color: var(--color-warning);
+}
+
+.generation-view .pipeline-stage-item.accepted .pipeline-stage-copy span {
+  color: var(--color-success);
+}
+
+.generation-view .pipeline-stage-copy p {
+  color: var(--muted);
+  font-size: 0.78rem;
+  line-height: 1.45;
+  margin: 0;
+}
+
+.generation-view .pipeline-raw-steps {
+  border-top: 1px solid var(--line);
+  padding-top: 10px;
+}
+
+.generation-view .pipeline-raw-steps summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  color: var(--ink);
+  cursor: pointer;
+  font-size: 0.84rem;
+  font-weight: 650;
+}
+
+.generation-view .pipeline-raw-steps summary small {
+  color: var(--muted);
+  font-size: 0.72rem;
+  font-weight: 600;
+}
+
+.generation-view .pipeline-raw-steps-body {
+  margin-top: 10px;
+}
+
+.generation-view .pipeline-running-meta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  color: var(--color-text-muted);
+  font-size: 0.85rem;
+}
+
 .generation-view .pipeline-error-box {
-  border: 1px solid rgba(169, 67, 67, 0.35);
+  border: 1px solid color-mix(in srgb, var(--color-danger) 35%, transparent);
   border-radius: var(--radius);
-  background: rgba(169, 67, 67, 0.08);
+  background: color-mix(in srgb, var(--color-danger) 8%, transparent);
   padding: 12px;
 }
 
 .generation-view .pipeline-current-artifact {
   display: grid;
   gap: 14px;
+  min-width: 0;
+}
+
+.generation-view .pipeline-failed-step-link {
+  border: 0;
+  background: transparent;
+  padding: 0;
+  cursor: pointer;
 }
 
 .generation-view .pipeline-artifact-tabs {
   display: flex;
-  gap: 8px;
-  padding: 4px;
-  border: 1px solid var(--line);
-  border-radius: 13px;
-  background: var(--color-surface-soft);
+  gap: 0;
+  padding: 0;
+  border-bottom: 1px solid var(--line);
+  background: transparent;
 }
 
 .generation-view .pipeline-artifact-tabs button {
+  margin-bottom: -1px;
   border: 0;
-  border-radius: 10px;
+  border-bottom: 2px solid transparent;
+  border-radius: 0;
   background: transparent;
   color: var(--muted);
   cursor: pointer;
-  font-weight: 800;
-  padding: 8px 12px;
+  font-weight: 600;
+  padding: 9px 14px;
+  transition:
+    color var(--duration-fast) ease,
+    border-color var(--duration-base) var(--ease-out);
+}
+
+.generation-view .pipeline-artifact-tabs button:hover {
+  color: var(--ink);
 }
 
 .generation-view .pipeline-artifact-tabs button.active {
-  color: var(--ink);
-  background: var(--color-surface-elevated);
-  box-shadow: 0 5px 14px rgba(28, 35, 31, 0.06);
+  color: var(--color-accent-strong);
+  border-bottom-color: var(--color-accent);
+  background: transparent;
 }
 
 .generation-view .pipeline-artifact-body pre,
@@ -410,6 +715,9 @@
   background: var(--surface-strong);
   padding: 12px;
   color: var(--muted);
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  line-height: 1.65;
 }
 
 .generation-view .pipeline-draft-preview {
@@ -418,12 +726,16 @@
 }
 
 .generation-view .pipeline-draft-body {
-  min-height: 430px;
-  line-height: 1.9;
-  font-size: 15px;
-  background:
-    linear-gradient(90deg, rgba(45, 130, 120, 0.04), transparent 28%),
-    var(--color-surface-elevated);
+  min-height: clamp(480px, 62vh, 760px);
+  padding: 28px max(28px, calc((100% - var(--prose-measure)) / 2));
+  border: 1px solid var(--paper-line);
+  border-radius: var(--radius-md);
+  color: var(--paper-ink);
+  background: var(--paper);
+  font-family: var(--font-prose);
+  font-size: 17px;
+  line-height: 2;
+  letter-spacing: 0.01em;
 }
 
 .generation-view .pipeline-draft-actions {
@@ -451,8 +763,8 @@
 }
 
 .generation-view .pipeline-step-output.failed {
-  border-color: rgba(169, 67, 67, 0.4);
-  background: rgba(169, 67, 67, 0.06);
+  border-color: color-mix(in srgb, var(--color-danger) 40%, transparent);
+  background: color-mix(in srgb, var(--color-danger) 6%, transparent);
 }
 
 .generation-view .pipeline-step-output summary {
@@ -466,14 +778,14 @@
 .generation-view .pipeline-risk-banner {
   display: grid;
   gap: 8px;
-  border: 1px solid rgba(168, 109, 37, 0.36);
-  border-radius: 16px;
+  border: 1px solid color-mix(in srgb, var(--color-warning) 36%, transparent);
+  border-radius: var(--radius-lg);
   padding: 14px;
 }
 
 .generation-view .pipeline-risk-banner.calm {
-  border-color: rgba(40, 118, 111, 0.2);
-  background: rgba(40, 118, 111, 0.06);
+  border-color: color-mix(in srgb, var(--color-accent) 20%, transparent);
+  background: color-mix(in srgb, var(--color-accent) 6%, transparent);
 }
 
 .generation-view .pipeline-risk-banner ul {
@@ -486,13 +798,130 @@
 .generation-view .pipeline-trace-summary {
   display: grid;
   gap: 14px;
+  min-width: 0;
 }
 
-.generation-view .pipeline-quality-summary,
-.generation-view .pipeline-consistency-summary,
-.generation-view .pipeline-revision-candidates {
+.generation-view .pipeline-editorial-section,
+.generation-view .pipeline-original-reports-body,
+.generation-view .pipeline-report-section {
   display: grid;
   gap: 10px;
+  min-width: 0;
+}
+
+.generation-view .pipeline-editorial-summary {
+  margin: 0;
+  color: var(--ink);
+  line-height: 1.6;
+}
+
+.generation-view .pipeline-editorial-section {
+  border-top: 1px solid var(--line);
+  padding-top: 12px;
+}
+
+.generation-view .pipeline-editorial-section h4,
+.generation-view .pipeline-report-section h4 {
+  margin: 0;
+  color: var(--ink);
+  font-size: 0.9rem;
+}
+
+.generation-view .pipeline-editorial-list,
+.generation-view .pipeline-editorial-actions,
+.generation-view .pipeline-report-list {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+  padding-left: 18px;
+}
+
+.generation-view .pipeline-editorial-list li,
+.generation-view .pipeline-editorial-actions li,
+.generation-view .pipeline-report-list li {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.generation-view .pipeline-editorial-list li,
+.generation-view .pipeline-editorial-actions li {
+  display: grid;
+  gap: 3px;
+}
+
+.generation-view .pipeline-editorial-list span,
+.generation-view .pipeline-editorial-actions span,
+.generation-view .pipeline-report-list span,
+.generation-view .pipeline-report-list small {
+  color: var(--muted);
+  line-height: 1.5;
+}
+
+.generation-view .pipeline-editorial-list.blockers li::marker {
+  color: var(--danger);
+}
+
+.generation-view .pipeline-original-reports {
+  border-top: 1px solid var(--line);
+  padding-top: 12px;
+}
+
+.generation-view .pipeline-original-reports > summary,
+.generation-view .pipeline-report-section details > summary {
+  color: var(--ink);
+  cursor: pointer;
+  font-weight: 650;
+  overflow-wrap: anywhere;
+}
+
+.generation-view .pipeline-original-reports-body {
+  margin-top: 12px;
+}
+
+.generation-view .pipeline-report-section {
+  border-top: 1px solid var(--line);
+  padding-top: 12px;
+}
+
+.generation-view .pipeline-report-section:first-child {
+  border-top: 0;
+  padding-top: 0;
+}
+
+.generation-view .pipeline-report-section p {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.generation-view .pipeline-report-list li {
+  display: grid;
+  gap: 5px;
+  padding-bottom: 10px;
+  border-bottom: 1px solid var(--line);
+}
+
+.generation-view .pipeline-report-list li:last-child {
+  padding-bottom: 0;
+  border-bottom: 0;
+}
+
+.generation-view .pipeline-report-list .row-actions {
+  flex-wrap: wrap;
+}
+
+.generation-view .pipeline-report-section .metric-grid > div {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+  padding: 8px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+}
+
+.generation-view .pipeline-report-section .metric-grid span {
+  color: var(--muted);
+  font-size: 0.78rem;
+  overflow-wrap: anywhere;
 }
 
 .generation-view .compact-list {
@@ -507,26 +936,82 @@
   opacity: 0.72;
 }
 
-@media (max-width: 1500px) {
+@media (max-width: 1200px) {
   .generation-view .pipeline-console-grid {
-    grid-template-columns: minmax(280px, 330px) minmax(0, 1fr);
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-areas:
+      "tools"
+      "main"
+      "inspector";
   }
 
   .generation-view .pipeline-inspector {
-    grid-column: 1 / -1;
-    grid-template-columns: repeat(2, minmax(0, 1fr));
+    grid-column: auto;
   }
 }
 
-@media (max-width: 1100px) {
-  .generation-view .pipeline-top-status-inner,
+@media (max-width: 1150px) {
   .generation-view .pipeline-console-grid,
-  .generation-view .pipeline-inspector {
+  .generation-view .pipeline-inspector-stack {
     grid-template-columns: 1fr;
   }
 
+  .generation-view .pipeline-top-status-inner {
+    grid-template-columns: minmax(130px, 1fr) auto;
+    gap: 10px;
+  }
+
   .generation-view .pipeline-status-cluster {
+    grid-column: 1 / -1;
+    grid-row: 2;
     grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .generation-view .pipeline-top-status-inner > .primary-button {
+    grid-column: 2;
+    grid-row: 1;
+  }
+
+  .generation-view .pipeline-sidebar {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .generation-view .pipeline-stage-list {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 10px 14px;
+  }
+
+  .generation-view .pipeline-stage-item {
+    min-width: 0;
+  }
+}
+
+@media (max-width: 620px) {
+  .generation-view .pipeline-top-status-inner,
+  .generation-view .pipeline-sidebar {
+    grid-template-columns: 1fr;
+  }
+
+  .generation-view .pipeline-stage-list {
+    grid-template-columns: 1fr;
+  }
+
+  .generation-view .pipeline-stage-board-header > div,
+  .generation-view .pipeline-running-meta,
+  .generation-view .pipeline-raw-steps summary {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .generation-view .pipeline-editorial-list,
+  .generation-view .pipeline-editorial-actions,
+  .generation-view .pipeline-report-list {
+    padding-left: 16px;
+  }
+
+  .generation-view .pipeline-report-list .row-actions {
+    display: grid;
+    grid-template-columns: 1fr;
   }
 }
 
