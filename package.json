@@ -41,7 +41,7 @@
     "perf:accepted-cost": "node scripts/benchmark-accepted-chapter-cost.mjs --output tmp/performance/accepted-chapter-cost.json"
   },
   "dependencies": {
-    "@vitejs/plugin-react": "^5.1.1",
+    "@vitejs/plugin-react": "^6.1.1",
     "better-sqlite3": "^12.9.0",
     "electron-vite": "^4.0.1",
     "lucide-react": "^1.46.0",
