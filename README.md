@@ -107,7 +107,7 @@ npm.cmd run dist:win
 
 生成产物位于：
 
-- `release/Novel Director Setup 0.1.6-preview.7.exe`
+- `release/Novel Director Setup 0.1.6-preview.18.exe`
 - `release/win-unpacked/Novel Director.exe`
 
 `release/` 始终只保留当前可分发版本；历史安装包会集中归档到 `releases/archive/`。每次成功打包还会生成 `BUILD_INFO.json` 和 `SHA256SUMS.txt`，用于确认版本、构建时间与安装包校验值。详见 [发行产物说明](docs/RELEASE_ARTIFACTS.md)。
@@ -297,7 +297,7 @@ npm.cmd run dist:win
 
 Generated artifacts are written to:
 
-- `release/Novel Director Setup 0.1.6-preview.7.exe`
+- `release/Novel Director Setup 0.1.6-preview.18.exe`
 - `release/win-unpacked/Novel Director.exe`
 
 `release/` contains only the current distributable build. Historical artifacts are kept under `releases/archive/`. Successful packaging also writes `BUILD_INFO.json` and `SHA256SUMS.txt` for version and integrity checks. See [Release Artifacts](docs/RELEASE_ARTIFACTS.md).
