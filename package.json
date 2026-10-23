@@ -52,7 +52,7 @@
     "@types/node": "^24.10.1",
     "@types/react": "^19.3.0",
     "@types/react-dom": "^19.3.0",
-    "electron": "^39.2.7",
+    "electron": "^42.11.9",
     "electron-builder": "^26.0.12",
     "typescript": "^5.9.3",
     "vite": "^7.2.7"
