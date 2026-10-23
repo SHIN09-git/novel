@@ -31,3 +31,6 @@ jobs:
 
       - name: Build
         run: npm run build
+
+      - name: Desktop smoke test
+        run: npm run smoke
