@@ -36,6 +36,12 @@ export const AGENT_REVISION_TOOL_DEFINITIONS: AgentToolDefinition[] = [
     inputSchema: schema({ ...write, ...hashes, requestId: string, expectedRequestHash: string }, [...writeRequired, ...hashRequired, 'requestId', 'expectedRequestHash'])
   },
   {
+    name: 'agent.createManualRevisionVersion', riskLevel: 'write_preview',
+    description: 'Save caller-written full text as a draft candidate for a full-text revision request, with the same source and request checks as generation. Makes no model call and does not commit a chapter.',
+    inputSchema: schema({ ...write, ...hashes, requestId: string, expectedRequestHash: string, body: string, changedSummary: string },
+      [...writeRequired, ...hashRequired, 'requestId', 'expectedRequestHash', 'body'])
+  },
+  {
     name: 'agent.editRevisionVersion', riskLevel: 'write_preview',
     description: 'Explicitly fork-edit a pending/draft candidate as an Agent; preserves the previous text as superseded history. Requires current candidate and source hashes. Not formal acceptance.',
     inputSchema: schema({ ...write, ...hashes, versionId: string, expectedVersionHash: string, body: string }, [...writeRequired, ...hashRequired, 'versionId', 'expectedVersionHash', 'body'])

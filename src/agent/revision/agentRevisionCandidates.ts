@@ -55,6 +55,45 @@ export async function createAgentRevisionRequest(data: AppData, args: Record<str
   return { sessionId: session.id, requestId: request.id, requestHash: audit.requestHash, source: audit.source, saved, replayed: false, formalCommit: false }
 }
 
+export async function createManualAgentRevisionVersion(data: AppData, args: Record<string, unknown>, runtime: AgentRuntimeData) {
+  checkRevisionFields(args, [...revisionWriteFields, ...revisionHashFields, 'requestId', 'expectedRequestHash', 'body', 'changedSummary'])
+  const projectId = findProjectId(data, args)
+  const identity = commandIdentity(args, 'create_manual_revision_version', projectId)
+  const prior = replayRevisionOperation(data, projectId, identity)
+  if (prior?.versionId) return { ...readRevisionVersion(data, projectId, prior.versionId), replayed: true }
+  const request = data.revisionRequests.find((item) => item.id === requiredString(args, 'requestId'))
+  if (!request) throw new Error('RevisionRequest not found.')
+  const session = revisionSession(data, projectId, request.sessionId)
+  if (session.status !== 'active') throw new Error('RevisionSession is no longer active.')
+  if (revisionFingerprint(request) !== requiredString(args, 'expectedRequestHash')) throw new Error('Revision request changed.')
+  const resolved = resolveRevisionSource(data, projectId, session.chapterId, session.sourceDraftId)
+  assertRevisionWritable(resolved)
+  checkSourceHashes(resolved.source, args)
+  checkKnownAgentSource(data, resolved.source, 'request', request.id, revisionFingerprint(request))
+  if (request.sourceDraftContentHash && request.sourceDraftContentHash !== resolved.source.sourceContentHash) throw new Error('Revision request belongs to an older source.')
+  if (request.targetRange) throw new Error('Manual revision versions replace the full text; create a request without targetRange.')
+  const body = rawRevisionText(args, 'body')
+  if (body === resolved.body) throw new Error('Manual revision body matches the source.')
+  const timestamp = new Date().toISOString()
+  const version: RevisionVersion = {
+    id: `${identity.id}-version`, sessionId: session.id, requestId: request.id,
+    title: `${resolved.draft?.title ?? resolved.chapter?.title ?? 'Revision'} - ${request.type}`,
+    body, changedSummary: args.changedSummary === undefined ? '' : rawRevisionText(args, 'changedSummary'), risks: '', preservedFacts: '',
+    sourceContentHash: resolved.source.sourceContentHash,
+    ...(resolved.source.sourceChapterContentHash !== null ? { sourceChapterContentHash: resolved.source.sourceChapterContentHash } : {}),
+    responseScope: 'as_requested', status: 'draft', createdAt: timestamp, updatedAt: timestamp
+  }
+  if (data.revisionVersions.some((item) => item.id === version.id)) throw new Error('Revision version ID collision.')
+  const audit: RevisionAudit = {
+    schemaVersion: 1, actor: { kind: 'agent', agentRunId: identity.agentRunId }, operation: 'create_manual_revision_version',
+    commandHash: identity.hash, source: resolved.source, sessionId: session.id, requestId: request.id,
+    requestHash: revisionFingerprint(request), versionId: version.id, versionHash: revisionFingerprint(version)
+  }
+  const next = recordRevisionOperation({ ...data, revisionVersions: [...data.revisionVersions, version] }, identity.id, audit, requiredString(args, 'reason'))
+  const saved = await saveAgentRuntimeData(next, runtime)
+  return { ...readRevisionVersion(next, projectId, version.id), saved, replayed: false }
+}
+
 export async function editAgentRevisionVersion(data: AppData, args: Record<string, unknown>, runtime: AgentRuntimeData) {
   checkRevisionFields(args, [...revisionWriteFields, ...revisionHashFields, 'versionId', 'expectedVersionHash', 'body'])
   const projectId = findProjectId(data, args)

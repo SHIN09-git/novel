@@ -131,7 +131,7 @@ export function checkVersionSource(version: RevisionVersion, source: ReturnType<
 }
 
 export function checkKnownAgentSource(data: AppData, source: RevisionSource, kind: 'request' | 'version', id: string, hash: string): void {
-  const operations = kind === 'request' ? ['create_revision_request'] : ['generate_revision_version', 'edit_revision_version']
+  const operations = kind === 'request' ? ['create_revision_request'] : ['generate_revision_version', 'create_manual_revision_version', 'edit_revision_version']
   for (const run of data.agentRuns.filter((item) => item.projectId === source.projectId)) {
     for (const decision of run.decisions.filter((item) => operations.includes(item.step))) {
       const audit = revisionAudit(decision.evidence)

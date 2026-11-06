@@ -346,8 +346,8 @@ try {
     assert.deepEqual(await h.snapshot(), before)
   })
 
-  await test('seven strict descriptors are registered', () => {
-    const names = ['getRevisionSessions', 'getRevisionVersion', 'createRevisionRequest', 'generateRevisionVersion', 'editRevisionVersion', 'previewRevisionCommit', 'applyApprovedRevisionCommit']
+  await test('eight strict descriptors are registered', () => {
+    const names = ['getRevisionSessions', 'getRevisionVersion', 'createRevisionRequest', 'generateRevisionVersion', 'createManualRevisionVersion', 'editRevisionVersion', 'previewRevisionCommit', 'applyApprovedRevisionCommit']
     for (const name of names) {
       const definition = api.AgentToolService.listTools().find((tool) => tool.name === `agent.${name}`)
       assert.ok(definition); assert.equal(definition.inputSchema.additionalProperties, false)
@@ -482,6 +482,28 @@ try {
       await assert.rejects(h.apply(p), /active|changed/)
       await h.apply(await h.preview(edited, { operationId: 'edited-preview' }))
       assert.equal((await h.snapshot()).data.chapters[0].body, '  Explicit Agent edit.\n')
+    })
+    await test(`${kind}: manual candidates skip the model and still go through preview and commit`, async () => {
+      const h = await harness(kind)
+      const req = await h.request()
+      const manual = (extra = {}) => h.call('createManualRevisionVersion', { ...h.write, operationId: 'manual', requestId: req.requestId,
+        expectedRequestHash: req.requestHash, ...h.sourceArgs(req.source), body: '  Written by hand.\n', ...extra })
+      const before = await h.snapshot()
+      await assert.rejects(manual({ expectedRequestHash: 'stale' }), /request changed/)
+      await assert.rejects(manual({ expectedSourceHash: 'stale' }), /[Ss]ource/)
+      await assert.rejects(manual({ body: before.data.chapters[0].body }), /matches the source/)
+      assert.deepEqual(await h.snapshot(), before)
+      const v = await manual({ changedSummary: 'Hand fix.' })
+      assert.equal(v.version.status, 'draft')
+      assert.equal(h.calls.length, 0)
+      assert.equal((await h.snapshot()).data.chapters[0].body, before.data.chapters[0].body)
+      assert.equal((await manual({ changedSummary: 'Hand fix.' })).replayed, true)
+      await h.apply(await h.preview(v))
+      assert.equal((await h.snapshot()).data.chapters[0].body, '  Written by hand.\n')
+      const local = await harness(kind)
+      const localReq = await local.request({ targetRange: target })
+      await assert.rejects(local.call('createManualRevisionVersion', { ...local.write, operationId: 'manual-local', requestId: localReq.requestId,
+        expectedRequestHash: localReq.requestHash, ...local.sourceArgs(localReq.source), body: 'Whole text.' }), /full text/)
     })
     await test(`${kind}: failed AI returns no fabricated version; local broader response requires acknowledgement`, async () => {
       const h = await harness(kind)
