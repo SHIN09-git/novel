@@ -43,15 +43,9 @@ export const OPENING_CHAPTER_DRAFT_SYSTEM_PROMPT = [
 
 export const REVISION_SYSTEM_PROMPT = [
   '你是小说修订编辑，不是续写作者。',
-  '你的任务是在不改变剧情事实、人物状态和伏笔状态的前提下，提高文本表现力。',
+  '只执行修订类型、用户指令和输出合约；不改动无关文字。',
+  '不改变剧情事实、角色当前状态、伏笔状态和世界规则；不新增重大设定，不提前解释悬念或擅自回收伏笔。',
   '当修订类型为 reduce_ai_tone 时，白名单式去 AI 味合同优先于通用润色要求：不得新增动作、感官细节或潜台词，未命中规则的文字必须逐字保留。',
-  '当任务涉及章节衔接或冗余压缩时，你同时是小说连续性编辑和压缩编辑。',
-  '必须让本章自然承接上一章结尾，删除重复、空泛、已经解释过的描写，但不要重写成新剧情。',
-  '不要擅自新增重大设定。',
-  '不要提前解释悬念。',
-  '不要让人物把潜台词直接说透。',
-  '不要写总结性废话。',
-  '优先使用具体动作、场景细节、对话张力和情绪留白。',
   '必须输出严格 JSON，不要输出 Markdown、解释、代码块或额外废话。'
 ].join('\n')
 
@@ -108,7 +102,17 @@ export function buildRevisionUserPrompt(request: RevisionPromptInput, context: s
           'targetRange（唯一待修订片段）：<missing>',
           '未提供局部目标。不要凭空生成局部修订；revisedText 必须返回空字符串。'
         ].join('\n')
-    : 'targetRange：<none>'
+    : ''
+  const typeGuidance: string[] = []
+  if (['fix_continuity', 'improve_continuity', 'strengthen_chapter_transition'].includes(request.type)) {
+    typeGuidance.push('- 开头必须接住上一章结尾的动作、身体状态和情绪余波，不要用时间跳跃逃避钩子。')
+  }
+  if (['compress_pacing', 'reduce_redundancy', 'compress_description', 'remove_repeated_explanation'].includes(request.type)) {
+    typeGuidance.push('- 优先删减重复环境描写、抽象强化词和已解释过的机制说明，保留人物动作、对白和关键伏笔。')
+  }
+  if (['polish_style', 'improve_dialogue', 'enhance_emotion'].includes(request.type)) {
+    typeGuidance.push('- 用具体表达和情绪留白改善指定文本，不把潜台词直接说透，不添加总结性说明。')
+  }
   return [
     '请根据修订类型与用户指令修订文本。只输出严格 JSON：',
     '{"revisedText":"","changedSummary":"","risks":"","preservedFacts":""}',
@@ -118,19 +122,12 @@ export function buildRevisionUserPrompt(request: RevisionPromptInput, context: s
     '',
     '输出合约：',
     isLocal
-      ? '- local 模式：revisedText 必须只包含 targetRange 修订后的目标片段。不要返回完整章节。程序会负责把片段合并回 fullChapterText。'
+      ? '- local 模式：revisedText 必须只包含 targetRange 修订后的目标片段，不改写或返回其他文字。程序会负责把片段合并回 fullChapterText。'
       : '- full 模式：revisedText 必须返回完整章节正文。',
-    isLocal
-      ? '- local 模式：除 targetRange 对应文本外，不要改写、复述或返回其他章节内容。'
-      : '- full 模式：可以对整章做统一修订，但不得改变剧情事实、角色状态和伏笔状态。',
     '',
     '修订约束：',
-    '- 不改变剧情事实、角色当前状态、伏笔状态和世界规则。',
-    '- 不新增重大设定。',
-    '- 不提前解释悬念，不擅自回收伏笔。',
     '- 修复一致性问题时，只处理指定问题，不改动无关剧情；必须保留伏笔 treatmentMode 的限制。',
-    '- 如果修订类型是加强章节衔接、强化转场承接：开头必须接住上一章结尾的动作、身体状态和情绪余波，不要用时间跳跃逃避钩子。',
-    '- 如果修订类型是减少冗余、压缩描写、删除重复解释：优先删减重复环境描写、抽象强化词和已解释过的机制说明，保留人物动作、对白和关键伏笔。',
+    ...typeGuidance,
     ...(lessAiToneSection ? ['', lessAiToneSection] : []),
     '',
     contextSection,

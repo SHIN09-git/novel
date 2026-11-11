@@ -1,9 +1,8 @@
 import { mkdir, readFile, readdir, rm, writeFile } from 'node:fs/promises'
 import { existsSync } from 'node:fs'
-import { join, resolve } from 'node:path'
-import { pathToFileURL } from 'node:url'
-import ts from 'typescript'
+import { join } from 'node:path'
 import { repoRoot } from './utils/repo-root.mjs'
+import { loadDomainModules } from './utils/load-domain-modules.mjs'
 
 const root = repoRoot
 const outDir = join(root, 'tmp', 'app-config-safety-test')
@@ -11,28 +10,6 @@ const userDataDir = join(outDir, 'userData')
 
 function assert(condition, message, details = {}) {
   return condition ? { ok: true, message } : { ok: false, message, details }
-}
-
-async function compileTsModulePath(relativePath, replacements = []) {
-  const sourcePath = join(root, relativePath)
-  let source = await readFile(sourcePath, 'utf-8')
-  for (const [from, to] of replacements) source = source.replace(from, to)
-  const compiled = ts.transpileModule(source, {
-    compilerOptions: {
-      module: ts.ModuleKind.ES2022,
-      target: ts.ScriptTarget.ES2022,
-      useDefineForClassFields: true
-    }
-  })
-  await mkdir(outDir, { recursive: true })
-  const outPath = join(outDir, `${relativePath.replace(/[\\/.:]/g, '-')}.mjs`)
-  await writeFile(outPath, compiled.outputText, 'utf-8')
-  return outPath
-}
-
-async function compileTsModule(relativePath, replacements = []) {
-  const outPath = await compileTsModulePath(relativePath, replacements)
-  return import(`${pathToFileURL(outPath).href}?t=${Date.now()}`)
 }
 
 async function readJson(path) {
@@ -44,10 +21,7 @@ async function main() {
   await mkdir(userDataDir, { recursive: true })
 
   const checks = []
-  const storageServicePath = await compileTsModulePath('src/storage/StorageService.ts')
-  const { AppConfigService } = await compileTsModule('src/main/AppConfigService.ts', [
-    ["from '../storage/StorageService'", `from '${pathToFileURL(storageServicePath).href}'`]
-  ])
+  const { AppConfigService } = await loadDomainModules('main/AppConfigService')
   const service = new AppConfigService(userDataDir)
   const configPath = await service.getConfigPath()
   const defaultStoragePath = service.getDefaultStoragePath()

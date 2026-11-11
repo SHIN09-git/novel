@@ -1,9 +1,14 @@
 import { contextBridge, ipcRenderer } from 'electron'
 import { IPC_CHANNELS } from '../shared/ipc/ipcChannels'
+import type { ChapterTitleCommit, ChapterTitlePreview, ChapterTitleRename } from '../shared/types/chapterTitle'
+import type { ChapterTitleWriteResult } from '../shared/ipc/ipcTypes'
+import { replayNeedsReload, StorageRevisionConflictError } from '../shared/storageRevisionConflict'
+import type { ProjectUsageReport } from '../shared/projectUsage'
 import type {
   ChatCompletionRequest,
   CancelAiCallResult,
   CandidateDecisionWriteResult,
+  CharacterCardReviewWriteResult,
   ChatCompletionResult,
   AgentAuthorizationGrantRequest,
   AgentAuthorizationGrantResult,
@@ -50,7 +55,7 @@ import type {
   StorageGetResult,
   StorageSaveResult
 } from '../shared/ipc/ipcTypes'
-import type { AppData, CandidateDecisionCommand, ChapterCommitBundle, GenerationRunBundle, RevisionCommitBundle } from '../shared/types'
+import type { AppData, CandidateDecisionCommand, CharacterCardReviewCommand, ChapterCommitBundle, GenerationRunBundle, RevisionCommitBundle } from '../shared/types'
 
 function isIpcFailure(value: unknown): value is IpcFailure {
   return Boolean(
@@ -106,8 +111,26 @@ function rememberStorageRevision(result: { revision?: string }): void {
 
 const novelDirector = {
   data: {
+    getProjectUsage: (projectId: string) => invokeOrThrow<ProjectUsageReport>(IPC_CHANNELS.DATA_GET_PROJECT_USAGE, assertText(projectId, 'projectId')),
     load: loadStorageData,
     save: saveStorageData,
+    previewChapterTitleRename: (command: ChapterTitleRename) =>
+      invokeOrThrow<ChapterTitlePreview>(IPC_CHANNELS.DATA_PREVIEW_CHAPTER_TITLES, { command, expectedRevision: storageRevision }),
+    applyChapterTitleRename: async (commit: ChapterTitleCommit) => {
+      const result = await invokeOrThrow<ChapterTitleWriteResult>(IPC_CHANNELS.DATA_RENAME_CHAPTER_TITLES, commit)
+      // A replay can observe another writer. Never pair its revision with stale renderer data.
+      if (result.replayed && storageRevision !== result.revision) {
+        throw new StorageRevisionConflictError(replayNeedsReload)
+      }
+      storageRevision = result.revision
+      return result
+    },
+    reviewCharacterCard: async (command: CharacterCardReviewCommand) => {
+      const result = await invokeOrThrow<CharacterCardReviewWriteResult>(IPC_CHANNELS.DATA_REVIEW_CHARACTER_CARD,
+        { command, expectedRevision: storageRevision })
+      storageRevision = result.revision
+      return result
+    },
     executeCandidateDecision: async (command: CandidateDecisionCommand) => {
       const result = await invokeOrThrow<CandidateDecisionWriteResult>(IPC_CHANNELS.DATA_EXECUTE_CANDIDATE_DECISION,
         { command, expectedRevision: storageRevision })
@@ -211,11 +234,11 @@ const novelDirector = {
       invokeOrThrow<{ ok: true }>(IPC_CHANNELS.CLIPBOARD_WRITE_TEXT, assertText(text, 'text'))
   },
   credentials: {
-    setApiKey: (apiKey: string) =>
+    setApiKey: (apiKey: string, baseUrl?: string) =>
       invokeOrThrow<CredentialSetApiKeyResult>(IPC_CHANNELS.CREDENTIALS_SET_API_KEY, {
-        apiKey: assertText(apiKey, 'apiKey')
+        apiKey: assertText(apiKey, 'apiKey'), baseUrl
       }),
-    hasApiKey: () => invokeOrThrow<CredentialHasApiKeyResult>(IPC_CHANNELS.CREDENTIALS_HAS_API_KEY),
+    hasApiKey: (baseUrl?: string) => invokeOrThrow<CredentialHasApiKeyResult>(IPC_CHANNELS.CREDENTIALS_HAS_API_KEY, baseUrl),
     deleteApiKey: () => invokeOrThrow<CredentialDeleteApiKeyResult>(IPC_CHANNELS.CREDENTIALS_DELETE_API_KEY),
     migrateLegacyApiKey: (apiKey: string) =>
       invokeOrThrow<CredentialMigrateLegacyApiKeyResult>(

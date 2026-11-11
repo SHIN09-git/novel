@@ -31,6 +31,7 @@ const REFERENCE_COLLECTION_BY_KEY: Partial<Record<string, AppDataArrayKey>> = {
   relatedChapterIds: 'chapters',
   newlyRequiredChapterIds: 'chapters',
   characterId: 'characters',
+  participantCharacterIds: 'characters',
   selectedCharacterIds: 'characters',
   relatedCharacterIds: 'characters',
   newlyRequiredCharacterIds: 'characters',
@@ -83,6 +84,7 @@ const REFERENCE_COLLECTION_BY_KEY: Partial<Record<string, AppDataArrayKey>> = {
   revisionCommitId: 'revisionCommitBundles',
   linkedRevisionCommitId: 'revisionCommitBundles',
   factId: 'characterStateFacts',
+  reversesTransactionIds: 'characterStateTransactions',
   targetFactId: 'characterStateFacts',
   linkedFactId: 'characterStateFacts',
   includedCharacterStateFactIds: 'characterStateFacts',
@@ -120,6 +122,7 @@ const EMBEDDED_ENTITY_COLLECTION_BY_KEY: Partial<Record<string, AppDataArrayKey>
   appliedCharacterStateTransactions: 'characterStateTransactions',
   appliedForeshadowingUpdates: 'foreshadowings',
   appliedTimelineEvents: 'timelineEvents',
+  event: 'timelineEvents',
   redundancyReports: 'redundancyReports'
 }
 
@@ -252,6 +255,11 @@ function remapReference(
   owner?: Entity,
   parentKey = ''
 ): unknown {
+  if (owner && (owner.kind === 'chapter_commit' || owner.kind === 'revision_commit') && typeof owner.attemptedAt === 'string') {
+    if (fieldKey === 'versionId') return remapId(remaps, value, 'chapterVersions')
+    if (fieldKey === 'commitId') return remapId(remaps, value,
+      owner.kind === 'chapter_commit' ? 'chapterCommitBundles' : 'revisionCommitBundles')
+  }
   const collection = REFERENCE_COLLECTION_BY_KEY[fieldKey]
     ?? (owner ? discriminatedCollection(owner, parentKey, fieldKey) : undefined)
   return remapId(remaps, value, collection)

@@ -76,6 +76,7 @@ import type {
 } from '../types'
 
 import { normalizeRecordArray, objectOrEmpty, stringValue } from './common'
+import { stateFactDefinition } from '../characterStateDefinition'
 
 const CHARACTER_CARD_FIELDS: CharacterCardField[] = [
   'roleFunction',
@@ -227,7 +228,12 @@ export function normalizeCharacterStateTransaction(value: unknown): CharacterSta
       : 'manual',
     status: CHARACTER_STATE_TRANSACTION_STATUSES.includes(statusRaw as CharacterStateTransactionStatus)
       ? (statusRaw as CharacterStateTransactionStatus)
-      : 'accepted',
+      : 'pending',
+    ...(transaction.factDefinition ? { factDefinition: stateFactDefinition(normalizeCharacterStateFact(transaction.factDefinition)) } : {}),
+    ...(typeof transaction.sourceBodyHash === 'string' && transaction.sourceBodyHash ? { sourceBodyHash: transaction.sourceBodyHash } : {}),
+    ...(Array.isArray(transaction.reversesTransactionIds)
+      ? { reversesTransactionIds: transaction.reversesTransactionIds.filter((id): id is string => typeof id === 'string') } : {}),
+    ...(transaction.preservedPriorFact === true ? { preservedPriorFact: true } : {}),
     createdAt: stringValue(transaction.createdAt) || timestamp,
     updatedAt: stringValue(transaction.updatedAt) || timestamp
   }

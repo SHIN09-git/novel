@@ -4,7 +4,6 @@ import type {
   ChapterGenerationJob,
   ChapterGenerationStep,
   ChapterPlan,
-  CharacterStateFact,
   ContextBudgetMode,
   ContextBudgetProfile,
   ContextNeedPlan,
@@ -109,8 +108,4 @@ export interface PipelineStepHandlerContext {
   activeStoryDirectionGuide: StoryDirectionGuide | null
   storyDirectionTracePatch: Partial<GenerationRunTrace>
   state: PipelineRunnerState
-}
-
-export function projectCharacterStateFacts(state: PipelineRunnerState, projectId: ID): CharacterStateFact[] {
-  return state.working.characterStateFacts.filter((fact) => fact.projectId === projectId)
 }

@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { EMPTY_APP_DATA } from '../../../shared/defaults'
 import type { AppData, CandidateDecisionCommand, ChapterCommitBundle, GenerationRunBundle, RevisionCommitBundle } from '../../../shared/types'
 import { getUserFriendlyError } from '../../../shared/errorUtils'
+import { isStorageRevisionConflict } from '../../../shared/storageRevisionConflict'
 import type { StorageSaveResult, StorageWriteResult } from '../../../shared/ipc/ipcTypes'
 import type { ImportDataResult, ImportDataStrategy } from '../../../shared/ipc/ipcTypes'
 import { createOperationQueue, type OperationQueue } from '../utils/saveQueue'
@@ -19,20 +20,12 @@ export type { SaveDataHandler, SaveDataInput, SaveDataOutcome }
 export type ChapterCommitSaveInput = (currentData: AppData) => { next: AppData; bundle: ChapterCommitBundle }
 export type RevisionCommitSaveInput = (currentData: AppData) => { next: AppData; bundle: RevisionCommitBundle }
 
-function isStorageRevisionConflict(error: unknown): boolean {
-  return Boolean(
-    error &&
-      typeof error === 'object' &&
-      'code' in error &&
-      error.code === 'STORAGE_REVISION_CONFLICT'
-  )
-}
-
 export function useAppData() {
   const [data, setData] = useState<AppData | null>(null)
   const [storagePath, setStoragePath] = useState('')
   const [status, setStatus] = useState('')
   const [hasStorageConflict, setHasStorageConflict] = useState(false)
+  const [needsWritebackCheck, setNeedsWritebackCheck] = useState(false)
   const saveQueueRef = useRef<OperationQueue | null>(null)
   const latestDataRef = useRef<AppData>(EMPTY_APP_DATA)
 
@@ -132,11 +125,13 @@ export function useAppData() {
 
   async function saveChapterCommitBundle(buildCommit: ChapterCommitSaveInput) {
     setStatus('正在提交正式章节...')
+    let sent = false
     try {
       const result = await enqueueStorageWrite(async () => {
         const { next, bundle } = buildCommit(latestDataRef.current)
         const dataApi = getNovelDirectorDataApi()
         let persisted: StorageSaveResult | StorageWriteResult
+        sent = true
         if (dataApi.saveChapterCommitBundle) {
           persisted = await dataApi.saveChapterCommitBundle(bundle)
           commitPersistedData(next)
@@ -148,8 +143,10 @@ export function useAppData() {
       })
       setStoragePath(result.storagePath)
       setStatus(result.credentialWarning || `正式章节已提交 ${new Date().toLocaleTimeString('zh-CN')}`)
+      setNeedsWritebackCheck(false)
     } catch (error) {
       if (isStorageRevisionConflict(error)) setHasStorageConflict(true)
+      else if (sent) setNeedsWritebackCheck(true)
       setStatus(`提交正式章节失败：${getUserFriendlyError(error)}`)
       throw error
     }
@@ -157,11 +154,13 @@ export function useAppData() {
 
   async function saveRevisionCommitBundle(buildCommit: RevisionCommitSaveInput) {
     setStatus('正在提交正式修订...')
+    let sent = false
     try {
       const result = await enqueueStorageWrite(async () => {
         const { next, bundle } = buildCommit(latestDataRef.current)
         const dataApi = getNovelDirectorDataApi()
         let persisted: StorageSaveResult | StorageWriteResult
+        sent = true
         if (dataApi.saveRevisionCommitBundle) {
           persisted = await dataApi.saveRevisionCommitBundle(bundle)
           commitPersistedData(next)
@@ -173,8 +172,10 @@ export function useAppData() {
       })
       setStoragePath(result.storagePath)
       setStatus(result.credentialWarning || `正式修订已提交 ${new Date().toLocaleTimeString('zh-CN')}`)
+      setNeedsWritebackCheck(false)
     } catch (error) {
       if (isStorageRevisionConflict(error)) setHasStorageConflict(true)
+      else if (sent) setNeedsWritebackCheck(true)
       setStatus(`提交正式修订失败：${getUserFriendlyError(error)}`)
       throw error
     }
@@ -266,6 +267,7 @@ export function useAppData() {
       setStoragePath(result.storagePath)
       setHasStorageConflict(false)
       setStatus(result.credentialWarning || '已重新加载最新本地数据')
+      setNeedsWritebackCheck(false)
       return { ok: true as const }
     } catch (error) {
       const errorMessage = getUserFriendlyError(error)
@@ -280,6 +282,7 @@ export function useAppData() {
     setStoragePath,
     status,
     hasStorageConflict,
+    needsWritebackCheck,
     setStatus,
     saveData,
     saveGenerationRunBundle,

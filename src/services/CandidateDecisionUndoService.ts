@@ -59,6 +59,9 @@ function appendCompensatingTransactions(before: AppData, after: AppData, receipt
       transactionType: effect.created ? 'invalidate' as const : 'update' as const,
       beforeValue: previous.value, afterValue: fact.value,
       delta: typeof fact.value === 'number' && typeof previous.value === 'number' ? fact.value - previous.value : null,
+      reversesTransactionIds: (receipt.effects ?? []).filter(item => item.created && item.collection === 'characterStateTransactions')
+        .map(item => item.id).filter(id => before.characterStateTransactions.some(tx => tx.id === id && tx.projectId === fact.projectId &&
+          tx.characterId === fact.characterId && tx.factId === fact.id && !tx.preservedPriorFact)),
       reason: `撤销候选决定 ${receipt.id}；补偿记录 ${command.id}`, evidence: '', source: 'manual' as const,
       status: 'accepted' as const, createdAt: command.decidedAt, updatedAt: command.decidedAt }]
   }) ?? []

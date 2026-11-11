@@ -8,6 +8,7 @@ import type {
   ConsistencyReviewReport,
   AiCallTelemetry,
   GeneratedChapterDraft,
+  HardCanonAuditResult,
   ID,
   NoveltyAuditResult,
   PipelineContextSource,
@@ -23,6 +24,7 @@ import {
 } from '../shared/qualityGatePolicy'
 import { NoveltyDetector } from './NoveltyDetector'
 import { draftContentHash } from './DraftDiagnosticBindingService'
+import { hardCanonAuditMatchesBody, withCurrentHardCanonAudit } from './qualityGate/hardCanonQuality'
 import { activeConsistencyIssues, applyConsistencyFindings, applyLocalGuardrails, applyNoveltyAudit } from './qualityGate/evaluationMergers'
 import {
   buildLocalQualityEvaluation,
@@ -53,6 +55,7 @@ export interface EvaluateQualityGateOptions {
   chapterPlan: ChapterPlan | null
   consistencyReports?: ConsistencyReviewReport[]
   noveltyAuditResult?: NoveltyAuditResult | null
+  hardCanonAudit?: HardCanonAuditResult | null
   redundancyReport?: RedundancyReport | null
   characterStateFacts?: CharacterStateFact[]
   characters?: Character[]
@@ -81,6 +84,13 @@ function consistencyDiagnosticsContext(options: EvaluateQualityGateOptions): str
 
 export class QualityGateService {
   static async evaluateChapterDraft(options: EvaluateQualityGateOptions): Promise<QualityGateReport> {
+    const body = draftBody(options.chapterDraft)
+    const contentHash = draftContentHash(body)
+    const audit = options.hardCanonAudit
+    if (audit && (audit.projectId !== options.projectId || audit.chapterOrder !== options.targetChapterOrder ||
+      !hardCanonAuditMatchesBody(audit, body, contentHash))) {
+      throw new Error('硬设定核查与当前项目、章号或正文不匹配，请重新核查。')
+    }
     const reviewContext = consistencyDiagnosticsContext(options)
     const localEvaluation = buildLocalQualityEvaluation(
       options.chapterDraft,
@@ -110,7 +120,7 @@ export class QualityGateService {
     evaluation = applyConsistencyFindings(evaluation, options.consistencyReports)
     const noveltyAudit =
       options.noveltyAuditResult ??
-      NoveltyDetector.audit({ generatedText: draftBody(options.chapterDraft), context: reviewContext, chapterPlan: options.chapterPlan })
+      NoveltyDetector.audit({ generatedText: body, context: reviewContext, chapterPlan: options.chapterPlan })
     evaluation = applyNoveltyAudit(evaluation, noveltyAudit)
     if (options.contextSource === 'prompt_snapshot') {
       evaluation = {
@@ -130,7 +140,7 @@ export class QualityGateService {
       jobId: options.jobId,
       chapterId: options.chapterId,
       draftId: options.draftId,
-      draftContentHash: draftContentHash(draftBody(options.chapterDraft)),
+      draftContentHash: contentHash,
       promptContextSnapshotId: options.promptContextSnapshotId ?? null,
       overallScore: clampQualityScore(evaluation.overallScore),
       pass: evaluation.pass,
@@ -155,7 +165,7 @@ export class QualityGateService {
       createdAt: new Date().toISOString()
     }
     report.pass = qualityGateSatisfiesPassCriteria(report)
-    return report
+    return withCurrentHardCanonAudit(report, audit ?? null)
   }
 
   static shouldRequireHumanReview(report: QualityGateReport): boolean {

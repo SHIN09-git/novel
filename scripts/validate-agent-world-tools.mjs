@@ -251,17 +251,47 @@ try {
       await assert.rejects(h.preview({
         ...state, operationId: 'state-with-foreign-source', patch: { ...state.patch, sourceChapterId: 'chapter-p2' }
       }), /missing or foreign chapter/)
+      const conflict = await h.preview({
+        entity: 'story_direction', action: 'create', operationId: 'legacy-length-conflict',
+        patch: { title: '旧长度冲突', status: 'active', startChapterOrder: 91, horizonChapters: 5, endChapterOrder: 96 }, source
+      })
+      assert.equal(conflict.after.horizonChapters, 6)
+      assert.match(conflict.after.warnings.join(' '), /长度冲突.*5 章.*91-96.*6 章/)
+      assert.ok(!(await h.runtime()).data.storyDirectionGuides.some(guide => guide.id === conflict.id))
       await assert.rejects(h.preview({
         entity: 'story_direction', action: 'create', operationId: 'bad-active-range',
-        patch: { title: '错误范围', status: 'active', startChapterOrder: 5, horizonChapters: 5, endChapterOrder: 8 }, source
-      }), /must cover exactly/)
+        patch: { title: '倒序章段', status: 'active', startChapterOrder: 91, endChapterOrder: 90 }, source
+      }), /结束章节.*不能早于/)
       await assert.rejects(h.preview({
         entity: 'story_direction', action: 'create', operationId: 'bad-active-beat',
         patch: {
           title: '错误节拍', status: 'active', startChapterOrder: 5, horizonChapters: 5, endChapterOrder: 9,
           chapterBeats: [{ id: 'beat-outside', chapterOffset: 1, chapterOrder: 7 }]
         }, source
-      }), /beats must stay within/)
+      }), /第 7 章的节拍序号应为 3/)
+    })
+
+    await test(`${kind}: six-chapter and single-chapter guides persist and activate under the edit_world grant`, async () => {
+      const h = await harness(kind)
+      const source = { kind: 'agent_director', reason: '导向章段验收', requestedAt: timestamp }
+      for (const start of [91, 96]) {
+        const orders = Array.from({ length: 97 - start }, (_, i) => start + i)
+        const create = { entity: 'story_direction', action: 'create', operationId: 'range-' + start, source,
+          patch: { title: '收尾章段', startChapterOrder: start, endChapterOrder: 96,
+            chapterBeats: orders.map((chapterOrder, i) => ({ chapterOrder, chapterOffset: i + 1, goal: '节拍' + chapterOrder })) } }
+        const preview = await h.preview(create)
+        const saved = await h.apply({ ...create, expectedFingerprint: preview.fingerprint })
+        assert.deepEqual(saved.after, preview.after)
+        const activate = { entity: create.entity, id: saved.id, action: 'set_status', operationId: 'activate-' + start,
+          patch: { status: 'active' }, source }
+        const active = await h.preview(activate)
+        await h.apply({ ...activate, expectedFingerprint: active.fingerprint })
+        const reloaded = (await h.read('getWorldRecord', { entity: create.entity, id: saved.id, detail: 'full' })).record
+        assert.equal(reloaded.status, 'active')
+        assert.equal(reloaded.horizonChapters, orders.length)
+        assert.deepEqual(reloaded.chapterBeats.map(beat => beat.chapterOrder), orders)
+        assert.equal((await h.runtime()).data.storyDirectionGuides.filter(guide => guide.status === 'active').length, 1)
+      }
     })
 
     await test(`${kind}: revision conflicts, cross-project references, untrusted apply and repeated operations are controlled`, async () => {
@@ -330,7 +360,7 @@ try {
       assert.equal(retry.replayed, true)
     })
 
-    await test(`${kind}: HardCanon sourced duplicates require an explicit update and never change the receipt target`, async () => {
+    await test(`${kind}: HardCanon sourced duplicates reuse unchanged records and never retarget an edit`, async () => {
       const h = await harness(kind)
       const source = { kind: 'agent_director', reason: '导演明确确认来源硬设定。', requestedAt: timestamp }
       const create = async (operationId, patch) => {
@@ -353,18 +383,24 @@ try {
       assert.equal(firstReceipt.after.updatedAt, savedFirst.updatedAt)
       const duplicate = {
         entity: 'hard_canon', action: 'create', operationId: 'canon-source-duplicate',
-        patch: { title: '重复来源规则', content: '同一来源的规则。', category: 'world_rule', sourceId: 'chapter-source-1' }, source
+        patch: { title: '来源规则', content: '同一来源的规则。', category: 'world_rule', sourceId: 'chapter-source-1' }, source
       }
-      await assert.rejects(h.preview(duplicate), new RegExp(`already exists.*${first.id}.*update`))
+      const reuse = await h.preview(duplicate)
+      assert.equal(reuse.changed, false)
+      assert.equal(reuse.id, first.id)
+      assert.deepEqual(reuse.before, reuse.after)
       assert.equal((await h.runtime()).data.worldManagementReceipts.some((item) => item.operationId === duplicate.operationId), false)
+      const reused = await h.apply({ ...duplicate, expectedFingerprint: reuse.fingerprint })
+      assert.equal(reused.hardCanonDuplicates.exact.id, first.id)
+      assert.deepEqual(reused.after, savedFirst)
 
       const other = await create('canon-source-other', {
         title: '另一条规则', content: '另一条内容。', category: 'world_rule', sourceId: 'chapter-source-2'
       })
       await assert.rejects(h.preview({
         entity: 'hard_canon', action: 'update', operationId: 'canon-source-update-duplicate', id: other.id,
-        patch: { content: '同一来源的规则。', sourceId: 'chapter-source-1' }, source
-      }), new RegExp(`already exists.*${first.id}.*update`))
+        patch: { title: '来源规则', content: '同一来源的规则。', sourceId: 'chapter-source-1' }, source
+      }), new RegExp(`相同规则已存在.*${first.id}`))
       assert.equal((await h.runtime()).data.hardCanonPacks.flatMap((pack) => pack.items).find((item) => item.id === other.id)?.content, '另一条内容。')
     })
 

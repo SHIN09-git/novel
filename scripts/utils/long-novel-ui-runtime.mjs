@@ -1,15 +1,31 @@
 import assert from 'node:assert/strict'
 import { createHash } from 'node:crypto'
 import { createRequire } from 'node:module'
-import { copyFile, cp, mkdir, mkdtemp, readFile, readdir, stat, writeFile } from 'node:fs/promises'
+import { copyFile, cp, mkdir, mkdtemp, readFile, readdir, realpath, rm, stat, writeFile } from 'node:fs/promises'
 import { dirname, join, resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
-import { checkedPath, sha256, within } from './long-novel-ui-driver.mjs'
+import { checkedPath, cleanup, connect, evaluate, ready, sha256, within } from './long-novel-ui-driver.mjs'
 
 const require = createRequire(import.meta.url)
 const asar = require('@electron/asar')
 const digest = (content) => createHash('sha256').update(content).digest('hex')
 const bindingRelative = join('node_modules', 'better-sqlite3', 'build', 'Release', 'better_sqlite3.node')
+
+export function isolatedPreviewTarget(root) {
+  const packagedDir = join(root, 'release', 'win-unpacked'), out = join(root, 'out')
+  return { mode: 'isolated-out', packagedDir, out,
+    executable: join(root, 'node_modules', 'electron', 'dist', 'electron.exe'),
+    binding: join(packagedDir, 'resources', 'app.asar.unpacked', bindingRelative),
+    required: ['main/index.js', 'preload/index.cjs', 'renderer/index.html'].map(file => join(out, file)) }
+}
+
+export function qaRuntimeTarget(root, packaged = process.argv.includes('--packaged')) {
+  if (!packaged) return isolatedPreviewTarget(root)
+  const packagedDir = join(root, 'release', 'win-unpacked')
+  return { mode: 'packaged', packagedDir, out: null, executable: join(packagedDir, 'Novel Director.exe'),
+    binding: join(packagedDir, 'resources', 'app.asar.unpacked', bindingRelative),
+    releaseInfoPath: join(root, 'release', 'BUILD_INFO.json'), required: [join(packagedDir, 'resources', 'icon.png')] }
+}
 
 export async function treeManifest(directory) {
   const files = []
@@ -46,6 +62,17 @@ export async function targetIdentity(root, target) {
   assert.equal(manifest.type, 'module', 'Production main requires the ESM package contract')
   target.expectedAppVersion = manifest.version
   target.expectedMode = target.out ? 'preview' : 'packaged'
+  if (target.releaseInfoPath) {
+    const release = JSON.parse(await readFile(target.releaseInfoPath, 'utf8'))
+    assert.equal(release.version, packagedManifest.version, 'BUILD_INFO and app.asar versions differ')
+    assert.equal(resolve(dirname(target.releaseInfoPath), release.unpackedExecutable), resolve(target.executable),
+      'BUILD_INFO points to a different desktop executable')
+    assert(release.electronVersion, 'Missing Electron version in BUILD_INFO')
+    target.expectedElectronVersion = release.electronVersion
+    for (const entry of ['out/main/index.js', 'out/preload/index.cjs', 'out/renderer/index.html']) {
+      assert(asar.statFile(target.archive, join(...entry.split('/')), false).size > 0, 'Missing packaged entry: ' + entry)
+    }
+  }
   if (target.out) {
     // A binding from another Electron version is not silently accepted or rebuilt.
     const releasePath = await checkedPath(root, join(dirname(target.packagedDir), 'BUILD_INFO.json'))
@@ -137,4 +164,55 @@ export function verifyRuntimeIdentity(target, info, rendererUrl) {
   assert.equal(new URL(rendererUrl).href.toLowerCase(), pathToFileURL(entry).href.toLowerCase(), 'Renderer was not loaded from selected production output')
   if (target.observedRuntime) assert.deepEqual(info, target.observedRuntime, 'Build identity changed between samples')
   else target.observedRuntime = info
+}
+
+export async function writeOfflineQaProfile(profile, fixture) {
+  const { startProseRejectSink } = await import('./qa-prose-first-fixture.mjs')
+  const sink = await startProseRejectSink()
+  try {
+    const settings = { ...fixture.settings, apiProvider: 'local', baseUrl: sink.baseUrl, modelName: 'qa-offline',
+      apiKey: '', hasApiKey: false, pipelineModelRoles: {}, retryEnabled: false, maxRetries: 0 }
+    await mkdir(profile)
+    await writeFile(join(profile, 'novel-director-data.json'), JSON.stringify({ ...fixture, settings }), { flag: 'wx' })
+    return sink
+  } catch (error) {
+    await sink.close()
+    throw error
+  }
+}
+
+export async function connectQaSession(target, session, profile) {
+  await connect(session)
+  const c = session.client
+  await ready(c, 'document.querySelector(".project-row,.nav-list")')
+  const info = await evaluate(c, 'window.novelDirector.app.getRuntimeInfo()'), rendererUrl = await evaluate(c, 'location.href')
+  verifyRuntimeIdentity(target, info, rendererUrl)
+  const storagePath = await evaluate(c, 'window.novelDirector.app.getStoragePath().then(result => result.storagePath)')
+  assert.equal(await realpath(storagePath), await realpath(join(profile, 'novel-director-data.sqlite')),
+    'Desktop is not using the disposable SQLite database')
+  console.log('QA_RUNTIME', JSON.stringify({ ...info, rendererUrl, storagePath, pid: session.child.pid, debugPort: session.port }))
+}
+
+export async function verifyQaOffline(session, sink) {
+  assert.deepEqual(session.exceptions, [])
+  assert.deepEqual(session.networkRequests, [])
+  assert.equal(await evaluate(session.client, 'window.novelDirector.ai.getCallProgress({})'), null, 'Unexpected model call')
+  assert.equal(sink.requests.length, 0, 'Model request reached the loopback-only QA endpoint')
+  console.log('QA_OFFLINE', JSON.stringify({ rendererRequests: session.networkRequests.length, modelProgress: null,
+    loopbackEndpoint: sink.baseUrl, loopbackRequests: sink.requests.length }))
+}
+
+export async function cleanupQaRun(root, work, session, sink) {
+  try {
+    const closed = await cleanup(session)
+    if (closed) {
+      console.log('QA_CLEANUP', JSON.stringify({ pid: session.child.pid, remainingProcessIds: closed.remainingProcessIds }))
+      assert.deepEqual(closed.remainingProcessIds, [])
+    }
+  } finally {
+    await sink?.close()
+  }
+  assert.equal(dirname(await realpath(work)), await realpath(join(root, 'tmp')), 'Unexpected QA cleanup directory')
+  await rm(work, { recursive: true, force: true, maxRetries: 4 })
+  if (sink) assert.equal(sink.requests.length, 0, 'Model request during QA shutdown')
 }

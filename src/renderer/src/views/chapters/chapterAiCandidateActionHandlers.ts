@@ -24,6 +24,7 @@ export interface ChapterCharacterActionContext {
   project: Project
   characters: Character[]
   characterStateFacts: CharacterStateFact[]
+  reviewSourceBodyHash?: string
   saveData: SaveDataHandler
   setCharacterSuggestions: Dispatch<SetStateAction<CharacterStateSuggestion[]>>
   setAiMessage: Dispatch<SetStateAction<string>>
@@ -83,9 +84,9 @@ export async function createStateChangeCandidate(
   const character = characters.find((item) => item.id === suggestion.characterId)
   if (!character) return
   const timestamp = now()
-  const existingFact = characterStateFacts.find(
-    (fact) => fact.characterId === suggestion.characterId && fact.key === suggestion.key && fact.status === 'active'
-  )
+  const matches = characterStateFacts.filter(f => f.projectId === project.id && f.characterId === suggestion.characterId &&
+    f.category === suggestion.category && f.key === suggestion.key && f.status === 'active')
+  const existingFact = matches.length === 1 ? matches[0] : undefined
   const proposedFact: CharacterStateFact = {
     id: existingFact?.id ?? newId(),
     projectId: project.id,
@@ -125,6 +126,7 @@ export async function createStateChangeCandidate(
     reason: suggestion.evidence,
     evidence: suggestion.evidence,
     source: 'chapter_review',
+    sourceBodyHash: context.reviewSourceBodyHash,
     status: 'pending',
     createdAt: timestamp,
     updatedAt: timestamp

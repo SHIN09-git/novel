@@ -30,6 +30,24 @@ function retryInstructionForIssue(issue: QualityGateIssue, measurements: Chapter
 }
 
 export class ChapterTaskContractService {
+  static lengthOverflowNotice(input: { body: string; chapterTask?: ChapterTask | null }): string | null {
+    const rule = chapterTaskLengthRule(input.chapterTask?.targetWordCount ?? '')
+    if (!rule.range || rule.source !== 'author') return null
+    const [minimum, maximum] = rule.range
+    if (maximum === null) return null
+    const count = visibleCharacterCount(input.body)
+    if (count <= maximum) return null
+    const target = minimum === maximum ? String(maximum) : minimum ? `${minimum}–${maximum}` : `最多 ${maximum}`
+    return `目标 ${target} 字，实际 ${count} 字，超出上限 ${count - maximum} 字。`
+  }
+
+  static isOnlyLengthOverflow(evaluation: ChapterTaskContractEvaluation): boolean {
+    const [minimum, maximum] = evaluation.measurements.expectedCharacterRange ?? [0, null]
+    return evaluation.measurements.expectedCharacterRangeSource === 'author' &&
+      maximum !== null && minimum <= maximum && evaluation.measurements.visibleCharacterCount > maximum &&
+      evaluation.issues.length > 0 && evaluation.issues.every((issue) => issue.type === 'chapter_task_length')
+  }
+
   static isOnlyLengthUnderflow(evaluation: ChapterTaskContractEvaluation): boolean {
     const [minimum, maximum] = evaluation.measurements.expectedCharacterRange ?? [0, null]
     const visibleCount = evaluation.measurements.visibleCharacterCount

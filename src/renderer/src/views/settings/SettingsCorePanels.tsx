@@ -105,9 +105,20 @@ export function SettingsCorePanels({ settings, updateSettings, credentials, work
               />
               <Field label="API Key">
                 <div className="credential-field">
+                  {credentials.apiKeyState?.keyEnv && (
+                    <div className="muted">
+                      共享清单 · {credentials.apiKeyState.keyEnv} · {credentials.apiKeyState.envAvailable
+                        ? '已就绪，优先用于此服务'
+                        : credentials.apiKeyState.backupAvailable ? '未设置，使用备用密钥'
+                        : credentials.apiKeyState.storedForEndpoint ? '未设置，此服务使用桌面密钥' : '尚未设置'}
+                      {credentials.apiKeyState.backupKeyEnv && (
+                        <>。备用 · {credentials.apiKeyState.backupKeyEnv} · {credentials.apiKeyState.backupAvailable ? '已就绪' : '尚未设置'}</>
+                      )}
+                    </div>
+                  )}
                   <div className="muted">
                     {credentials.hasStoredApiKey
-                      ? '已保存 API Key。出于安全原因不会回显完整密钥。'
+                      ? (credentials.apiKeyState?.storedForEndpoint ? '工作台已为此地址加密保存密钥。' : '工作台另有一把已保存的桌面密钥。')
                       : settings.apiProvider === 'local'
                         ? '本地模型模式不需要远程 API Key。'
                         : '未保存 API Key。'}

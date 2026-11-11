@@ -1,22 +1,4 @@
-import type {
-  Character,
-  CharacterCardField,
-  CharacterStateFact,
-  CharacterStateLog,
-  Chapter,
-  ChapterContinuityBridge,
-  Foreshadowing,
-  ForeshadowingTreatmentMode,
-  ID,
-  ContextCompressionRecord,
-  ContextNeedPlan,
-  PromptBlockOrderItem,
-  PromptBuildInput,
-  PromptConfig,
-  PromptMode,
-  StageSummary,
-  TimelineEvent
-} from '../../shared/types'
+import type { ID, PromptBlockOrderItem, PromptBuildInput, PromptMode } from '../../shared/types'
 import { TokenEstimator } from '../TokenEstimator'
 
 export { parseChapterNumbersFromText, parseChapterRangesFromText } from '../../shared/chapterText'
@@ -46,31 +28,6 @@ const AUDIT_LINE_PATTERNS = [
   /生成质量评价/,
   /历史风险/
 ]
-
-const MAX_PROMPT_FORESHADOWINGS = 10
-
-const FORESHADOWING_WEIGHT_PRIORITY: Record<Foreshadowing['weight'], number> = {
-  payoff: 4,
-  high: 3,
-  medium: 2,
-  low: 1
-}
-
-const FORESHADOWING_STATUS_PRIORITY: Record<Foreshadowing['status'], number> = {
-  partial: 4,
-  unresolved: 3,
-  resolved: 1,
-  abandoned: 0
-}
-
-const FORESHADOWING_TREATMENT_PRIORITY: Record<ForeshadowingTreatmentMode, number> = {
-  payoff: 5,
-  advance: 4,
-  mislead: 3,
-  hint: 2,
-  pause: 1,
-  hidden: 0
-}
 
 export function isPlaceholderText(value: unknown): boolean {
   if (value === null || value === undefined) return true
@@ -176,28 +133,10 @@ export function renderPromptBlock(block: PromptBlockDraft): string {
   return section(block.title, block.enabled, block.body)
 }
 
-export function blockToOrderItem(block: PromptBlockDraft): PromptBlockOrderItem {
-  const rendered = renderPromptBlock(block)
-  const included = Boolean(rendered)
-  return {
-    id: block.id,
-    title: block.title,
-    kind: block.kind,
-    priority: block.priority,
-    tokenEstimate: included ? TokenEstimator.estimate(rendered) : 0,
-    source: block.source,
-    sourceIds: block.sourceIds ?? [],
-    included,
-    compressed: block.compressed ?? false,
-    forced: block.forced ?? false,
-    omittedReason: included ? null : block.omittedReason ?? '模块关闭或无可用内容。',
-    reason: block.reason
-  }
-}
-
 export function promptBlockOrderFromFinalPrompt(
   blocks: PromptBlockDraft[],
-  finalPrompt: string
+  finalPrompt: string,
+  renderedBlocks = blocks.map(renderPromptBlock)
 ): PromptBlockOrderItem[] {
   const matches = [...finalPrompt.matchAll(/^##\s+(.+)$/gm)]
   const renderedSections = new Map<string, string>()
@@ -208,22 +147,25 @@ export function promptBlockOrderFromFinalPrompt(
     renderedSections.set(title, finalPrompt.slice(start, end).trim())
   })
 
-  return blocks.map((block) => {
-    const base = blockToOrderItem(block)
-    if (!base.included) return base
-    const rendered = renderedSections.get(block.title)
-    if (!rendered) {
-      return {
-        ...base,
-        included: false,
-        tokenEstimate: 0,
-        omittedReason: '运行时 Prompt guard 已移除该区块。'
-      }
-    }
+  return blocks.map((block, index) => {
+    const wasRendered = Boolean(renderedBlocks[index])
+    const rendered = wasRendered ? renderedSections.get(block.title) : undefined
+    const included = Boolean(rendered)
     return {
-      ...base,
-      tokenEstimate: TokenEstimator.estimate(rendered),
-      omittedReason: null
+      id: block.id,
+      title: block.title,
+      kind: block.kind,
+      priority: block.priority,
+      tokenEstimate: included ? TokenEstimator.estimate(rendered) : 0,
+      source: block.source,
+      sourceIds: block.sourceIds ?? [],
+      included,
+      compressed: block.compressed ?? false,
+      forced: block.forced ?? false,
+      omittedReason: included ? null : wasRendered
+        ? '运行时 Prompt guard 已移除该区块。'
+        : block.omittedReason ?? '模块关闭或无可用内容。',
+      reason: block.reason
     }
   })
 }
@@ -300,21 +242,6 @@ export function styleSampleLimit(mode: PromptMode): number {
   if (mode === 'light') return 600
   if (mode === 'full') return 2000
   return 1200
-}
-
-export function formatHardCanonPack(project: PromptBuildInput['project'], bible: PromptBuildInput['bible']): string {
-  if (!bible) return '尚未填写小说圣经；不得因此临时发明重大设定。'
-  return [
-    `项目：${project.name}`,
-    `项目简介：${valueOrEmpty(project.description)}`,
-    `力量体系/规则体系底线：${valueOrEmpty(bible.powerSystem)}`,
-    `重要不可违背设定：${valueOrEmpty(bible.immutableFacts)}`,
-    `主角核心欲望：${valueOrEmpty(bible.protagonistDesire)}`,
-    `主角核心恐惧：${valueOrEmpty(bible.protagonistFear)}`,
-    `主线冲突：${valueOrEmpty(bible.mainConflict)}`,
-    `禁用套路：${valueOrEmpty(bible.bannedTropes)}`,
-    '禁止新增机制：不得为了让角色脱困而临时新增未铺垫救命规则、系统权限、管理员层级或核心世界观机制。'
-  ].join('\n')
 }
 
 export function formatStyleEnvelope(

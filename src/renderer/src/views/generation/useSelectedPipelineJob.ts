@@ -1,5 +1,6 @@
 import { useMemo } from 'react'
 import type { ID } from '../../../../shared/types'
+import { hasCurrentChapterFragment } from '../../../../shared/chapterStepFragment'
 import type { projectData } from '../../utils/projectData'
 import { PIPELINE_STEP_ORDER } from './pipelineStepDefinitions'
 import {
@@ -32,7 +33,8 @@ export function useSelectedPipelineJob(scoped: ScopedProjectData, selectedJobId:
         .filter((draft) => draft.jobId === selectedJob.id)
         .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt) || b.createdAt.localeCompare(a.createdAt))
     : []
-  const latestDraft = selectedDrafts[0] ?? null
+  const fragmentOnly = Boolean(selectedJob && hasCurrentChapterFragment(selectedSteps, selectedJob.id, selectedDrafts[0]))
+  const latestDraft = fragmentOnly ? null : selectedDrafts[0] ?? null
   const selectedCandidates = selectedJob ? scoped.memoryUpdateCandidates.filter((candidate) => candidate.jobId === selectedJob.id) : []
   const selectedReports = selectedJob && latestDraft
     ? latestConsistencyReportsForDraft(scoped.consistencyReviewReports.filter((report) => report.jobId === selectedJob.id), latestDraft)
@@ -48,21 +50,22 @@ export function useSelectedPipelineJob(scoped: ScopedProjectData, selectedJobId:
     ? latestRedundancyReportForDraft(scoped.redundancyReports.filter((report) => report.jobId === selectedJob?.id), latestDraft)
     : null
   const rawSelectedTrace = selectedJob ? scoped.generationRunTraces.find((trace) => trace.jobId === selectedJob.id) ?? null : null
-  const selectedTrace = rawSelectedTrace && latestDraft
+  const selectedTrace = rawSelectedTrace && (latestDraft || fragmentOnly)
     ? {
         ...rawSelectedTrace,
         consistencyReviewReportId: selectedReports[0]?.id ?? null,
         qualityGateReportId: latestQualityReport?.id ?? null,
         redundancyReportId: traceRedundancyReport?.id ?? null,
-        noveltyAuditResult: noveltyAuditMatchesDraft(rawSelectedTrace.noveltyAuditResult, latestDraft)
+        noveltyAuditResult: latestDraft && noveltyAuditMatchesDraft(rawSelectedTrace.noveltyAuditResult, latestDraft)
           ? rawSelectedTrace.noveltyAuditResult
           : null
       }
     : rawSelectedTrace
-  const selectedAuthorSummary = selectedTrace
+  const selectedAuthorSummary = selectedTrace && latestDraft
     ? scoped.runTraceAuthorSummaries.find(
         (summary) =>
           (summary.traceId === selectedTrace.id || summary.jobId === selectedTrace.jobId) &&
+          summary.generatedDraftId === latestDraft.id && summary.createdAt >= latestDraft.updatedAt &&
           Boolean(latestQualityReport || selectedReports[0]) &&
           (!latestQualityReport || summary.sourceRefs.qualityGateReportId === latestQualityReport.id) &&
           (!selectedReports[0] || summary.sourceRefs.consistencyReviewReportId === selectedReports[0].id)

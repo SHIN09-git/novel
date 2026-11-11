@@ -99,7 +99,7 @@ async function main() {
   checks.push(
     assert(
       revisionActionsSource.includes("resolvePipelineRoleSettings(sourceJob?.aiRunConfig, data.settings, 'revision')") &&
-        revisionActionsSource.includes("new AIService(runSettings, { runId: sourceJob?.id ?? draft.jobId })"),
+        revisionActionsSource.includes("new AIService(runSettings, { projectId: draft.projectId, runId: sourceJob?.id ?? draft.jobId })"),
       'revision candidate generation inherits the frozen source-run revision role and run identity'
     )
   )

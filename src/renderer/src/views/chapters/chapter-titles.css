@@ -1,0 +1,22 @@
+.chapter-title-dialog {
+  width: min(48rem, 92vw); max-height: 88vh; overflow: auto; box-sizing: border-box;
+  padding: 1.25rem; color: var(--ink); background: var(--surface); border: 1px solid var(--line); border-radius: 8px;
+}
+.chapter-title-dialog::backdrop { background: rgb(0 0 0 / 35%); }
+.chapter-title-dialog header, .chapter-title-filters { display: flex; gap: .75rem; align-items: center; flex-wrap: wrap; }
+.chapter-title-dialog header { justify-content: space-between; }
+.chapter-title-dialog h2, .chapter-title-dialog h3 { margin: 0; }
+.chapter-title-dialog fieldset { min-width: 0; padding: 0; border: 0; margin: 0; }
+.chapter-title-filters { margin: 1rem 0; }
+.chapter-title-filters label { display: grid; gap: .25rem; }
+.chapter-title-filters input { width: 6em; }
+.chapter-title-grid { overflow: auto; max-height: 36vh; }
+.chapter-title-grid table { width: 100%; border-collapse: collapse; table-layout: fixed; }
+.chapter-title-grid th, .chapter-title-grid td { padding: .4rem; text-align: left; overflow-wrap: anywhere; border-bottom: 1px solid var(--line); }
+.chapter-title-grid th:first-child { width: 4.5em; }
+.chapter-title-grid td input:not([type=checkbox]) { width: 100%; min-width: 0; box-sizing: border-box; }
+.chapter-title-grid td label { display: flex; gap: .4em; align-items: center; }
+.chapter-title-preview, .chapter-title-dialog footer { margin-top: 1rem; }
+.chapter-title-preview code { overflow-wrap: anywhere; }
+.chapter-title-dialog footer { justify-content: flex-end; }
+.chapter-current-title input { flex: 1; min-width: 0; }

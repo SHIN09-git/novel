@@ -163,3 +163,19 @@
 .character-form-status:empty {
   margin-block: 0;
 }
+
+.character-card-review { display: grid; gap: 10px; border-bottom: 1px solid var(--line); padding-bottom: 18px; margin-bottom: 20px; }
+.character-card-review h2, .character-card-review p, .character-card-review dl, .character-card-review dd { margin: 0; }
+.character-card-review select { width: 100%; max-width: 34rem; }
+.character-card-review dl { display: flex; flex-wrap: wrap; gap: 10px 28px; }
+.character-card-review dt { color: var(--muted); font-size: 12px; }
+.character-card-review dd { margin-top: 3px; font-weight: 600; }
+.character-card-review p, .character-review-evidence article { overflow-wrap: anywhere; }
+.character-card-fields { margin-block: 16px; }
+.character-card-fields summary, .character-review-evidence summary { cursor: pointer; color: var(--accent); padding-block: 6px; }
+.character-review-evidence article { border-left: 2px solid var(--line); padding-inline-start: 12px; margin-block: 10px; }
+.character-review-evidence blockquote { margin: 6px 0; white-space: pre-wrap; }
+.character-review-form { padding: 0; margin: 0; border: 0; min-width: 0; }
+.character-review-form legend { margin-bottom: 12px; color: var(--color-accent-strong); }
+.character-review-form > .panel { background: transparent; border: 0; padding: 0; box-shadow: none; }
+.character-card-review button, .character-review-form .row-actions button { display: inline-flex; align-items: center; gap: 5px; }

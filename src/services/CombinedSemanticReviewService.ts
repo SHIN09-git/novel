@@ -7,6 +7,7 @@ import type {
   QualityGateIssue,
   QualityGateReport
 } from '../shared/types'
+import { qualityReportWithoutHardCanon } from './qualityGate/hardCanonQuality'
 
 interface ConsistencyClassification {
   type: ConsistencyIssueType
@@ -81,14 +82,15 @@ export function deriveConsistencyReviewFromQualityGate(
   report: QualityGateReport,
   draft: GeneratedChapterDraft
 ): { qualityGateReport: QualityGateReport; consistencyReviewReport: ConsistencyReviewReport } {
-  const mapped = report.issues.flatMap((issue, index) => {
+  const base = qualityReportWithoutHardCanon(report)
+  const mapped = base.issues.flatMap((issue, index) => {
     const classification = classifyIssue(issue.type)
     return classification ? [{ source: issue, issue: consistencyIssue(report.id, issue, index, classification) }] : []
   })
   const linkBySignature = new Map(mapped.map(({ source, issue }) => [`${source.type}\u0000${source.description}\u0000${source.evidence}`, issue.id]))
   const qualityGateReport: QualityGateReport = {
     ...report,
-    issues: report.issues.map((issue) => ({
+    issues: base.issues.map((issue) => ({
       ...issue,
       linkedConsistencyIssueId:
         issue.linkedConsistencyIssueId ?? linkBySignature.get(`${issue.type}\u0000${issue.description}\u0000${issue.evidence}`)

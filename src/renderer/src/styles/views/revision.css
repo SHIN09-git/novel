@@ -169,15 +169,17 @@
 .revision-view .segmented-control {
   display: grid;
   grid-template-columns: 1fr 1fr;
-  gap: 6px;
-  padding: 4px;
-  border: 1px solid var(--line);
-  border-radius: var(--radius);
-  background: var(--surface-strong);
+  gap: 2px;
+  padding: 3px;
+  border: 0;
+  border-radius: var(--radius-pill);
+  background: var(--pressed);
 }
 
 .revision-view .segmented-control button {
+  min-height: 30px;
   border: 0;
+  border-radius: var(--radius-pill);
   box-shadow: none;
   background: transparent;
   color: var(--muted);

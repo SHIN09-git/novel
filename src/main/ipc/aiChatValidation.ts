@@ -1,9 +1,22 @@
 import type { ChatCompletionRequest } from '../../shared/ipc/ipcTypes'
 import type { ApiProvider } from '../../shared/types'
+import { usagePhases, type ProjectUsageContext, type UsagePhase } from '../../shared/projectUsage'
 import { ValidationError, validateNumber, validateString, validateUrl } from '../../shared/validation'
 
 const apiProviders = new Set<ApiProvider>(['openai', 'compatible', 'local', 'codex_cli'])
 const chatMessageRoles = new Set(['system', 'user'])
+
+function validateUsageContext(value: unknown): ProjectUsageContext | undefined {
+  if (value === undefined) return undefined
+  if (!value || typeof value !== 'object' || Array.isArray(value)) throw new ValidationError('Invalid AI usage context.')
+  const record = value as Record<string, unknown>
+  if (Object.keys(record).some(key => key !== 'projectId' && key !== 'phase')) {
+    throw new ValidationError('Unsupported AI usage context field.')
+  }
+  const projectId = validateString(record.projectId, 'projectId', { minLength: 1, maxLength: 200, pattern: /^[^\x00-\x1f\x7f]+$/ })
+  if (!usagePhases.includes(record.phase as UsagePhase)) throw new ValidationError('Unsupported AI usage phase.')
+  return { projectId, phase: record.phase as UsagePhase }
+}
 
 function validateApiProvider(value: unknown): ApiProvider {
   if (typeof value !== 'string' || !apiProviders.has(value as ApiProvider)) {
@@ -91,6 +104,7 @@ export function validateChatCompletionRequest(request: ChatCompletionRequest): C
         : 300_000
     },
     messages: validateChatMessages(record.messages),
+    usageContext: validateUsageContext(record.usageContext),
     runId: typeof record.runId === 'string'
       ? validateString(record.runId, 'AI runId', { minLength: 1, maxLength: 200 })
       : undefined

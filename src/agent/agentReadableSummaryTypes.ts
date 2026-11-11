@@ -32,6 +32,7 @@ export interface AgentProjectDigest {
     updatedAt: string
   }
   nextChapterOrder: number
+  manuscript: { totalWords: number; chapterCount: number; completeThrough: number }
   counts: {
     chapters: number
     archivedChapters: number
@@ -49,6 +50,7 @@ export interface AgentProjectDigest {
     title: string
     updatedAt: string
     bodyCharCount: number
+    wordCount: number
     summary: string
     endingHook: string
   }>
@@ -70,16 +72,19 @@ export interface AgentChapterState {
     title: string
     updatedAt: string
     bodyCharCount: number
+    wordCount: number
     summary: string
     endingHook: string
   } | null
   latestJob: AgentJobSummary | null
+  latestAttemptHasOnlyFragment?: true
   drafts: Array<{
     id: ID
     jobId: ID
     title: string
     status: string
     bodyCharCount: number
+    wordCount: number
     tokenEstimate: number
     updatedAt: string
   }>
@@ -110,6 +115,13 @@ export interface AgentRunDiagnostics {
     status: string
     errorMessage: string
     outputCharCount: number
+    fragment?: {
+      kind: 'incomplete_chapter_fragment'
+      title: string
+      finishReason: string | null
+      bodyCharCount: number
+      body?: string
+    }
     updatedAt: string
   }>
   trace: {

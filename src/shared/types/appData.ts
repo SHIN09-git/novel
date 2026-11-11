@@ -11,6 +11,7 @@ import type { StoryDirectionGuide } from './storyDirection'
 import type { ChapterCommitBundle, GenerationRunTrace, PromptBlockOrderItem, RunTraceAuthorSummary } from './trace'
 import type { AgentActionPreview, AgentRun } from './agent'
 import type { CandidateDecisionReceipt } from './candidateDecision'
+import type { ChapterTitleReceipt } from './chapterTitle'
 import type { QuickRewriteDraft } from './quickRewrite'
 import type { WorldManagementReceipt } from './worldManagement'
 
@@ -67,11 +68,32 @@ export interface AppSettings {
   theme: 'system' | 'light' | 'dark'
 }
 
+/** A failed formal write, not a chapter version or a successful commit receipt. */
+export interface ChapterWritebackFailure {
+  id: ID
+  projectId: ID
+  chapterId: ID
+  chapterOrder: number
+  kind: 'chapter_commit' | 'revision_commit'
+  commitId: ID
+  versionId: ID
+  jobId?: ID
+  draftId?: ID
+  revisionSessionId?: ID
+  revisionVersionId?: ID
+  baseChapterVersionId?: ID
+  /** Binds the target and baseline when a retry allocates new commit/version IDs. */
+  intentFingerprint?: string
+  attemptedAt: string
+  reason: string
+}
+
 export interface AppData {
   schemaVersion: number
   projects: Project[]
   storyBibles: StoryBible[]
   chapters: Chapter[]
+  chapterTitleReceipts: ChapterTitleReceipt[]
   characters: Character[]
   characterStateLogs: CharacterStateLog[]
   characterStateFacts: CharacterStateFact[]
@@ -108,6 +130,7 @@ export interface AppData {
   chapterVersions: ChapterVersion[]
   chapterCommitBundles: ChapterCommitBundle[]
   revisionCommitBundles: RevisionCommitBundle[]
+  chapterWritebackFailures: ChapterWritebackFailure[]
   agentRuns: AgentRun[]
   agentActionPreviews: AgentActionPreview[]
   settings: AppSettings
@@ -120,6 +143,9 @@ export interface PromptBuildInput {
   characters: Character[]
   characterStateLogs: CharacterStateLog[]
   characterStateFacts: CharacterStateFact[]
+  characterStateTransactions?: CharacterStateTransaction[]
+  /** Full project chapter directory (including archived chapters), not the budget selection. */
+  stateSourceChapters?: Chapter[]
   foreshadowings: Foreshadowing[]
   timelineEvents: TimelineEvent[]
   stageSummaries: StageSummary[]

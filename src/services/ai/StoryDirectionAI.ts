@@ -11,7 +11,8 @@ import type {
   StoryDirectionPolishResult,
   TimelineEvent
 } from '../../shared/types'
-import type { AIClient } from './AIClient'
+import { assertStoryDirectionBeats, inspectStoryDirectionRange, storyDirectionLengthConflict, type StoryDirectionRange } from '../../shared/storyDirectionRange'
+import type { AIJsonClient } from './AIJsonClient'
 import { StageSummaryService } from '../StageSummaryService'
 
 export interface PolishStoryDirectionIdeaInput {
@@ -21,9 +22,12 @@ export interface PolishStoryDirectionIdeaInput {
   activeGuide?: { title: string; aiGuidance: string } | null
 }
 
-export interface GenerateStoryDirectionGuideInput {
+export type GenerateStoryDirectionGuideInput = ({
+  endChapterOrder: number; horizonChapters?: StoryDirectionHorizon
+} | {
+  endChapterOrder?: undefined; horizonChapters: StoryDirectionHorizon
+}) & {
   project: Project
-  horizonChapters: StoryDirectionHorizon
   startChapterOrder: number
   userRawIdea: string
   userPolishedIdea: string
@@ -58,9 +62,14 @@ function normalizePolish(value: unknown): StoryDirectionPolishResult {
   }
 }
 
-function normalizeGeneration(value: unknown): StoryDirectionGenerationResult {
+function normalizeGeneration(value: unknown, range: StoryDirectionRange): StoryDirectionGenerationResult {
   const item = asObject(value)
-  const beats = Array.isArray(item.chapterBeats) ? item.chapterBeats.map(asObject) : []
+  const beats = item.chapterBeats
+  try {
+    assertStoryDirectionBeats(beats, range, true)
+  } catch (error) {
+    throw new Error(`AI 返回结构不符合剧情导向：${error instanceof Error ? error.message : String(error)}`)
+  }
   return {
     title: asString(item.title),
     aiGuidance: asString(item.aiGuidance),
@@ -71,9 +80,9 @@ function normalizeGeneration(value: unknown): StoryDirectionGenerationResult {
     foreshadowingDirectives: asString(item.foreshadowingDirectives),
     constraints: asString(item.constraints),
     forbiddenTurns: asString(item.forbiddenTurns),
-    chapterBeats: beats.map((beat, index) => ({
-      chapterOffset: typeof beat.chapterOffset === 'number' ? beat.chapterOffset : index + 1,
-      chapterOrder: typeof beat.chapterOrder === 'number' ? beat.chapterOrder : null,
+    chapterBeats: beats.map(beat => ({
+      chapterOffset: beat.chapterOffset,
+      chapterOrder: beat.chapterOrder,
       goal: asString(beat.goal),
       conflict: asString(beat.conflict),
       characterFocus: asString(beat.characterFocus),
@@ -84,7 +93,7 @@ function normalizeGeneration(value: unknown): StoryDirectionGenerationResult {
       readerEmotion: asString(beat.readerEmotion),
       mustAvoid: asString(beat.mustAvoid),
       notes: asString(beat.notes)
-    })),
+    })).sort((a, b) => a.chapterOffset - b.chapterOffset),
     warnings: asStringArray(item.warnings)
   }
 }
@@ -100,10 +109,10 @@ function fallbackPolish(input: PolishStoryDirectionIdeaInput): StoryDirectionPol
   }
 }
 
-function fallbackGeneration(input: GenerateStoryDirectionGuideInput): StoryDirectionGenerationResult {
+function fallbackGeneration(input: GenerateStoryDirectionGuideInput, range: StoryDirectionRange): StoryDirectionGenerationResult {
   const guidance = input.userPolishedIdea.trim() || input.userRawIdea.trim() || '承接当前阶段摘要，稳步推进下一组章节。'
   return {
-    title: `第 ${input.startChapterOrder}-${input.startChapterOrder + input.horizonChapters - 1} 章剧情导向`,
+    title: `第 ${range.startChapterOrder}-${range.endChapterOrder} 章剧情导向`,
     aiGuidance: guidance,
     strategicTheme: guidance,
     coreDramaticPromise: guidance,
@@ -112,7 +121,7 @@ function fallbackGeneration(input: GenerateStoryDirectionGuideInput): StoryDirec
     foreshadowingDirectives: '只按已有 treatmentMode 暗示、推进或回收伏笔。',
     constraints: '不得改写已发生事实；不得新增未确认硬设定。',
     forbiddenTurns: '不得使用无铺垫救命规则或临时权限解决危机。',
-    chapterBeats: Array.from({ length: input.horizonChapters }, (_, index) => ({
+    chapterBeats: Array.from({ length: range.horizonChapters }, (_, index) => ({
       chapterOffset: index + 1,
       chapterOrder: input.startChapterOrder + index,
       goal: index === 0 ? guidance : '',
@@ -153,7 +162,7 @@ function chapterSummaryForPrompt(chapters: Chapter[]): string {
 }
 
 export class StoryDirectionAI {
-  constructor(private readonly client: AIClient) {}
+  constructor(private readonly client: AIJsonClient) {}
 
   async polishUserStoryDirectionIdea(input: PolishStoryDirectionIdeaInput): Promise<AIResult<StoryDirectionPolishResult>> {
     const systemPrompt =
@@ -171,12 +180,14 @@ export class StoryDirectionAI {
     ]
       .filter(Boolean)
       .join('\n\n')
-    return this.client.requestJson(systemPrompt, userPrompt, normalizePolish, fallbackPolish(input))
+    return this.client.requestJson(systemPrompt, userPrompt, normalizePolish, fallbackPolish(input), undefined, undefined, { phase: 'planning' })
   }
 
   async generateStoryDirectionGuide(input: GenerateStoryDirectionGuideInput): Promise<AIResult<StoryDirectionGenerationResult>> {
+    const { range, error } = inspectStoryDirectionRange(input.startChapterOrder, input.endChapterOrder, input.horizonChapters)
+    if (!range) return { ok: false, usedAI: false, data: null, error }
     const systemPrompt =
-      '你是长篇小说剧情导演。请基于用户纲领、阶段摘要、近期章节、角色、伏笔、时间线和硬设定，生成未来 5/10 章的中期剧情指导。这不是正文，不是详细大纲，而是供章节生成使用的方向性 beat sheet。不得违反已有事实；新角色、新机制、新组织、新世界观只能作为候选，不能当成稳定 canon。必须返回 strict JSON。'
+      '你是长篇小说剧情导演。请基于用户纲领、阶段摘要、近期章节、角色、伏笔、时间线和硬设定，按指定起止章号生成中期剧情指导。这不是正文，不是详细大纲，而是供章节生成使用的方向性 beat sheet。不得违反已有事实；新角色、新机制、新组织、新世界观只能作为候选，不能当成稳定 canon。必须返回 strict JSON。'
     const stageSummaryText = summaryForPrompt(input.stageSummaries)
     const recentChapterText = chapterSummaryForPrompt(input.recentChapters)
     const characterText = input.characters.map((character) => character.name).filter(Boolean).join('、')
@@ -185,7 +196,8 @@ export class StoryDirectionAI {
     const hardCanonText = input.storyBible?.immutableFacts?.trim() || input.storyBible?.worldbuilding?.trim() || ''
     const userPrompt = [
       `项目：${input.project.name}`,
-      `覆盖范围：从第 ${input.startChapterOrder} 章开始，未来 ${input.horizonChapters} 章`,
+      `覆盖范围：第 ${range.startChapterOrder}-${range.endChapterOrder} 章（含首尾）。chapterBeats 必须恰好有 ${range.horizonChapters} 个节拍，每章一个，不能缺章、重复或越界。`,
+      `chapterOffset 从 1 到 ${range.horizonChapters}；chapterOrder = ${range.startChapterOrder} + (chapterOffset - 1)。两者都必须是整数。`,
       input.userRawIdea.trim() ? `用户原始想法：${input.userRawIdea.trim()}` : '',
       input.userPolishedIdea.trim() ? `润色纲领：${input.userPolishedIdea.trim()}` : '',
       stageSummaryText ? `阶段摘要：\n${stageSummaryText}` : '未提供阶段摘要；请在 warnings 中提示历史上下文不足，不要编造已发生剧情。',
@@ -199,6 +211,9 @@ export class StoryDirectionAI {
     ]
       .filter(Boolean)
       .join('\n\n')
-    return this.client.requestJson(systemPrompt, userPrompt, normalizeGeneration, fallbackGeneration(input))
+    const result = await this.client.requestJson(systemPrompt, userPrompt, value => normalizeGeneration(value, range),
+      fallbackGeneration(input, range), undefined, undefined, { phase: 'planning' })
+    const conflict = storyDirectionLengthConflict(range, input.horizonChapters)
+    return result.data && conflict ? { ...result, data: { ...result.data, warnings: [...result.data.warnings, conflict] } } : result
   }
 }

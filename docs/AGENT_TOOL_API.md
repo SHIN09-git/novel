@@ -42,7 +42,11 @@ npm.cmd run agent:tools
 - `agent.listProjects`
 - `agent.getProjectDigest`
 - `agent.getNextChapterTarget`
+- `agent.getProjectUsage`：按项目和工作环节读取实际请求、已知 token、已知费用和未覆盖范围。不含正文，不调用模型。未上报的用量和账户余额都是未知。
+- `agent.estimateProjectUsage`：预估单次请求；传 `projectId`、`provider`、`endpoint`（订阅 CLI 无需）、`model`、可选 `maxOutputTokens`。输入用 `inputTokens` 或本项目的 `snapshotId`，二选一；不提供则输入未知。快照只代表该段文字，不是整条流水线。只有配置了匹配的价目才能估算金额。
+- `agent.getBookProgress`：核对全书正式字数、距作者目标的差额、缺章和写回情况。传 `projectId` 或 `project`；可选 `fromChapter` / `toChapter`（含两端）、`issuesOnly`、`offset`、`limit`（默认 50，最多 200）。`totalWords` 是全书字数，`range.totalWords` 是所选章段字数，均不随分页变化。它不返回整段正文。`nextAssignableOrder` 是可分配的新章号；`completeThrough` 才是从第 1 章起连续有正文的末章。
 - `agent.getArchivedChapters`
+- `agent.getBookContinuityReport`：只读核对本项目的当前正式正文和已确认记录。传 `projectId` 或 `project`，可选 `from`、`to`、`kind`、`status`、`offset` 和 `limit`（默认 10、最多 50）。例：`{"projectId":"你的项目ID","from":80,"to":96,"kind":"money","status":"conflict"}`。可保留第 80 章之前的比较依据，但不会使用第 96 章之后的事件。结果包含章 ID、正文指纹、可核实的版本 ID 和原句节选，不返回整章或写入正史。`needs_evidence` 是待核线索，`open` 是未结事项，不是采纳否决。
 - `agent.getChapterProductionState`
 - `agent.getChapterVersionChain`
 - `agent.getChapterText`
@@ -61,6 +65,8 @@ npm.cmd run agent:tools
 - `agent.getAgentRunSummary`
 
 写入/预览：
+
+正式改章名：先用 `agent.previewChapterTitleRename`，传 `projectId`、唯一的 `operationId`、`prefixMode`（`manual`、`keep` 或 `strip`）和 `edits`（稳定章节 ID、拟用标题）。核对返回的章号、旧名和新名后，用 `agent.applyChapterTitleRename` 发同一命令，附预览的版本与指纹（`expectedRevision`、`expectedPreviewHash`）。必须有覆盖全部所选章节的有效 `manage_chapters` 授权。重试同一提交请复用操作 ID。读 `agent.getChapterTitleHistory` 可按项目或章节查旧名，不需读取正文。
 
 - `agent.startAgentRun`
 - `agent.runChapterPipeline`
@@ -162,7 +168,7 @@ directory, never the production novel store.
 
 世界资料工具只允许读取和经作者项目级 `edit_world` 授权后的明确导演动作；不提供删除、任意集合写入或由检测结果自动生成 canon 的入口。
 
-1. `agent.getWorldRecords` 与 `agent.getWorldRecord`：读取角色、角色状态、伏笔、时间线、HardCanon 或剧情导向。默认 compact，`detail: "full"` 才返回未截断的许可字段。
+1. `agent.getWorldRecords` 与 `agent.getWorldRecord`：读取角色、角色状态、伏笔、时间线、HardCanon 或剧情导向。单读角色时，`cardReview` 区分最后变化章、核对章、最近确认事实章，`detail: "full"` 另给短引文和来源。可用 `asOfChapterOrder` 限定核对截止章；这不会把可编辑原卡还原到当时，也不会将卡标为已核对。
 2. `agent.getWorldActionReceipt`：按 `operationId` 读取一条已落盘的世界资料操作记录，含脱敏后的 `before`、`after`、command/preview 指纹、导演来源和实际授权 grant ID。
 3. `agent.getWorldActionHistory`：按项目分页读取上述 receipt；`limit` 默认 20、最大 100，返回 `total`、`offset`、`nextOffset` 和 `receipts`。
 4. `agent.previewWorldAction` 与 `agent.applyWorldAction`：支持 create、update、set_status、archive。apply 必须原样携带 preview 的 `expectedFingerprint` 与稳定 `operationId`，并在当前落盘快照上重新校验后保存。
@@ -173,7 +179,7 @@ compact 输出会保留 ID、枚举、operationId 和全部指纹，不截断；
 
 `previewWorldAction` 和 `applyWorldAction` 返回的 `before`/`after` 也使用同一脱敏规则；保存的 command、receipt 和 fingerprint 仍基于原始内容，不会因展示脱敏而改变。两个写工具的 `patch` schema 提供 `x-worldEditableFieldsByEntity`：它列出每种实体允许的字段、角色九项卡字段以及状态/伏笔/HardCanon/剧情导向的枚举值，实际写入仍由共享服务按实体严格校验。
 
-角色和时间线没有已注册的归档生命周期，归档/状态动作会明确拒绝。角色状态的 `sourceChapterId`（及同时提供的 `sourceChapterOrder`）必须定位到同项目同一章节。激活剧情导向时，`endChapterOrder` 必须等于 `startChapterOrder + horizonChapters - 1`，每个节拍必须位于该范围并与自身 offset 一致。
+角色和时间线没有已注册的归档生命周期，归档/状态动作会明确拒绝。角色状态的 `sourceChapterId`（及同时提供的 `sourceChapterOrder`）必须定位到同项目同一章节。剧情导向以起止章为准，含两端，一条导向可覆盖 1–30 章；5 和 10 只是快捷选项。第 91–96 章的长度是 6，第 96–96 章的长度是 1。节拍的章号和 offset 须与区间一致。
 
 ### Shared-Kernel Review Handoff (2026-09-06)
 
@@ -256,6 +262,14 @@ known shared defects to remain present.
 ## English
 
 Novel Director now exposes a structured Agent Tool API for Codex/Agent use. It shares the desktop app's SQLite/JSON data, Agent Runtime, and transaction-backed commit pipeline without requiring Computer Use to read the UI.
+
+Use `agent.getProjectUsage` for the book's recorded usage and `agent.estimateProjectUsage` for an offline, single-request estimate. Neither can read a provider balance. Story direction accepts inclusive ranges of 1–30 chapters. For official chapter titles use `agent.previewChapterTitleRename`, then `agent.applyChapterTitleRename` with the returned revision and fingerprint and a current `manage_chapters` grant. Read prior titles with `agent.getChapterTitleHistory`; renames do not create prose revisions.
+
+For manuscript coverage, use `agent.getBookProgress` with a project, optional chapter range and `issuesOnly: true`. A nonblank historical manuscript counts even without a formal receipt; an old manuscript does not prove that a failed revision was applied. `agent.getNextChapterTarget` returns an available order, not proof that the manuscript is complete through that point.
+
+For cross-chapter consistency, call `agent.getBookContinuityReport` with an optional inclusive `from` / `to`, category and status. Earlier evidence can support an in-range finding; later chapters cannot. Results reference current manuscript evidence and distinguish conflicts, missing evidence and open questions. This local read does not change the acceptance decision.
+
+For a single character, `agent.getWorldRecord` includes a compact `cardReview`: when the card changed, when an author last checked it, and when a confirmed fact last changed. Use `detail: "full"` for short evidence excerpts. The optional `asOfChapterOrder` limits this review, not the editable profile; reading never marks it reviewed.
 
 ### Start
 

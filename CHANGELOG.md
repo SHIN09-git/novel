@@ -2,6 +2,18 @@
 
 ## 简体中文
 
+### 0.1.6-preview.20 - 长篇完稿核查与收尾
+
+- 超过字数上限的可读草稿会保留；有明确证据的截断片段不能采纳。作者可对成稿核查禁词、角色动作，并决定哪些确证违规必须先修。
+- 工作台新增全书进度、缺章与跨章核对；角色卡可按章核对已确认余额，不用旧卡上的钱数覆盖新账。
+- 可按书查看模型用量、设置价目并在请求前预估费用。剧情导向支持 1–30 章，批量改名先预览、不改正文。详见[长篇修复说明](./docs/LONG_NOVEL_COMPLETION_REPAIR_PLAN.md)。
+
+### 0.1.6-preview.19 - 重复计算与修订指令精简
+
+- Novelty 审计在单次调用内复用词边界和原文偏移；Prompt 构建复用渲染结果，减少追踪与 token 估算中的重复处理，保持审计及正文 Prompt 输出一致。
+- 修订指令按所选任务加入，减少无关的衔接、压缩和润色要求；保留事实、局部范围、伏笔和去 AI 味约束。
+- 纳入当前已有的界面调整，精简 README 与 ROADMAP。性能方法和结果见 [重复计算与指令精简](./docs/REDUNDANCY_PERFORMANCE.md)，本地打包状态以 `release/BUILD_INFO.json` 为准。
+
 ### 0.1.6-preview.18 - 界面更新打包
 
 - 将本轮已有的 Ink Desk 界面改动纳入安装包和 `win-unpacked`：深色导航、雾蓝操作色、正文纸面，以及页面、弹窗、进度反馈的统一样式和动效。
@@ -200,6 +212,18 @@
 ---
 
 ## English
+
+### 0.1.6-preview.20 - Long-Manuscript Checks and Finishing Tools
+
+- Keep readable overlength drafts; explicitly truncated fragments cannot be accepted. Authors can check manuscripts against selected hard rules and block confirmed violations.
+- See book progress, missing chapters and cross-chapter evidence. Character card checks use confirmed balances as of the selected chapter.
+- Review per-book model usage, edit prices and preview request costs. Story directions cover 1–30 chapters; bulk title changes have a preview and leave the manuscript unchanged.
+
+### 0.1.6-preview.19 - Less Duplicate Work and Focused Revision Instructions
+
+- Reuse prepared text within a Novelty audit and rendered Prompt blocks during trace construction, preserving audit and writing-prompt outputs.
+- Apply revision instructions by task type while retaining fact, local-scope, foreshadowing and less-AI-tone constraints.
+- Include the current UI changes and simplify README/ROADMAP. See the [measurement report](./docs/REDUNDANCY_PERFORMANCE.md) and `release/BUILD_INFO.json` for local package verification.
 
 ### 0.1.6-preview.18 - Packaged UI Refresh
 

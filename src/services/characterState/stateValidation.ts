@@ -69,7 +69,7 @@ export function validateCharacterStateInText(
     const character = characters.find((item) => item.id === characterId)
     const byStateKey = new Map<string, CharacterStateFact[]>()
     for (const fact of characterFacts) {
-      const key = `${fact.category}:${fact.key}`
+      const key = JSON.stringify([fact.projectId, fact.category, fact.key || fact.id, fact.unit])
       byStateKey.set(key, [...(byStateKey.get(key) ?? []), fact])
     }
     for (const duplicateFacts of byStateKey.values()) {

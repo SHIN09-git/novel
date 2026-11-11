@@ -1,5 +1,6 @@
 import { loadAgentRuntimeData } from '../AgentRuntime'
 import { handleAgentOverviewReadTool } from './agentOverviewReadHandlers'
+import { isChapterTitleTool, runChapterTitleTool } from './agentChapterTitleTools'
 import { findProjectId, requiredString, stringArg } from './agentToolArguments'
 import { AgentAuthorizationService } from '../../main/services/AgentAuthorizationService'
 import { decorateCandidateAuthorization } from './agentCandidateAuthorization'
@@ -29,6 +30,7 @@ export class AgentToolService {
 
   static async callTool(input: AgentToolCallInput): Promise<AgentToolCallResult> {
     const args = input.arguments ?? {}
+    if (isChapterTitleTool(input.name)) return runChapterTitleTool(input.name, args)
     const overview = await handleAgentOverviewReadTool(input.name, args)
     if (overview) return overview
     const runtime = await loadAgentRuntimeData({

@@ -1,5 +1,6 @@
 import type { AppData, ID } from '../../shared/types'
-import { WorldManagementService, type WorldManagedEntity, type WorldManagementCommand, type WorldManagementResult } from '../../services/WorldManagementService'
+import { WORLD_MANAGEMENT_FIELD_HELP, WorldManagementService, type WorldManagedEntity, type WorldManagementCommand, type WorldManagementResult } from '../../services/WorldManagementService'
+import { readAgentCharacterCardReview } from '../agentCharacterCardReview'
 import { AgentAuthorizationService } from '../../main/services/AgentAuthorizationService'
 import { redactSensitiveText } from '../../shared/errorUtils'
 import type { AgentRuntimeData } from '../AgentRuntime'
@@ -34,7 +35,8 @@ function pagination(args: Record<string, unknown>): { limit: number; offset: num
 const stableTextKeys = new Set([
   'id', 'projectId', 'operationId', 'agentRunId', 'authorizationGrantId', 'fingerprint', 'expectedFingerprint',
   'commandFingerprint', 'previewFingerprint', 'entity', 'action', 'status', 'kind', 'sourceType', 'category',
-  'priority', 'valueType', 'trackingLevel', 'promptPolicy', 'schemaVersion', 'createdAt', 'updatedAt', 'recordedAt'
+  'priority', 'valueType', 'trackingLevel', 'promptPolicy', 'schemaVersion', 'createdAt', 'updatedAt', 'recordedAt',
+  'mode', 'effect', 'side', 'enforcement'
 ])
 
 function isStableText(key: string): boolean {
@@ -75,11 +77,14 @@ function worldOutput(
   }
 }
 
-function presentWorldActionResult(result: WorldManagementResult['result'], data: AppData): WorldManagementResult['result'] {
+function presentWorldActionResult(result: WorldManagementResult['result'], data: AppData) {
   // Keep the persisted receipt and its fingerprints raw; only redact display snapshots.
   const before = result.before === null ? null : worldOutput(result.before, data, Number.MAX_SAFE_INTEGER, 'before').value
   const after = worldOutput(result.after, data, Number.MAX_SAFE_INTEGER, 'after').value
-  return { ...result, before, after }
+  const duplicates = result.hardCanonDuplicates
+  return { ...result, before, after, ...(duplicates && {
+    hardCanonDuplicates: worldOutput(duplicates, data, Number.MAX_SAFE_INTEGER, 'hardCanonDuplicates').value
+  }) }
 }
 
 function command(data: AppData, args: Record<string, unknown>, requireFingerprint: boolean): WorldManagementCommand {
@@ -119,13 +124,25 @@ export function getAgentWorldRecords(data: AppData, args: Record<string, unknown
 }
 
 export function getAgentWorldRecord(data: AppData, args: Record<string, unknown>): unknown {
-  fields(args, [...common, 'entity', 'id', 'detail', 'maxChars'])
+  const kind = entity(args)
+  fields(args, [...common, 'entity', 'id', 'detail', 'maxChars', ...(kind === 'character' ? ['asOfChapterOrder'] : [])])
   const options = readOptions(args)
-  const item = WorldManagementService.get(data, findProjectId(data, args), entity(args), requiredString(args, 'id'))
-  const output = worldOutput(item, data, options.maxChars ?? (options.detail === 'full' ? Number.MAX_SAFE_INTEGER : 320))
+  const projectId = findProjectId(data, args), id = requiredString(args, 'id')
+  const item = WorldManagementService.get(data, projectId, kind, id)
+  const through = args.asOfChapterOrder
+  if (through !== undefined && (typeof through !== 'number' || !Number.isSafeInteger(through) || through < 1)) {
+    throw new Error('asOfChapterOrder must be a positive integer.')
+  }
+  const full = options.detail === 'full', maxChars = options.maxChars ?? (full ? Number.MAX_SAFE_INTEGER : 320)
+  const record = kind === 'character' ? Object.fromEntries(['id', 'projectId', 'createdAt', 'updatedAt',
+    ...WORLD_MANAGEMENT_FIELD_HELP.character.fields].map(key => [key, (item as Record<string, unknown>)[key]])) : item
+  const output = worldOutput(record, data, maxChars)
+  const review = kind === 'character' ? worldOutput(readAgentCharacterCardReview(data, projectId, id, full, through, options.maxChars),
+    data, maxChars, 'cardReview') : null
+  const truncatedFields = [...output.truncatedFields, ...(review?.truncatedFields ?? [])]
   return {
-    projectId: findProjectId(data, args), entity: entity(args), record: output.value,
-    truncated: output.truncatedFields.length > 0, truncatedFields: output.truncatedFields,
+    projectId, entity: kind, record: output.value, ...(review ? { cardReview: review.value } : {}),
+    truncated: truncatedFields.length > 0, truncatedFields,
     ...(options.detail === 'full' ? {} : { fullRead: { tool: 'agent.getWorldRecord', detail: 'full', requiredArguments: ['projectId', 'entity', 'id'] } })
   }
 }

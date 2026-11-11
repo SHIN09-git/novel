@@ -20,6 +20,12 @@ function defaultRevisionInstruction(type: RevisionGenerationRequest['type']): st
   return instructions[type] ?? '按修订类型处理。'
 }
 
+export function revisionMessages(request: RevisionGenerationRequest, context: string) {
+  const normalized = { ...request, instruction: request.instruction || defaultRevisionInstruction(request.type) }
+  return [{ role: 'system', content: REVISION_SYSTEM_PROMPT },
+    { role: 'user', content: buildRevisionUserPrompt(normalized, context) }] as const
+}
+
 export class RevisionAI {
   constructor(private readonly client: AIClient) {}
 
@@ -28,12 +34,8 @@ export class RevisionAI {
     context: string,
     requestControl?: AIRequestControl
   ): Promise<AIResult<RevisionResult>> {
-    const normalizedRequest: RevisionGenerationRequest = {
-      ...request,
-      instruction: request.instruction || defaultRevisionInstruction(request.type)
-    }
     const fallbackText =
-      normalizedRequest.revisionScope === 'local' ? normalizedRequest.targetRange ?? '' : normalizedRequest.fullChapterText
+      request.revisionScope === 'local' ? request.targetRange ?? '' : request.fullChapterText
     const fallback: RevisionResult = {
       revisedText: fallbackText,
       changedSummary:
@@ -41,16 +43,16 @@ export class RevisionAI {
       risks: '本地模板没有实际改写，请人工确认后再接受。',
       preservedFacts: '未改动剧情事实、角色状态和伏笔状态。'
     }
-    const userPrompt = buildRevisionUserPrompt(normalizedRequest, context)
+    const [system, user] = revisionMessages(request, context)
 
     return this.client.requestJson(
-      REVISION_SYSTEM_PROMPT,
-      userPrompt,
+      system.content,
+      user.content,
       ensureRevisionResult,
       fallback,
       undefined,
       validateRevisionResultSchema,
-      requestControl
+      { ...requestControl, phase: 'revision' }
     )
   }
 

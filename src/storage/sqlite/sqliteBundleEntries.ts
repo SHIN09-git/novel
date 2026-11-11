@@ -6,17 +6,6 @@ import type {
 } from '../../shared/types'
 import type { SqliteEntityEntry } from './sqliteTypes'
 
-export function isPersistedCommitBundle(
-  existing: AppData,
-  bundle: ChapterCommitBundle | RevisionCommitBundle
-): boolean {
-  return 'commitId' in bundle
-    ? existing.chapterCommitBundles.some((commit) => commit.commitId === bundle.commitId || commit.id === bundle.id)
-    : existing.revisionCommitBundles.some(
-        (commit) => commit.revisionCommitId === bundle.revisionCommitId || commit.id === bundle.id
-      )
-}
-
 export function generationBundleEntityEntries(
   bundle: GenerationRunBundle
 ): SqliteEntityEntry[] {

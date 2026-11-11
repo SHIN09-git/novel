@@ -9,6 +9,7 @@ import type {
 import { TokenEstimator } from '../TokenEstimator'
 import { replacementTextForCompressedChapter } from '../ContextCompressionService'
 import type { ProjectContextData } from './types'
+import { formatCharacterStateLedgerSlice } from '../promptFormatters/characterFormatters'
 import {
   byId,
   itemCost,
@@ -61,6 +62,9 @@ export function selectionCost(data: ProjectContextData, selection: ContextSelect
       ].join('\n')
     : [data.project.name, data.project.genre, data.project.description].join('\n')
 
+  const characters = byId(data.characters, selection.selectedCharacterIds)
+  const characterIds = new Set(selection.selectedCharacterIds)
+  const ledger = formatCharacterStateLedgerSlice(characters, (data.characterStateFacts ?? []).filter(f => characterIds.has(f.characterId)))
   const selectedText = [
     storyBibleText,
     ...byId(data.chapters, selection.selectedChapterIds).map((chapter) => {
@@ -68,7 +72,8 @@ export function selectionCost(data: ProjectContextData, selection: ContextSelect
       return compression ? replacementTextForCompressedChapter(compression) : stringifyChapter(chapter)
     }),
     ...byId(data.stageSummaries, selection.selectedStageSummaryIds).map(stringifyStageSummary),
-    ...byId(data.characters, selection.selectedCharacterIds).map((character) => stringifyCharacterForPlan(character, contextNeedPlan)),
+    ...characters.map((character) => stringifyCharacterForPlan(character, contextNeedPlan)),
+    ...(ledger ? [ledger] : []),
     ...byId(data.foreshadowings, selection.selectedForeshadowingIds).map((item) => stringifyForeshadowing(item)),
     ...byId(data.timelineEvents, selection.selectedTimelineEventIds).map(stringifyTimelineEvent)
   ].join('\n\n')

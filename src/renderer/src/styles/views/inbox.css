@@ -15,18 +15,18 @@
   gap: 3px;
   padding: 3px;
   margin-bottom: 22px;
-  border: 1px solid var(--line);
-  border-radius: var(--radius-md);
-  background: var(--color-surface-soft);
+  border: 0;
+  border-radius: var(--radius-pill);
+  background: var(--pressed);
 }
 
 .inbox-toolbar button {
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  min-height: 34px;
-  padding: 7px 11px;
-  border-radius: var(--radius-sm);
+  min-height: 30px;
+  padding: 5px 13px;
+  border-radius: var(--radius-pill);
   background: transparent;
   color: var(--muted);
   font-size: 12px;

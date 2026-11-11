@@ -1,3 +1,5 @@
+@import '../components/HardCanonAuditPanel.css';
+
 /* Shared components for the Ink Desk system. Views compose these; view sheets only add layout. */
 
 /* ---------- Actions ---------- */
@@ -17,9 +19,9 @@
   align-items: center;
   justify-content: center;
   gap: 7px;
-  min-height: 36px;
-  border-radius: var(--radius-md);
-  padding: 7px 14px;
+  min-height: 34px;
+  border-radius: var(--radius-pill);
+  padding: 6px 16px;
   font-size: var(--text-sm);
   font-weight: 600;
   line-height: 1.3;
@@ -36,7 +38,7 @@
   border: 1px solid transparent;
   background: var(--color-accent-strong);
   color: var(--color-on-accent);
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.14), 0 1px 2px rgba(23, 27, 36, 0.12);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.22), 0 1px 2px rgba(22, 27, 38, 0.14), 0 6px 16px -10px var(--color-accent-strong);
 }
 
 .primary-button:hover:not(:disabled) {
@@ -57,19 +59,23 @@
   background: var(--color-surface-elevated);
   color: var(--ink);
   border: 1px solid var(--line);
-  box-shadow: var(--shadow-card);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.6), var(--shadow-card);
 }
 
 .ghost-button {
-  background: transparent;
+  border-color: transparent;
+  background: var(--hover);
   box-shadow: none;
 }
 
 /* Quiet commands stay neutral on hover; jade is reserved for the primary action and current state. */
-.secondary-button:hover:not(:disabled),
-.ghost-button:hover:not(:disabled) {
+.secondary-button:hover:not(:disabled) {
   border-color: var(--color-border-strong);
-  background: var(--hover);
+  color: var(--ink);
+}
+
+.ghost-button:hover:not(:disabled) {
+  background: var(--pressed);
   color: var(--ink);
 }
 
@@ -102,7 +108,7 @@ button:disabled {
 .panel {
   background: var(--surface);
   border: 1px solid var(--line);
-  border-radius: var(--radius-lg);
+  border-radius: var(--radius-panel);
   box-shadow: var(--shadow-card);
   padding: 20px;
 }
@@ -148,7 +154,7 @@ button:disabled {
 .section-card {
   background: var(--surface);
   border: 1px solid var(--line);
-  border-radius: var(--radius-lg);
+  border-radius: var(--radius-panel);
   box-shadow: var(--shadow-card);
   padding: 20px;
 }
@@ -262,7 +268,7 @@ button:disabled {
 .notice {
   position: relative;
   margin-bottom: 16px;
-  padding: 11px 14px 11px 16px;
+  padding: 11px 16px;
   border: 1px solid color-mix(in srgb, var(--color-info) 24%, var(--line));
   border-radius: var(--radius-md);
   background: var(--color-info-soft);
@@ -273,11 +279,7 @@ button:disabled {
 }
 
 .notice::before {
-  content: "";
-  position: absolute;
-  inset: 0 auto 0 0;
-  width: 3px;
-  background: var(--color-info);
+  content: none;
 }
 
 .notice.warning {
@@ -298,14 +300,12 @@ button:disabled {
   display: grid;
   justify-items: center;
   gap: 4px;
-  border: 1px dashed var(--color-border-strong);
+  border: 0;
   border-radius: var(--radius-lg);
-  padding: 32px 24px;
+  padding: 36px 24px;
   text-align: center;
   color: var(--muted);
-  background:
-    repeating-linear-gradient(0deg, transparent 0 27px, color-mix(in srgb, var(--line) 55%, transparent) 27px 28px),
-    color-mix(in srgb, var(--color-surface-soft) 50%, transparent);
+  background: var(--hover);
 }
 
 .empty-state h2 {
@@ -343,10 +343,11 @@ button:disabled {
 .confirm-dialog {
   width: min(460px, 100%);
   max-height: calc(100dvh - 48px);
-  border: 1px solid var(--line);
-  border-radius: var(--radius-xl);
-  background: var(--color-surface-elevated);
-  box-shadow: var(--shadow-overlay);
+  border: 1px solid var(--glass-stroke);
+  border-radius: 22px;
+  background: var(--glass-thick);
+  backdrop-filter: var(--glass-filter);
+  box-shadow: var(--glass-specular), 0 0 0 1px var(--glass-hairline), var(--shadow-overlay);
   padding: 24px;
   display: flex;
   flex-direction: column;
@@ -354,9 +355,8 @@ button:disabled {
   animation: nd-pop-in var(--duration-slow) var(--ease-emphasized) backwards;
 }
 
-.confirm-dialog.danger {
-  border-color: color-mix(in srgb, var(--color-danger) 34%, transparent);
-  box-shadow: var(--shadow-overlay), inset 0 3px 0 var(--color-danger);
+.confirm-dialog.danger h2 {
+  color: var(--color-danger);
 }
 
 .confirm-dialog h2 {
@@ -379,6 +379,10 @@ button:disabled {
 .confirm-dialog .row-actions {
   flex: 0 0 auto;
   justify-content: flex-end;
+}
+
+.confirm-dialog .row-actions button {
+  min-width: 96px;
 }
 
 /* ---------- Layout helpers ---------- */
@@ -691,7 +695,7 @@ button:disabled {
   min-width: 0;
   background: var(--surface);
   border: 1px solid var(--line);
-  border-radius: var(--radius-lg);
+  border-radius: var(--radius-panel);
   box-shadow: var(--shadow-card);
   padding: 16px 18px;
   overflow: hidden;
@@ -709,11 +713,9 @@ button:disabled {
   background: transparent;
 }
 
-.stat-card.accent::after { background: var(--color-accent); }
-.stat-card.success::after { background: var(--color-success-mark); }
-.stat-card.warning::after { background: var(--color-warning); }
-.stat-card.danger::after { background: var(--color-danger); }
-.stat-card.info::after { background: var(--color-info); }
+.stat-card.success strong { color: var(--color-success); }
+.stat-card.warning strong { color: var(--color-warning); }
+.stat-card.danger strong { color: var(--color-danger); }
 
 .stat-card span,
 .metric span,
@@ -953,10 +955,11 @@ button:disabled {
   gap: 8px;
   padding: 10px;
   overflow: auto;
-  border: 1px solid color-mix(in srgb, var(--color-accent) 22%, var(--line));
+  border: 1px solid var(--glass-stroke);
   border-radius: var(--radius-lg);
-  background: var(--color-surface-elevated);
-  box-shadow: var(--shadow-popover);
+  background: var(--glass-thick);
+  backdrop-filter: var(--glass-filter);
+  box-shadow: var(--glass-specular), 0 0 0 1px var(--glass-hairline), var(--shadow-popover);
   transform-origin: top left;
   animation: nd-pop-in var(--duration-base) var(--ease-out) backwards;
 }
@@ -987,10 +990,11 @@ button:disabled {
 
 .ai-rewrite-menu-actions button {
   width: 100%;
-  min-height: 34px;
+  min-height: 32px;
   justify-content: flex-start;
   text-align: left;
   border-color: transparent;
+  border-radius: calc(var(--radius-lg) - 6px);
   background: transparent;
   box-shadow: none;
 }
@@ -1018,11 +1022,12 @@ button:disabled {
   max-height: calc(100dvh - 40px);
   display: flex;
   flex-direction: column;
-  border: 1px solid var(--line);
-  border-radius: var(--radius-xl);
-  background: var(--color-surface-elevated);
+  border: 1px solid var(--glass-stroke);
+  border-radius: 22px;
+  background: var(--glass-thick);
+  backdrop-filter: var(--glass-filter);
   color: var(--ink);
-  box-shadow: var(--shadow-overlay);
+  box-shadow: var(--glass-specular), 0 0 0 1px var(--glass-hairline), var(--shadow-overlay);
   overflow: hidden;
   animation: nd-slide-up var(--duration-slow) var(--ease-out) backwards;
 }
@@ -1043,8 +1048,8 @@ button:disabled {
 .ai-rewrite-result-header span,
 .ai-rewrite-result-status { color: var(--color-text-muted); font-size: var(--text-xs); }
 .ai-rewrite-result-controls { justify-content: space-between; padding-block: 8px; }
-.ai-rewrite-result-controls .tab-row { margin: 0; display: flex; gap: 2px; padding: 3px; border: 1px solid var(--line); border-radius: var(--radius-md); background: var(--color-surface-soft); }
-.ai-rewrite-result-controls .tab-row button { min-height: 28px; padding: 4px 10px; border: 0; border-radius: var(--radius-sm); background: transparent; color: var(--muted); font: inherit; font-size: var(--text-xs); transition: background var(--duration-fast) ease, color var(--duration-fast) ease; }
+.ai-rewrite-result-controls .tab-row { margin: 0; display: flex; gap: 2px; padding: 3px; border: 0; border-radius: var(--radius-pill); background: var(--pressed); }
+.ai-rewrite-result-controls .tab-row button { min-height: 28px; padding: 4px 12px; border: 0; border-radius: var(--radius-pill); background: transparent; color: var(--muted); font: inherit; font-size: var(--text-xs); transition: background var(--duration-fast) ease, color var(--duration-fast) ease; }
 .ai-rewrite-result-controls .tab-row button.active { background: var(--color-surface-elevated); color: var(--ink); box-shadow: 0 1px 2px rgba(23, 27, 36, 0.12); }
 .ai-rewrite-result-content { min-height: 0; overflow: auto; padding: 0 16px 12px; }
 .ai-rewrite-result-content pre { white-space: pre-wrap; overflow-wrap: anywhere; max-height: 180px; overflow: auto; padding: 10px 12px; border-radius: var(--radius-md); background: var(--paper); color: var(--paper-ink); font-family: var(--font-prose); font-size: 15px; line-height: 1.85; }
@@ -1052,7 +1057,7 @@ button:disabled {
 .ai-rewrite-result-text { width: 100%; min-height: 180px; max-height: 45dvh; resize: vertical; border-color: var(--paper-line); background: var(--paper); color: var(--paper-ink); font-family: var(--font-prose); font-size: 15px; line-height: 1.85; }
 .ai-rewrite-result-refine { display: flex; gap: 8px; margin-top: 10px; }
 .ai-rewrite-result-refine input { flex: 1; min-width: 0; }
-.ai-rewrite-result-footer { border-top: 1px solid var(--line); justify-content: flex-end; background: var(--color-surface-soft); }
+.ai-rewrite-result-footer { border-top: 1px solid var(--glass-hairline); justify-content: flex-end; }
 .ai-rewrite-result-panel.collapsed { width: min(300px, calc(100vw - 40px)); }
 .ai-rewrite-result-panel.collapsed .ai-rewrite-result-header { border-bottom: 0; }
 
@@ -1254,7 +1259,7 @@ details[open] > :not(summary) {
   animation: nd-pop-out 160ms var(--ease-in) forwards;
 }
 
-/* Lists of cards arrive one after another; the delay caps at the eighth item so long lists stay quick. */
+/* Lists of cards arrive one after another; the delay caps at the sixth item so the whole list lands within ~150ms. */
 :is(.home-project-list, .inbox-event-list, .hard-canon-list, .timeline-list, .director-progress-list, .stage-summary-view .summary-list) > * {
   animation: nd-rise-in var(--duration-slow) var(--ease-out) backwards;
   animation-delay: calc(var(--stagger-i, 0) * var(--stagger-step));
@@ -1264,6 +1269,4 @@ details[open] > :not(summary) {
 :is(.home-project-list, .inbox-event-list, .hard-canon-list, .timeline-list, .director-progress-list, .stage-summary-view .summary-list) > :nth-child(3) { --stagger-i: 2; }
 :is(.home-project-list, .inbox-event-list, .hard-canon-list, .timeline-list, .director-progress-list, .stage-summary-view .summary-list) > :nth-child(4) { --stagger-i: 3; }
 :is(.home-project-list, .inbox-event-list, .hard-canon-list, .timeline-list, .director-progress-list, .stage-summary-view .summary-list) > :nth-child(5) { --stagger-i: 4; }
-:is(.home-project-list, .inbox-event-list, .hard-canon-list, .timeline-list, .director-progress-list, .stage-summary-view .summary-list) > :nth-child(6) { --stagger-i: 5; }
-:is(.home-project-list, .inbox-event-list, .hard-canon-list, .timeline-list, .director-progress-list, .stage-summary-view .summary-list) > :nth-child(7) { --stagger-i: 6; }
-:is(.home-project-list, .inbox-event-list, .hard-canon-list, .timeline-list, .director-progress-list, .stage-summary-view .summary-list) > :nth-child(n + 8) { --stagger-i: 7; }
+:is(.home-project-list, .inbox-event-list, .hard-canon-list, .timeline-list, .director-progress-list, .stage-summary-view .summary-list) > :nth-child(n + 6) { --stagger-i: 5; }

@@ -3,14 +3,15 @@ import type { CancelAiCallResult } from '../../shared/ipc/ipcTypes'
 import { normalizeAIError, parseWithFallback } from '../AIJsonParser'
 import { fallbackResult, isTruncatedFinishReason } from './AIResponseNormalizer'
 import { formatSchemaValidationError, type AISchemaValidator } from './AISchemaValidator'
-import type { AIJsonClient, AIRequestControl } from './AIJsonClient'
-import { createRendererAITransport, type AIChatCompletionTransport } from './AITransport'
+import { getRejectedChapterEnvelope, type AIJsonClient, type AIRequestControl } from './AIJsonClient'
+import { createRendererAITransport, projectUsageContext, type AIChatCompletionTransport } from './AITransport'
 
 export class AIClient implements AIJsonClient {
   constructor(
     private readonly settings?: AppSettings,
     private readonly transport: AIChatCompletionTransport = createRendererAITransport(),
-    private readonly runId?: string
+    private readonly runId?: string,
+    private readonly projectId?: string
   ) {}
 
   private hasApiConfig(): boolean {
@@ -27,13 +28,12 @@ export class AIClient implements AIJsonClient {
     validate?: AISchemaValidator,
     requestControl?: AIRequestControl
   ): Promise<AIResult<T>> {
-    if (!this.settings || !this.hasApiConfig()) {
-      return fallbackResult(fallback)
-    }
-
+    if (!this.settings) return fallbackResult(fallback)
     try {
+      if (!this.hasApiConfig() && !(await this.transport.isManagedEndpoint?.(this.settings.baseUrl))) return fallbackResult(fallback)
       const response = await this.transport.chatCompletion({
         settings: this.settings,
+        usageContext: projectUsageContext(this.projectId, requestControl?.phase),
         runId: requestControl?.runId ?? this.runId,
         clientCallId: requestControl?.clientCallId,
         messages: [
@@ -64,6 +64,8 @@ export class AIClient implements AIJsonClient {
         }
       }
 
+      const rejected = getRejectedChapterEnvelope(response, normalize, validate)
+      if (rejected) return rejected
       try {
         const parsed = parseWithFallback(response.content, 'AI 返回内容')
         if (!parsed.ok) throw new Error(parsed.parseError)

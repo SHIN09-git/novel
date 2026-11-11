@@ -5,6 +5,7 @@ import type {
 } from '../../shared/ipc/ipcTypes'
 import type { RedundancyReport, NoveltyAuditResult, QualityGateReport } from '../../shared/types'
 import type { IAIService } from './AIService'
+import type { AIJsonTransport } from '../../services/ai/AITransport'
 
 export class DiagnosticsService {
   constructor(private readonly aiTransport: IAIService) {}
@@ -20,16 +21,18 @@ export class DiagnosticsService {
   }
 
   evaluateQualityGate(request: DiagnosticsEvaluateQualityGateRequest): Promise<QualityGateReport> {
-    return this.evaluateQualityGateLazy(request)
+    // A library switch while loading the reviewers must not redirect this request's receipts.
+    const transport = this.aiTransport.bindToCurrentStorage?.() ?? this.aiTransport
+    return this.evaluateQualityGateLazy({ ...request }, transport)
   }
 
-  private async evaluateQualityGateLazy(request: DiagnosticsEvaluateQualityGateRequest): Promise<QualityGateReport> {
+  private async evaluateQualityGateLazy(request: DiagnosticsEvaluateQualityGateRequest, transport: AIJsonTransport): Promise<QualityGateReport> {
     const [{ QualityGateService }, { QualityGateAI }, { MainAIJsonClient }] = await Promise.all([
       import('../../services/QualityGateService'),
       import('../../services/ai/QualityGateAI'),
       import('./MainAIJsonClient')
     ])
-    const aiClient = new MainAIJsonClient(request.settings, this.aiTransport, request.runId)
+    const aiClient = new MainAIJsonClient(request.settings, transport, request.runId, request.projectId)
     const qualityGateAI = new QualityGateAI(aiClient)
     return QualityGateService.evaluateChapterDraft({
         projectId: request.projectId,
@@ -41,6 +44,7 @@ export class DiagnosticsService {
         chapterPlan: request.chapterPlan,
         consistencyReports: request.consistencyReports ?? [],
         noveltyAuditResult: request.noveltyAuditResult ?? null,
+        hardCanonAudit: request.hardCanonAudit,
         redundancyReport: request.redundancyReport ?? null,
         characterStateFacts: request.characterStateFacts,
         characters: request.characters ?? [],

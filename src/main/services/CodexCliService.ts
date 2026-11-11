@@ -17,6 +17,8 @@ interface CodexCliCompletionInput {
   maxTokens: number
   signal: AbortSignal
   timeoutMs: number
+  onDispatch?: () => void
+  onTurnFinished?: (metadata: { usage?: unknown; request_id?: unknown }) => void
 }
 
 interface ProcessResult {
@@ -39,8 +41,23 @@ function trimBom(value: string): string {
   return value.replace(/^\uFEFF/, '').trim()
 }
 
-function safeErrorMessage(error: unknown): string {
-  return error instanceof Error ? error.message : String(error)
+function cancelledError(): Error {
+  return Object.assign(new Error('Codex CLI 调用已取消。'), { code: 'CODEX_CLI_CANCELLED' })
+}
+
+function readExecEvents(stdout: string, onTurnFinished: CodexCliCompletionInput['onTurnFinished']): string {
+  let finalMessage = ''
+  for (const line of stdout.split(/\r?\n/)) {
+    let event
+    try { event = JSON.parse(line) } catch { continue }
+    if (event?.type === 'turn.completed' || event?.type === 'turn.failed') {
+      onTurnFinished?.({ usage: event.usage ?? event.error?.usage, request_id: event.request_id ?? event.error?.request_id })
+    } else if (event?.type === 'item.completed' && event.item?.type === 'agent_message' &&
+        (!event.item.phase || event.item.phase === 'final_answer') && typeof event.item.text === 'string') {
+      finalMessage = event.item.text.trim()
+    }
+  }
+  return finalMessage
 }
 
 function validateCodexCommand(command: string): string {
@@ -112,9 +129,12 @@ async function runCapturedProcess(
     stdin?: string
     signal?: AbortSignal
     timeoutMs: number
+    onSpawn?: () => void
+    onStdoutCaptured?: (stdout: string) => void
   }
 ): Promise<ProcessResult> {
   const invocation = createSpawnInvocation(executable, args)
+  if (options.signal?.aborted) throw cancelledError()
   const child = spawn(invocation.command, invocation.args, {
     cwd: options.cwd,
     env: { ...process.env, NO_COLOR: '1', FORCE_COLOR: '0' },
@@ -146,18 +166,20 @@ async function runCapturedProcess(
       const forceKill = setTimeout(() => child.kill('SIGKILL'), 150)
       forceKill.unref()
     }
-    const onAbort = () => failAfterClose(new Error('Codex CLI 调用已取消。'))
+    const onAbort = () => failAfterClose(cancelledError())
     const timeout = setTimeout(() => {
-      failAfterClose(new Error(`Codex CLI 调用超过 ${Math.ceil(options.timeoutMs / 1_000)} 秒，已终止。`))
+      failAfterClose(Object.assign(new Error(`Codex CLI 调用超过 ${Math.ceil(options.timeoutMs / 1_000)} 秒，已终止。`),
+        { code: 'CODEX_CLI_TIMEOUT', timeoutMs: options.timeoutMs }))
     }, options.timeoutMs)
 
     options.signal?.addEventListener('abort', onAbort, { once: true })
     if (options.signal?.aborted) onAbort()
 
+    if (options.onSpawn) child.once('spawn', options.onSpawn)
     child.stdout.on('data', (chunk: Buffer) => {
       stdoutBytes += chunk.length
       if (stdoutBytes > MAX_CAPTURE_BYTES) {
-        failAfterClose(new Error('Codex CLI 标准输出过大，已终止。'))
+        failAfterClose(Object.assign(new Error('Codex CLI 标准输出过大，已终止。'), { code: 'CODEX_CLI_OUTPUT_LIMIT' }))
         return
       }
       stdoutChunks.push(chunk)
@@ -165,28 +187,36 @@ async function runCapturedProcess(
     child.stderr.on('data', (chunk: Buffer) => {
       stderrBytes += chunk.length
       if (stderrBytes > MAX_CAPTURE_BYTES) {
-        failAfterClose(new Error('Codex CLI 错误输出过大，已终止。'))
+        failAfterClose(Object.assign(new Error('Codex CLI 错误输出过大，已终止。'), { code: 'CODEX_CLI_OUTPUT_LIMIT' }))
         return
       }
       stderrChunks.push(chunk)
     })
-    child.once('error', (error) => {
+    child.once('error', () => {
       if (settled) return
       settled = true
       cleanup()
-      reject(error)
+      reject(Object.assign(new Error('无法启动 Codex CLI。'), { code: 'CODEX_CLI_SPAWN' }))
     })
     child.once('close', (exitCode) => {
       if (settled) return
       settled = true
       cleanup()
+      // A failed/killed exec may already have reported usage before it exited.
+      const stdout = Buffer.concat(stdoutChunks).toString('utf8')
+      try {
+        options.onStdoutCaptured?.(stdout)
+      } catch (error) {
+        reject(error)
+        return
+      }
       if (terminalError) {
         reject(terminalError)
         return
       }
       resolvePromise({
         exitCode,
-        stdout: Buffer.concat(stdoutChunks).toString('utf8'),
+        stdout,
         stderr: Buffer.concat(stderrChunks).toString('utf8')
       })
     })
@@ -229,7 +259,7 @@ export class CodexCliService {
         timeoutMs: STATUS_TIMEOUT_MS
       })
       if (versionResult.exitCode !== 0) {
-        throw new Error(trimBom(versionResult.stderr) || '无法读取 Codex CLI 版本。')
+        throw new Error('无法读取 Codex CLI 版本。')
       }
       const loginResult = await runCapturedProcess(executable, ['login', 'status'], {
         timeoutMs: STATUS_TIMEOUT_MS
@@ -247,34 +277,36 @@ export class CodexCliService {
         authenticated,
         authenticationMode,
         resolvedPath: executable,
-        version: trimBom(versionResult.stdout || versionResult.stderr),
+        version: /^codex-cli \d+\.\d+\.\d+(?:-[A-Za-z0-9.-]{1,40})?$/m.exec(trimBom(versionResult.stdout))?.[0],
         message:
           authenticated && authenticationMode === 'chatgpt'
-            ? 'Codex CLI 已安装，并已通过 ChatGPT 登录，可以使用当前 Codex 计划额度。'
+            ? 'Codex CLI 已通过 ChatGPT 登录；未查询订阅剩余额度。'
             : authenticated && authenticationMode === 'api_key'
               ? 'Codex CLI 当前使用 API Key 登录；调用可能计入 API 账单，而不是 ChatGPT/Codex 计划额度。'
               : authenticated
                 ? 'Codex CLI 已登录，但无法确认登录方式。请在终端运行 codex login status 核对是否为 ChatGPT 登录。'
             : 'Codex CLI 已安装，但尚未登录。请先在终端运行 codex login。'
       }
-    } catch (error) {
+    } catch {
       return {
         ok: true,
         available: false,
         authenticated: false,
         authenticationMode: 'unknown',
-        message: `未找到可用的 Codex CLI：${safeErrorMessage(error)}`
+        message: '未能确认 Codex CLI 状态，请检查安装路径和执行权限。'
       }
     }
   }
 
   async chatCompletion(input: CodexCliCompletionInput): Promise<ChatCompletionResult> {
+    if (input.signal.aborted) throw cancelledError()
     const executable = await this.resolveExecutable(input.command)
     const model = validateCodexModel(input.model)
     const workspace = await mkdtemp(join(tmpdir(), 'novel-director-codex-'))
     const outputPath = join(workspace, 'last-message.txt')
     const args = [
       'exec',
+      '--json',
       '--skip-git-repo-check',
       '--sandbox',
       'read-only',
@@ -294,25 +326,28 @@ export class CodexCliService {
     )
 
     try {
+      let finalMessage = ''
       const result = await runCapturedProcess(executable, args, {
         cwd: workspace,
         stdin: formatCodexCliPrompt(input.messages, input.maxTokens),
         signal: input.signal,
+        onSpawn: input.onDispatch,
+        onStdoutCaptured: stdout => { finalMessage = readExecEvents(stdout, input.onTurnFinished) },
         timeoutMs: input.timeoutMs
       })
       if (result.exitCode !== 0) {
         const stderr = trimBom(result.stderr).slice(0, 800)
         if (/login|not authenticated|unauthorized|sign in/i.test(stderr)) {
-          throw new Error('Codex CLI 尚未登录，请先在终端运行 codex login。')
+          throw Object.assign(new Error('Codex CLI 身份验证失败。'), { code: 'CODEX_CLI_AUTH' })
         }
-        throw new Error(`Codex CLI 执行失败（退出码 ${result.exitCode ?? 'unknown'}）：${stderr || '没有错误详情。'}`)
+        throw Object.assign(new Error('Codex CLI 执行失败。'), { code: 'CODEX_CLI_EXIT', exitCode: result.exitCode })
       }
 
       let content = ''
       try {
         content = trimBom(await readFile(outputPath, 'utf8'))
       } catch {
-        content = trimBom(result.stdout)
+        content = finalMessage
       }
       if (!content) {
         this.logger.warn('Codex CLI returned an empty final message.')

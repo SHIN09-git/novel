@@ -65,12 +65,12 @@ export function useChapterContinuityActions({ selected, selectedBridge, project,
         ? current.chapterContinuityBridges.map((item) => (item.id === existing.id ? bridge : item))
         : [bridge, ...current.chapterContinuityBridges]
     }))
-    if (!saved.ok) return
-    setAiMessage('已保存下一章衔接状态。')
+    if (saved.ok) setAiMessage('已保存下一章衔接状态。')
+    return saved
   }
 
   async function updateContinuityBridgeField(field: keyof ChapterContinuityBridgeSuggestion, value: string) {
-    await saveContinuityBridge({ ...(selectedBridge ?? emptyBridgeSuggestion), [field]: value })
+    return saveContinuityBridge({ ...(selectedBridge ?? emptyBridgeSuggestion), [field]: value })
   }
 
   return {

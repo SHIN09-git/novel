@@ -165,9 +165,27 @@ function sentenceRangeAt(ranges: SentenceRange[], index: number): SentenceRange 
 
 export function keywordOccurrences(text: string, keywords: string[], radius = 130): KeywordOccurrence[] {
   if (!text || !keywords.length) return []
+  return createKeywordMatcher(text)(keywords, radius)
+}
+
+// Reuse text preparation across dictionaries within one synchronous audit only.
+export function createKeywordMatcher(text: string): (keywords: string[], radius?: number) => KeywordOccurrence[] {
   const normalizedText = normalizeWithOffsets(text)
-  const trie = trieForKeywords(keywords)
   const boundaries = chineseBoundaries(text)
+  const ranges = sentenceRanges(text)
+  return (keywords, radius = 130) => matchPreparedText(text, normalizedText, boundaries, ranges, keywords, radius)
+}
+
+function matchPreparedText(
+  text: string,
+  normalizedText: NormalizedText,
+  boundaries: Set<number> | null,
+  ranges: SentenceRange[],
+  keywords: string[],
+  radius: number
+): KeywordOccurrence[] {
+  if (!text || !keywords.length) return []
+  const trie = trieForKeywords(keywords)
   const candidates: Array<{ keyword: string; index: number; end: number }> = []
 
   // One bounded dictionary scan replaces one full-text scan per keyword.
@@ -196,7 +214,6 @@ export function keywordOccurrences(text: string, keywords: string[], radius = 13
     occupiedUntil = candidate.end
   }
 
-  const ranges = sentenceRanges(text)
   const seen = new Set<string>()
   const counts = new Map<string, number>()
   const occurrences: KeywordOccurrence[] = []

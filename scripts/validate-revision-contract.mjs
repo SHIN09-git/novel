@@ -140,8 +140,8 @@ async function main() {
       fullPrompt.includes('revisionScope') &&
         fullPrompt.includes('full') &&
         fullPrompt.includes('fullChapterText') &&
-        fullPrompt.includes('targetRange') &&
-        fullPrompt.includes('<none>') &&
+        !fullPrompt.includes('targetRange') &&
+        !fullPrompt.includes('<none>') &&
         fullPrompt.includes('revisedText') &&
         fullPrompt.includes('lieflat-less-ai-tone 白名单式改写合同') &&
         fullPrompt.includes('未命中规则的文字必须逐字保留') &&

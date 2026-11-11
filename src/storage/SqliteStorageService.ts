@@ -2,13 +2,19 @@ import { randomUUID } from 'node:crypto'
 import { mkdir } from 'node:fs/promises'
 import { createRequire } from 'node:module'
 import { dirname } from 'node:path'
-import type { AppData, CandidateDecisionCommand, ChapterCommitBundle, GenerationRunBundle, RevisionCommitBundle } from '../shared/types'
-import type { CandidateDecisionWriteResult, StorageWriteResult } from '../shared/ipc/ipcTypes'
-import { EMPTY_APP_DATA, sanitizeAppDataForPersistence } from '../shared/defaults'
-import { applyChapterCommitBundleToAppData, validateChapterCommitBundle } from '../services/ChapterCommitBundleService'
+import type { AppData, CandidateDecisionCommand, Character, CharacterCardReviewCommand, ChapterCommitBundle, ChapterWritebackFailure, GenerationRunBundle, RevisionCommitBundle } from '../shared/types'
+import type { CandidateDecisionWriteResult, CharacterCardReviewWriteResult, StorageWriteResult } from '../shared/ipc/ipcTypes'
+import { EMPTY_APP_DATA, normalizeAppData, sanitizeAppDataForPersistence } from '../shared/defaults'
+import { normalizeChapterWritebackFailure } from '../shared/normalizers/chapterWritebackFailures'
+import { applyCharacterCardReview, CHARACTER_CARD_REVIEW_COLLECTIONS } from '../services/characterState/cardReview'
+import { applyChapterCommitBundleToAppData } from '../services/ChapterCommitBundleService'
 import { validateGenerationRunBundle, type GenerationRunBundleValidationContext } from '../services/GenerationRunBundleService'
-import { applyRevisionCommitBundleToAppData, validateRevisionCommitBundle } from '../services/RevisionCommitBundleService'
+import { applyRevisionCommitBundleToAppData } from '../services/RevisionCommitBundleService'
 import { JsonStorageService } from './JsonStorageService'
+import { readSqliteChapterTitles, readJsonChapterTitles, sqliteTitleVersionIds } from './chapterTitleState'
+import { decideChapterTitleCommit } from '../services/ChapterTitleRenameService'
+import type { ChapterTitleActor, ChapterTitleCommit } from '../shared/types/chapterTitle'
+import type { ChapterTitleWriteResult } from '../shared/ipc/ipcTypes'
 import {
   StorageRevisionConflictError,
   resolveJsonStoragePath,
@@ -19,7 +25,6 @@ import {
 import {
   chapterCommitEntityEntries,
   generationBundleEntityEntries,
-  isPersistedCommitBundle,
   revisionCommitEntityEntries
 } from './sqlite/sqliteBundleEntries'
 import {
@@ -31,6 +36,7 @@ import { writeSqliteSnapshotEntities } from './sqlite/sqliteSnapshotWriter'
 import { readGenerationBundleValidationContext } from './sqlite/sqliteGenerationContext'
 import { executeSqliteCandidateDecision } from './sqlite/sqliteCandidateDecisions'
 import { SETTINGS_ROW_ID } from './sqlite/sqliteSchema'
+import { sqliteUsageHistory } from './sqlite/sqliteProjectUsage'
 import { isSqliteEmpty, SqliteInitialization } from './sqlite/sqliteInitialization'
 import type {
   AppDataArrayKey,
@@ -78,12 +84,31 @@ export async function loadSqliteSnapshotReadonly(storagePath: string): Promise<S
   }))
 }
 
+export async function loadChapterTitlesReadonly(storagePath: string, projectId: string) {
+  if (storagePath.toLowerCase().endsWith('.json')) {
+    const { state, revision } = await readJsonChapterTitles(storagePath, projectId)
+    return { state, revision }
+  }
+  return readSqliteReadonly(storagePath, db => readSqliteChapterTitles(db, projectId))
+}
+
+export function loadSqliteUsageHistoryReadonly(storagePath: string, projectId: string) {
+  return readSqliteReadonly(storagePath, db => ({ history: sqliteUsageHistory(db, projectId), revision: currentRevisionFromDatabase(db) }))
+}
+
 export async function loadSqliteCollectionsReadonly(
-  storagePath: string, collections: readonly AppDataArrayKey[]
+  storagePath: string, collections: readonly AppDataArrayKey[], projectSelector?: string
 ): Promise<{ data: Partial<AppData>; revision: string }> {
-  return readSqliteReadonly(storagePath, (db) => ({
-    data: readAppDataCollectionsFromDatabase(db, collections), revision: currentRevisionFromDatabase(db)
-  }))
+  return readSqliteReadonly(storagePath, (db) => {
+    let projectId: string | undefined
+    if (projectSelector !== undefined) {
+      const row = db.prepare("SELECT id FROM entities WHERE collection = 'projects' AND (id = ? OR title = ?) ORDER BY (id = ?) DESC, id LIMIT 1")
+        .get(projectSelector, projectSelector, projectSelector)
+      if (typeof row?.id !== 'string') throw new Error(`Project not found: ${projectSelector}`)
+      projectId = row.id
+    }
+    return { data: readAppDataCollectionsFromDatabase(db, collections, projectId), revision: currentRevisionFromDatabase(db) }
+  })
 }
 
 export class SqliteStorageService implements StorageService {
@@ -179,32 +204,86 @@ export class SqliteStorageService implements StorageService {
     }, (db) => readGenerationBundleValidationContext(db, bundle.jobId))
   }
 
-  async saveChapterCommitBundle(bundle: ChapterCommitBundle, expectedRevision?: string): Promise<StorageWriteResult> {
+  async saveChapterCommitBundle(bundle: ChapterCommitBundle, expectedRevision?: string, onWriteStarted?: () => void): Promise<StorageWriteResult> {
     return this.saveEntityBundle<AppData>(expectedRevision, (existing) => {
-      validateChapterCommitBundle(bundle, existing)
-      if (isPersistedCommitBundle(existing, bundle)) return []
       const nextData = applyChapterCommitBundleToAppData(existing, bundle)
-      return chapterCommitEntityEntries(bundle, nextData)
-    }, (db) => this.isEmpty(db) ? EMPTY_APP_DATA : this.readAppData(db))
+      return nextData === existing ? [] : chapterCommitEntityEntries(bundle, nextData)
+    }, (db) => this.isEmpty(db) ? EMPTY_APP_DATA : this.readAppData(db), onWriteStarted)
   }
 
-  async saveRevisionCommitBundle(bundle: RevisionCommitBundle, expectedRevision?: string): Promise<StorageWriteResult> {
+  async saveRevisionCommitBundle(bundle: RevisionCommitBundle, expectedRevision?: string, onWriteStarted?: () => void): Promise<StorageWriteResult> {
     return this.saveEntityBundle<AppData>(expectedRevision, (existing) => {
-      validateRevisionCommitBundle(bundle, existing)
-      if (isPersistedCommitBundle(existing, bundle)) return []
       const nextData = applyRevisionCommitBundleToAppData(existing, bundle)
-      return revisionCommitEntityEntries(bundle, nextData)
-    }, (db) => this.isEmpty(db) ? EMPTY_APP_DATA : this.readAppData(db))
+      return nextData === existing ? [] : revisionCommitEntityEntries(bundle, nextData)
+    }, (db) => this.isEmpty(db) ? EMPTY_APP_DATA : this.readAppData(db), onWriteStarted)
+  }
+
+  async recordChapterWritebackFailureIfUncommitted(row: ChapterWritebackFailure): Promise<void> {
+    const failure = normalizeChapterWritebackFailure(row)
+    if (!failure) return
+    const db = await this.open()
+    const receiptCollection = failure.kind === 'chapter_commit' ? 'chapterCommitBundles' : 'revisionCommitBundles'
+    const updatedAt = nowIso()
+    db.transaction(() => {
+      // Check absence as part of the INSERT, after rollback and serialized with competing writers.
+      const result = db.prepare(`INSERT INTO entities (
+        collection, id, project_id, chapter_id, job_id, character_id, chapter_order, title, updated_at, json
+      ) SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
+        WHERE EXISTS (SELECT 1 FROM entities WHERE collection = 'projects' AND id = ?)
+          AND NOT EXISTS (SELECT 1 FROM entities WHERE (collection, id) IN (
+            (?, ?), ('chapterVersions', ?), ('chapterWritebackFailures', ?)
+          ))`).run(...entityInsertValues({ collection: 'chapterWritebackFailures', value: failure }, 0, updatedAt),
+          failure.projectId, receiptCollection, failure.commitId, failure.versionId, failure.id) as { changes: number }
+      if (result.changes) this.writeRevisionMeta(db, `${updatedAt}-${randomUUID()}`, updatedAt)
+    })()
   }
 
   async executeCandidateDecision(command: CandidateDecisionCommand, expectedRevision?: string): Promise<CandidateDecisionWriteResult> {
     return executeSqliteCandidateDecision(await this.open(), this.storagePath, command, expectedRevision)
   }
 
+  async reviewCharacterCard(command: CharacterCardReviewCommand, expectedRevision: string): Promise<CharacterCardReviewWriteResult> {
+    if (!expectedRevision) throw new StorageRevisionConflictError()
+    let character!: Character
+    const saved = await this.saveEntityBundle(expectedRevision, (data: AppData) => {
+      character = applyCharacterCardReview(data, command, nowIso())
+      return [{ collection: 'characters', value: character }]
+    }, db => normalizeAppData(readAppDataCollectionsFromDatabase(db, CHARACTER_CARD_REVIEW_COLLECTIONS, command.projectId)))
+    return { ...saved, character }
+  }
+
+  async renameChapterTitles(commit: ChapterTitleCommit, actor: ChapterTitleActor): Promise<ChapterTitleWriteResult> {
+    const db = await this.open()
+    return db.transaction((): ChapterTitleWriteResult => {
+      const snapshot = readSqliteChapterTitles(db, commit.command.projectId)
+      const { receipt, replayed } = decideChapterTitleCommit(snapshot.state, commit, this.storagePath, snapshot.revision, actor,
+        () => sqliteTitleVersionIds(db, snapshot.state.projectId))
+      let revision = snapshot.revision
+      if (!replayed) {
+        const update = db.prepare(`UPDATE entities SET title = ?, updated_at = ?,
+          json = json_set(json, '$.title', ?, '$.updatedAt', ?)
+          WHERE collection = 'chapters' AND project_id = ? AND id = ? AND chapter_order = ?
+            AND json_extract(json, '$.title') = ?`)
+        for (const row of receipt.rows) {
+          if (row.oldTitle === row.newTitle) continue
+          const { changes } = update.run(row.newTitle, receipt.createdAt, row.newTitle, receipt.createdAt,
+            receipt.projectId, row.chapterId, row.chapterOrder, row.oldTitle) as { changes: number }
+          if (changes !== 1) throw new StorageRevisionConflictError()
+        }
+        this.writeEntityEntries(db, [{ collection: 'chapterTitleReceipts', value: receipt }], receipt.createdAt, false)
+        revision = `${receipt.createdAt}-${randomUUID()}`
+        this.writeRevisionMeta(db, revision, receipt.createdAt)
+      }
+      return { ok: true, storagePath: this.storagePath, revision, updatedAt: receipt.createdAt,
+        savedCollections: replayed ? [] : ['chapters', 'chapterTitleReceipts'], receipt, replayed }
+    })()
+  }
+
   private async saveEntityBundle<TContext>(
     expectedRevision: string | undefined,
     buildEntries: (existing: TContext) => SqliteEntityEntry[],
-    readExisting: (db: SqliteDatabase) => TContext
+    readExisting: (db: SqliteDatabase) => TContext,
+    onWriteStarted?: () => void
   ): Promise<StorageWriteResult> {
     const db = await this.open()
     const updatedAt = nowIso()
@@ -220,6 +299,7 @@ export class SqliteStorageService implements StorageService {
         persistedRevision = this.currentRevision(db)
         return
       }
+      onWriteStarted?.()
       this.writeEntityEntries(db, entries, updatedAt, true)
       this.writeRevisionMeta(db, revision, updatedAt)
     })

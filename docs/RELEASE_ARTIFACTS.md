@@ -19,7 +19,31 @@ Novel Director 的本地目录按用途分为三层：
 
 小说项目和 SQLite 用户数据库不存放在这些目录中，整理发行产物不会移动或删除用户数据。
 
-### 当前本地发行与清理（2026-10-01）
+### 当前本地发行（2026-11-11）
+
+`0.1.6-preview.20` 合并了[长篇完稿修复 P0–P2](./LONG_NOVEL_COMPLETION_REPAIR_PLAN.md)。安装请用 `release/Novel Director Setup 0.1.6-preview.20.exe`；不安装可直接打开 `release/win-unpacked/Novel Director.exe`。打开项目，在**设置 → 运行信息**中核对应用版本、运行方式和程序位置。已安装的旧版不会因更新仓库目录而自动升级。
+
+本次使用隔离依赖打包，保留命令行用的 Node SQLite 绑定。临时与正式路径的 Windows 成品均通过启动与 SQLite 检查；包内 133 个构建文件与本次生产构建逐项相符。另将 NSIS 安装包释放到临时目录，128 个应用文件与对应的 `win-unpacked` 文件逐一比较，文件名和 SHA-256 均相同。可运行 `node scripts/verify-win-installer-payload.mjs` 复核，结果见 `release/INSTALLER_PAYLOAD_CHECK.json`。安装包未签名，本次验收没有覆盖本机已安装的应用。公开分发使用 [v0.1.6-preview.20 预发布](https://github.com/SHIN09-git/novel/releases/tag/v0.1.6-preview.20)；下载 Windows 安装包和同页的 `SHA256SUMS.txt` 配套校验。该标签保留安装包使用的 Electron 39.8.10 和 better-sqlite3 12.9.0，开发主线可使用更新的依赖。
+
+类型检查、生产构建、174 项回归通过。正式程序的 11 项功能记录见 `release/FUNCTIONAL_ACCEPTANCE.json`：包括 946 字草稿在 800 字上限下完整保留、审稿失败重启后不重写、硬规则阻断与去重、跨章余额与写回、费用、单章和六章导向、批量改名。使用临时书库和本机模型替身，未调用付费模型。桌面验收脚本应逐个运行：多套用例同时操作窗口时出现过读取界面超时，单独重跑保稿套件 7 项均通过。
+
+上一版完整保留在 `releases/archive/v0.1.6-preview.19-2026-11-11T10-41-50-069Z/`。安装包 SHA-256：`AA38B6DBCBA629591113D928617F4EA82EE9C9DCFDFD199E67A7A9CE4C0D50CE`。
+
+### 历史发行（2026-10-31）
+
+- 当前版本：`0.1.6-preview.19`，包括重复计算优化、按类型精简的修订指令和当前已有的 UI 调整。
+- 安装包：`release/Novel Director Setup 0.1.6-preview.19.exe`；直接运行：`release/win-unpacked/Novel Director.exe`。
+- 上一版完整保留在 `releases/archive/v0.1.6-preview.18-2026-10-31T05-21-28-601Z/`。本轮没有清理其他历史归档或用户数据。
+- 使用隔离依赖目录打包，Electron 39.8.10 / SQLite 12.9.0。复用的原生绑定先通过目标 Electron 实际查询，再通过成品启动检查；根目录 Node 绑定未改动。
+- Windows NSIS 打包、临时成品与正式发行路径的启动/SQLite smoke 通过，含 preload API 与中文 Novelty 正反例。包内 110 个 `out/` 文件与本次构建逐项 SHA-256 一致。
+
+类型检查、生产构建及 150/150 验证脚本通过。实际 `win-unpacked` 的七个主要页面在明暗主题下均能打开，保存 28 张截图；另完成 Prompt 构建、章节编辑自动保存、SQLite 回读及页面重载后正文一致性检查。没有 renderer 异常、AI 请求或遗留验收进程。记录：`tmp/visual-qa/hig-workspace/before-zO77gR/report.json`（页面加载与截图，不启用布局门槛）和 `tmp/preview19-functional-aMvx39/report.json`（功能复查）。
+
+限制：严格布局检查在 1024px 工作台视口发现横向溢出，记录于 `tmp/visual-qa/hig-workspace/after-cyEvRw/report.json`，因此完整视觉验收没有通过。本轮保留现有 UI，没有为打包重做布局；建议使用常规桌面窗口。没有执行真实模型生成，也没有覆盖安装或卸载测试。
+
+安装包 SHA-256：`86F760BE5AAE53FE2724556D40C7BC03B85A6B4D2382660DE58085A4FB77FFFB`。包仍未代码签名，也未上传 GitHub；没有覆盖系统中已有的安装目录。
+
+### 历史发行与清理（2026-10-01）
 
 - 当前版本：`0.1.6-preview.18`，包含 10 月 1 日已有的 Ink Desk 界面更新。本轮保留这些设计改动，没有重做界面或修改业务规则。
 - 安装包：`release/Novel Director Setup 0.1.6-preview.18.exe`。
@@ -73,7 +97,27 @@ Rebuilding the same version replaces generated output. Building a newer version 
 
 Novel projects and the SQLite user database are stored elsewhere. Organizing release artifacts does not move or delete user data.
 
-### Current Local Release and Cleanup (2026-10-01)
+### Current Local Release (2026-11-11)
+
+Preview.20 ships the [P0–P2 long-manuscript repairs](./LONG_NOVEL_COMPLETION_REPAIR_PLAN.md). Install `release/Novel Director Setup 0.1.6-preview.20.exe` or start `release/win-unpacked/Novel Director.exe`. In an open project, Settings → Runtime information shows the application version, packaged mode and executable path. An installed older copy is not automatically updated by a new repository build.
+
+Both staged and final executables passed isolated startup and SQLite checks. All 133 production build files matched the application archive; all 128 files extracted from the NSIS application payload matched the unpacked release by name and SHA-256. Recheck with `node scripts/verify-win-installer-payload.mjs`; see `release/INSTALLER_PAYLOAD_CHECK.json`. The unsigned installer was not installed over an existing copy during testing. Download the Windows installer and matching `SHA256SUMS.txt` from the [v0.1.6-preview.20 prerelease](https://github.com/SHIN09-git/novel/releases/tag/v0.1.6-preview.20). The tag retains the binary's Electron 39.8.10 and better-sqlite3 12.9.0; the development branch may use newer dependencies. The complete Preview.19 rollback is at `releases/archive/v0.1.6-preview.19-2026-11-11T10-41-50-069Z/`.
+
+Type checking, the production build and 174 regression scripts passed. `release/FUNCTIONAL_ACCEPTANCE.json` records 11 feature checks against the packaged runtime, including draft retention across a failed review and application restart. The tests used disposable books and loopback model responses, not a live provider. Run desktop suites sequentially: two UI reads timed out during overlapping runs; the standalone retention suite passed all seven cases.
+
+### Historical Release (2026-10-31)
+
+Preview.19 includes the duplicate-work optimizations, task-specific revision instructions and existing UI changes. Use `release/Novel Director Setup 0.1.6-preview.19.exe` or `release/win-unpacked/Novel Director.exe`. Preview.18 is preserved intact at `releases/archive/v0.1.6-preview.18-2026-10-31T05-21-28-601Z/`; no author data or other archives were removed.
+
+An isolated dependency tree packages Electron 39.8.10 with SQLite 12.9.0. The reused binding passes a real target-runtime query and packaged SQLite startup; the repository's Node binding is unchanged. NSIS packaging and both staged/published startup checks pass, including preload APIs and Chinese Novelty positive/negative cases. All 110 bundled output files match the current build by SHA-256.
+
+Typecheck, production build and all 150 validation scripts pass. Seven main routes open in both themes with 28 screenshots; separate packaged checks build a Prompt, edit and persist a chapter, verify SQLite readback and reload the saved text. No renderer exceptions, AI calls or surviving test processes. Evidence: `tmp/visual-qa/hig-workspace/before-zO77gR/report.json` (page loads/screenshots with layout gates disabled) and `tmp/preview19-functional-aMvx39/report.json`.
+
+The strict 1024px dashboard layout check still reports horizontal overflow (`tmp/visual-qa/hig-workspace/after-cyEvRw/report.json`), so this is not a full visual acceptance pass. Existing UI is preserved; use a normal desktop window. Paid-model generation and installer upgrade/uninstall lifecycle were not tested.
+
+Installer SHA-256: `86F760BE5AAE53FE2724556D40C7BC03B85A6B4D2382660DE58085A4FB77FFFB`. Still unsigned and local only; no GitHub upload or overwrite of an existing system installation.
+
+### Historical Release and Cleanup (2026-10-01)
 
 Preview.18 packages the existing October 1 Ink Desk UI updates without replacing the design or changing business rules. The current installer is `release/Novel Director Setup 0.1.6-preview.18.exe`; the executable is `release/win-unpacked/Novel Director.exe`. The complete Preview.17 rollback package remains in `releases/archive/v0.1.6-preview.17-2026-10-01T08-15-54-270Z/`.
 

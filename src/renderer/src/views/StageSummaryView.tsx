@@ -25,7 +25,7 @@ export function StageSummaryView({ data, project, saveData }: ProjectProps) {
     const selectedChapters = chapters.filter((chapter) => chapter.order >= chapterStart && chapter.order <= chapterEnd)
     if (selectedChapters.length === 0) return
     const { AIService } = await import('../../../services/AIService')
-    const aiService = new AIService(data.settings)
+    const aiService = new AIService(data.settings, { projectId: project.id })
     const draft = await aiService.generateStageSummary(selectedChapters)
     const timestamp = now()
     const summary: StageSummary = { ...draft, id: newId(), projectId: project.id, createdAt: timestamp, updatedAt: timestamp }

@@ -13,22 +13,32 @@ import type {
 } from '../shared/types'
 import { AIService as WorkflowAIService } from '../services/AIService'
 import type { AIChatCompletionTransport } from '../services/ai/AITransport'
-import { resolvePipelineRoleSettings, resolvePipelineRunSettings } from '../services/PipelineRunContextService'
+import { readChapterStepFragment } from '../shared/chapterStepFragment'
+import { getPipelineRoleForStep, resolvePipelineRoleSettings, resolvePipelineRunSettings } from '../services/PipelineRunContextService'
 import { PIPELINE_AI_ROLES } from '../shared/normalizers/pipelineRunConfig'
 import { PipelineRecipeService } from '../services/PipelineRecipeService'
 import { OPENING_READER_EMOTION_FALLBACK } from '../services/OpeningChapterContextPolicy'
 import { AIService as MainAITransportService } from '../main/services/AIService'
+import { AIHttpClient } from '../main/services/AIHttpClient'
+import { appendProjectUsageAttempts } from '../storage/projectUsageJournal'
+import { CodexCliService } from '../main/services/CodexCliService'
+import { agentApiKey, apiEndpoint, backupKeyAfterRejection, readApiRegistry, type ApiRegistry } from '../main/services/ApiRegistry'
 import { DiagnosticsService } from '../main/services/DiagnosticsService'
 import { TokenBucketRateLimiter } from '../main/RateLimiter'
 import { projectData } from '../renderer/src/utils/projectData'
 import { runPipelineFromStepEngine } from '../renderer/src/views/generation/pipelineRunnerEngine'
+import { parseOutput, type PipelineRuntimeOptions } from '../renderer/src/views/generation/pipelineRuntimeBasics'
 import type { PipelineDiagnosticsAdapter } from '../renderer/src/views/generation/pipelineRunnerTypes'
 import { saveAgentRuntimeData, type AgentRuntimeData } from './AgentRuntime'
 import { AGENT_PIPELINE_STEP_ORDER, AgentRunService } from './AgentRunService'
 import { AgentExecutionControlService } from './AgentExecutionControlService'
+import { checkPipelineRunTarget, describePendingRunTarget, firstPendingRunTarget, isMultiChapterRun } from './agentBatchWriteback'
+import { BATCH_EXECUTION_PREFIX, batchModelRequestGuard, guardModelCalls, pauseInterruptedBatchAttempt, reopenPipelineRuntime } from './agentPipelineWritebackGuard'
+import { StorageRevisionConflictError } from '../storage/StorageService'
 
 export interface ExecuteAgentChapterPipelineInput {
-  appData: AppData
+  /** Older callers pass a snapshot here. Execution always reopens the persisted run. */
+  appData?: AppData
   runtime: AgentRuntimeData
   agentRunId: ID
   jobId: ID
@@ -99,11 +109,23 @@ export function resolveAgentPipelineResumeStep(
   return null
 }
 
+function outputForRestart(step: ChapterGenerationStep, fromStep: ChapterGenerationStepType): string {
+  if (step.type !== 'generate_chapter_draft') return ''
+  if (fromStep === step.type && (step.status === 'running' || step.status === 'failed' || step.status === 'pending')) {
+    return step.output
+  }
+  // Restarting upstream invalidates reuse, but keep the readable fragment until there is a replacement.
+  // The read-only projection deliberately excludes any repair source tied to the old inputs.
+  const fragment = readChapterStepFragment(step)
+  return fragment ? JSON.stringify(fragment) : ''
+}
+
 function preparePipelineExecutionState(
   data: AppData,
   agentRunId: ID,
   jobId: ID,
-  fromStep: ChapterGenerationStepType
+  fromStep: ChapterGenerationStepType,
+  executionId?: ID
 ): AppData {
   const timestamp = now()
   const startIndex = AGENT_PIPELINE_STEP_ORDER.indexOf(fromStep)
@@ -118,9 +140,9 @@ function preparePipelineExecutionState(
     job.status === 'failed' ||
     jobSteps.some((step) => step.status === 'failed' || step.status === 'running') ||
     jobSteps.some((step) => step.status === 'completed')
-  const resumeDecision: AgentDecision | null = isResume
+  const startDecision: AgentDecision | null = isResume || executionId
     ? {
-        id: newId('agent-decision'),
+        id: executionId ?? newId('agent-decision'),
         agentRunId,
         projectId: run.projectId,
         chapterId:
@@ -129,8 +151,9 @@ function preparePipelineExecutionState(
           )?.id ?? null,
         jobId,
         step: fromStep,
-        action: 'retry_step',
-        reason: `Resume the persisted chapter pipeline from ${fromStep}; completed earlier steps remain authoritative.`,
+        action: isResume ? 'retry_step' : 'run_pipeline',
+        reason: isResume ? `Resume the persisted chapter pipeline from ${fromStep}; completed earlier steps remain authoritative.`
+          : `Start the registered chapter pipeline from ${fromStep}.`,
         evidence: [`jobId=${jobId}`, `fromStep=${fromStep}`],
         riskLevel: 'low',
         result: 'applied',
@@ -147,7 +170,7 @@ function preparePipelineExecutionState(
       return {
         ...step,
         status: 'pending',
-        output: '',
+        output: outputForRestart(step, fromStep),
         errorMessage: '',
         updatedAt: timestamp
       }
@@ -168,7 +191,7 @@ function preparePipelineExecutionState(
         ? {
             ...item,
             status: 'running',
-            decisions: resumeDecision ? [...item.decisions, resumeDecision] : item.decisions,
+            decisions: startDecision ? [...item.decisions, startDecision] : item.decisions,
             summary: `Chapter ${job.targetChapterOrder} pipeline is running from ${fromStep}.`,
             updatedAt: timestamp,
             completedAt: null
@@ -206,14 +229,16 @@ function pipelineModeForRun(run: AgentRun): PipelineMode {
 export function resolveAgentPipelineAIProfile(
   config: ChapterGenerationJob['aiRunConfig'],
   fallback: AppData['settings'],
-  environmentHasApiKey: boolean
+  environmentHasApiKey: boolean | ((baseUrl: string) => boolean)
 ) {
   const needsKey = (settings: AppData['settings']) =>
     settings.apiProvider === 'openai' || settings.apiProvider === 'compatible'
   const withAgentCredentials = (settings: AppData['settings']): AppData['settings'] => ({
     ...settings,
     apiKey: '',
-    hasApiKey: needsKey(settings) ? environmentHasApiKey : settings.hasApiKey
+    hasApiKey: needsKey(settings)
+      ? (typeof environmentHasApiKey === 'boolean' ? environmentHasApiKey : environmentHasApiKey(settings.baseUrl))
+      : settings.hasApiKey
   })
   const aiSettings = withAgentCredentials(resolvePipelineRunSettings(config, fallback))
   const roleSettings = {} as Record<PipelineAIRole, AppData['settings']>
@@ -227,28 +252,39 @@ export function resolveAgentPipelineAIProfile(
   }
 }
 
-export function createHeadlessTransport(settings: AppData['settings']): {
+export function createHeadlessTransport(settings: AppData['settings'], registry: ApiRegistry, storagePath: string | null, beforeRequest?: () => Promise<void>): {
   transport: AIChatCompletionTransport
   diagnostics: PipelineDiagnosticsAdapter
   cancelRun: (runId: ID) => boolean
 } {
-  const environmentApiKey = String(process.env.NOVEL_DIRECTOR_API_KEY ?? '').trim()
+  const logger = {
+    info: (message: string) => console.error(`[agent-ai] ${message}`),
+    warn: (message: string) => console.error(`[agent-ai:warn] ${message}`)
+  }
   const transportService = new MainAITransportService(
-    { getApiKey: async () => environmentApiKey },
+    { getApiKey: async (baseUrl) => agentApiKey(registry, baseUrl, settings.baseUrl),
+      getBackupApiKey: async (baseUrl, rejected) => backupKeyAfterRejection(registry, baseUrl, rejected),
+      isManagedEndpoint: async (baseUrl) => registry.has(apiEndpoint(baseUrl)) },
     {
       openai: new TokenBucketRateLimiter(60, 1),
       compatible: new TokenBucketRateLimiter(30, 0.5)
     },
     {
-      logger: {
-        info: (message) => console.error(`[agent-ai] ${message}`),
-        warn: (message) => console.error(`[agent-ai:warn] ${message}`)
-      }
+      logger,
+      usageJournal: { getStoragePath: () => storagePath, append: appendProjectUsageAttempts },
+      ...(beforeRequest ? {
+        // Includes retries with another format or key, and diagnostics sent through the same main transport.
+        httpClient: new AIHttpClient({ beforeRequest, transport: 'node-fetch' }),
+        codexCliService: guardModelCalls(new CodexCliService(logger), beforeRequest, ['chatCompletion'])
+      } : {})
     }
   )
   const diagnosticsService = new DiagnosticsService(transportService)
   return {
-    transport: { chatCompletion: (request) => transportService.chatCompletion(request) },
+    transport: {
+      chatCompletion: (request) => transportService.chatCompletion(request),
+      isManagedEndpoint: (baseUrl) => transportService.isManagedEndpoint(baseUrl)
+    },
     diagnostics: {
       analyzeRedundancy: (request) => diagnosticsService.analyzeRedundancy(request),
       auditNovelty: (request) => diagnosticsService.auditNovelty(request),
@@ -316,59 +352,111 @@ export async function executeAgentChapterPipeline(
   input: ExecuteAgentChapterPipelineInput,
   dependencies: AgentPipelineExecutorDependencies = {}
 ): Promise<ExecuteAgentChapterPipelineResult> {
-  const initialRun = input.appData.agentRuns.find((item) => item.id === input.agentRunId)
-  if (!initialRun) throw new Error(`AgentRun not found: ${input.agentRunId}`)
-  const initialJob = input.appData.chapterGenerationJobs.find((item) => item.id === input.jobId)
-  if (!initialJob) throw new Error(`Job not found: ${input.jobId}`)
-  if (initialRun.projectId !== initialJob.projectId) throw new Error('AgentRun and pipeline job belong to different projects.')
-  const project = input.appData.projects.find((item) => item.id === initialJob.projectId)
+  const runtime = await reopenPipelineRuntime(input.runtime)
+  const { run, job } = checkPipelineRunTarget(runtime.data, input.agentRunId, input.jobId)
+  const executionId = isMultiChapterRun(run) ? BATCH_EXECUTION_PREFIX + randomUUID() : undefined
+  try {
+    const result = await executeLoadedPipeline(input, dependencies, runtime, run, job, executionId)
+    Object.assign(input.runtime, runtime)
+    return result
+  } catch (error) {
+    if (executionId) {
+      const reason = error instanceof Error ? error.message : String(error)
+      try {
+        await pauseInterruptedBatchAttempt(runtime, run.id, job.id, executionId, reason)
+      } catch (pauseError) {
+        throw new Error(`${reason} 本次任务的暂停状态未能保存：${pauseError instanceof Error ? pauseError.message : String(pauseError)}`, { cause: error })
+      }
+    }
+    throw error
+  }
+}
+
+async function executeLoadedPipeline(
+  input: ExecuteAgentChapterPipelineInput, dependencies: AgentPipelineExecutorDependencies,
+  runtime: AgentRuntimeData, initialRun: AgentRun, initialJob: ChapterGenerationJob, executionId?: ID
+): Promise<ExecuteAgentChapterPipelineResult> {
+  const data = runtime.data
+  const beforeRequest = batchModelRequestGuard(runtime, initialRun, initialJob.id)
+  const project = data.projects.find((item) => item.id === initialJob.projectId)
   if (!project) throw new Error(`Project not found: ${initialJob.projectId}`)
-  const fromStep = resolveAgentPipelineResumeStep(input.appData, initialJob.id, input.fromStep, input.pipelineMode)
+  const fromStep = resolveAgentPipelineResumeStep(data, initialJob.id, input.fromStep, input.pipelineMode)
   if (!fromStep) {
+    const pending = isMultiChapterRun(initialRun) && firstPendingRunTarget(data, initialRun, initialJob.targetChapterOrder + 1)
+    if (pending) throw new Error(`本章没有待执行的生成步骤。${describePendingRunTarget(pending)}`)
     throw new Error(`Pipeline job ${initialJob.id} has no failed or unfinished step to run.`)
   }
-  await AgentExecutionControlService.clearCancellation(input.runtime, initialJob.id)
+  await AgentExecutionControlService.clearCancellation(runtime, initialJob.id)
 
-  const environmentHasApiKey = Boolean(String(process.env.NOVEL_DIRECTOR_API_KEY ?? '').trim())
-  const { aiSettings, roleSettings, requiresEnvironmentApiKey } = resolveAgentPipelineAIProfile(
-    initialJob.aiRunConfig, input.appData.settings, environmentHasApiKey
-  )
-  let latestWorking = preparePipelineExecutionState(input.appData, initialRun.id, initialJob.id, fromStep)
+  let latestWorking = preparePipelineExecutionState(data, initialRun.id, initialJob.id, fromStep, executionId)
   let cancellationObserved = false
   let cancellationPollBusy = false
   let cancellationTimer: ReturnType<typeof setInterval> | null = null
   const persistWorking = async (next: AppData): Promise<AppData> => {
+    try {
+      await saveAgentRuntimeData(next, runtime)
+    } catch (error) {
+      // Report the earlier chapter if a writeback failure arrived while this step was running.
+      if (error instanceof StorageRevisionConflictError) await beforeRequest?.()
+      throw error
+    }
     latestWorking = next
-    await saveAgentRuntimeData(next, input.runtime)
     return next
   }
   await persistWorking(latestWorking)
   try {
-    if (requiresEnvironmentApiKey && !environmentHasApiKey && !dependencies.workflowAI && !dependencies.transport) {
-      throw new Error(
-        'Agent Runtime 无法读取桌面安全存储中的 API Key。请设置 NOVEL_DIRECTOR_API_KEY，或在项目设置中使用 Codex CLI / 本地模型后重试。'
-      )
+    const defaultSettings = resolvePipelineRunSettings(initialJob.aiRunConfig, data.settings)
+    const usesRemoteRoles = resolveAgentPipelineAIProfile(initialJob.aiRunConfig, data.settings, false).requiresEnvironmentApiKey
+    const registry = usesRemoteRoles ? await readApiRegistry() : new Map()
+    const { aiSettings, roleSettings } = resolveAgentPipelineAIProfile(initialJob.aiRunConfig, data.settings,
+      (baseUrl) => Boolean(agentApiKey(registry, baseUrl, defaultSettings.baseUrl)))
+    const { pipelineMode, pipelineRecipe } = PipelineRecipeService.resolveRunConfiguration({
+      recipe: initialJob.pipelineRecipe, recipeId: initialJob.pipelineRecipeId, storedMode: initialJob.pipelineMode,
+      requestedMode: input.pipelineMode, fallbackMode: pipelineModeForRun(initialRun)
+    })
+    const requireRoleKey = (role: PipelineAIRole) => {
+      const settings = roleSettings[role]
+      if ((settings.apiProvider === 'compatible' || settings.apiProvider === 'openai') && !settings.hasApiKey) {
+        const variable = registry.get(apiEndpoint(settings.baseUrl))?.keyEnv ?? 'NOVEL_DIRECTOR_API_KEY'
+        throw new Error(`工作环节 ${role} 缺少对应的 API Key（${variable}）。外部流程按共享清单取密钥。`)
+      }
+    }
+    if (!dependencies.workflowAI && !dependencies.transport) {
+      const start = AGENT_PIPELINE_STEP_ORDER.indexOf(fromStep)
+      for (const step of PipelineRecipeService.resolveExecutionPlan(pipelineRecipe, pipelineMode).steps) {
+        const role = getPipelineRoleForStep(step.type)
+        if (!step.run || !role || AGENT_PIPELINE_STEP_ORDER.indexOf(step.type) < start) continue
+        // The draft handler checks the persisted checkpoint before it asks for the prose service.
+        if (step.type === 'generate_chapter_draft' && fromStep === step.type) continue
+        requireRoleKey(role)
+      }
     }
     const needsDefaultHeadlessServices = !dependencies.workflowAI || !dependencies.diagnostics
-    const headless = needsDefaultHeadlessServices ? createHeadlessTransport(aiSettings) : null
+    const headless = needsDefaultHeadlessServices ? createHeadlessTransport(aiSettings, registry, runtime.storagePath, beforeRequest) : null
+    const workflowAI = dependencies.workflowAI && guardModelCalls(dependencies.workflowAI, beforeRequest)
+    const transport = dependencies.transport
+      ? guardModelCalls(dependencies.transport, beforeRequest, ['chatCompletion']) : headless?.transport
     const workflowAIByRole = new Map<PipelineAIRole, WorkflowAIService>()
     const getRoleSettings = (role: PipelineAIRole) => roleSettings[role]
     const getWorkflowAI = async (role: PipelineAIRole) => {
-      if (dependencies.workflowAI) return dependencies.workflowAI
+      if (workflowAI) return workflowAI
+      if (role === 'prose' && !dependencies.transport) requireRoleKey(role)
       const existing = workflowAIByRole.get(role)
       if (existing) return existing
       const service = new WorkflowAIService(getRoleSettings(role), {
+        projectId: initialJob.projectId,
         runId: initialJob.id,
-        transport: dependencies.transport ?? headless?.transport
+        transport
       })
       workflowAIByRole.set(role, service)
       return service
     }
-    const diagnostics = dependencies.diagnostics ?? headless?.diagnostics
+    const diagnostics = dependencies.diagnostics
+      ? guardModelCalls(dependencies.diagnostics, beforeRequest, ['evaluateQualityGate']) : headless?.diagnostics
     if (!diagnostics) throw new Error('Agent pipeline diagnostics adapter is unavailable.')
     const cancelActiveRun = dependencies.cancelActiveRun ?? headless?.cancelRun ?? (() => false)
     const checkCancellation = async (): Promise<boolean> => {
-      const requested = await AgentExecutionControlService.isCancellationRequested(input.runtime, initialJob.id)
+      const requested = await AgentExecutionControlService.isCancellationRequested(runtime, initialJob.id)
       if (requested) {
         cancellationObserved = true
         cancelActiveRun(initialJob.id)
@@ -382,14 +470,6 @@ export async function executeAgentChapterPipeline(
         cancellationPollBusy = false
       })
     }, Math.max(50, dependencies.cancellationPollIntervalMs ?? 250))
-    const runConfiguration = PipelineRecipeService.resolveRunConfiguration({
-      recipe: initialJob.pipelineRecipe,
-      recipeId: initialJob.pipelineRecipeId,
-      storedMode: initialJob.pipelineMode,
-      requestedMode: input.pipelineMode,
-      fallbackMode: pipelineModeForRun(initialRun)
-    })
-    const { pipelineMode, pipelineRecipe } = runConfiguration
     latestWorking = {
       ...latestWorking,
       chapterGenerationJobs: latestWorking.chapterGenerationJobs.map((job) =>
@@ -406,17 +486,19 @@ export async function executeAgentChapterPipeline(
     }
     await persistWorking(latestWorking)
     const scoped = projectData(latestWorking, project.id)
+    const previousStep = data.chapterGenerationSteps.find((step) => step.jobId === initialJob.id && step.type === fromStep)
+    const savedOptions = parseOutput<Partial<PipelineRuntimeOptions> | null>(previousStep?.inputSnapshot ?? '', null)
     const options = {
       targetChapterOrder: initialJob.targetChapterOrder,
       pipelineMode,
-      estimatedWordCount: input.estimatedWordCount?.trim() || '3000-5000',
+      estimatedWordCount: input.estimatedWordCount?.trim() || savedOptions?.estimatedWordCount || '3000-5000',
       readerEmotionTarget:
-        input.readerEmotionTarget?.trim() ||
+        input.readerEmotionTarget?.trim() || savedOptions?.readerEmotionTarget ||
         (initialJob.targetChapterOrder === 1
           ? OPENING_READER_EMOTION_FALLBACK
           : '承接上一章情绪，并逐步提升本章核心压力'),
-      budgetMode: input.budgetMode ?? input.appData.settings.defaultPromptMode,
-      budgetMaxTokens: input.budgetMaxTokens ?? input.appData.settings.defaultTokenBudget
+      budgetMode: input.budgetMode ?? savedOptions?.budgetMode ?? data.settings.defaultPromptMode,
+      budgetMaxTokens: input.budgetMaxTokens ?? savedOptions?.budgetMaxTokens ?? data.settings.defaultTokenBudget
     }
     latestWorking = await runPipelineFromStepEngine(
       latestWorking,
@@ -439,6 +521,7 @@ export async function executeAgentChapterPipeline(
       }
     )
   } catch (error) {
+    if (beforeRequest) await beforeRequest()
     const message = error instanceof Error ? error.message : String(error)
     const failedStep = latestWorking.chapterGenerationSteps.find(
       (step) => step.jobId === initialJob.id && (step.status === 'running' || step.status === 'pending')
@@ -456,7 +539,7 @@ export async function executeAgentChapterPipeline(
             job.id === initialJob.id ? { ...job, status: 'failed', errorMessage: message, updatedAt: now() } : job
           )
         }
-    await saveAgentRuntimeData(latestWorking, input.runtime)
+    await persistWorking(latestWorking)
   } finally {
     if (cancellationTimer) clearInterval(cancellationTimer)
   }
@@ -464,7 +547,7 @@ export async function executeAgentChapterPipeline(
   let job = latestWorking.chapterGenerationJobs.find((item) => item.id === initialJob.id) ?? initialJob
   const steps = latestWorking.chapterGenerationSteps.filter((step) => step.jobId === job.id)
   const failedStep = steps.find((step) => step.status === 'failed') ?? null
-  const cancellationRequest = await AgentExecutionControlService.getCancellationRequest(input.runtime, initialJob.id)
+  const cancellationRequest = await AgentExecutionControlService.getCancellationRequest(runtime, initialJob.id)
   const cancelled = Boolean(failedStep && (cancellationObserved || cancellationRequest))
   if (cancelled) {
     latestWorking = {
@@ -479,8 +562,8 @@ export async function executeAgentChapterPipeline(
   }
   const draftIds = latestWorking.generatedChapterDrafts.filter((draft) => draft.jobId === job.id).map((draft) => draft.id)
   latestWorking = finishAgentRun(latestWorking, input.agentRunId, job, draftIds, failedStep, cancelled)
-  await saveAgentRuntimeData(latestWorking, input.runtime)
-  await AgentExecutionControlService.clearCancellation(input.runtime, initialJob.id)
+  await persistWorking(latestWorking)
+  await AgentExecutionControlService.clearCancellation(runtime, initialJob.id)
   const agentRun = latestWorking.agentRuns.find((item) => item.id === input.agentRunId)
   if (!agentRun) throw new Error(`AgentRun not found after execution: ${input.agentRunId}`)
   return {

@@ -12,6 +12,7 @@ import type {
   NoveltyFinding
 } from '../shared/types'
 import { isEditorialIssueActive } from '../shared/editorialIssuePolicy'
+import { qualityReportWithoutHardCanon } from './qualityGate/hardCanonQuality'
 import {
   QUALITY_GATE_HUMAN_REVIEW_SCORE,
   qualityGateEffectivelyPassed,
@@ -214,7 +215,9 @@ export function buildEditorialVerdict(input: BuildEditorialVerdictInput): Editor
   const scopedRedundancy = input.appData.redundancyReports.filter(
     (item) => item.projectId === draft.projectId && (!item.jobId || item.jobId === draft.jobId)
   )
-  const quality = latestQualityReportForDraft(scopedQuality, draft)
+  // This verdict is persisted by draft revision, not by rule or book-count revision.
+  const recordedQuality = latestQualityReportForDraft(scopedQuality, draft)
+  const quality = recordedQuality && qualityReportWithoutHardCanon(recordedQuality)
   const matchingConsistency = latestConsistencyReportsForDraft(scopedConsistency, draft)
   const consistency = matchingConsistency[0] ?? null
   // Only a strictly newer, hash-bound review supersedes a previous review.

@@ -11,11 +11,14 @@ import { ContextBudgetManager } from './ContextBudgetManager'
 import { formatContinuityBridgeForPrompt, resolveContinuityBridge } from './ContinuityService'
 import { TokenEstimator } from './TokenEstimator'
 import { StoryDirectionService } from './StoryDirectionService'
+import { coversStoryDirectionChapter } from '../shared/storyDirectionRange'
 import { HardCanonPackService } from './HardCanonPackService'
 import { PromptLintService } from './PromptLintService'
 import { activeChapters } from './ChapterLifecycleService'
+import { projectCharacterStatesAtChapter } from './characterState/stateAsOf'
+import { getRelevantCharacterStatesForPrompt } from './characterState/stateSelection'
 import { dedupeAgainstBridge, formatCompressedChapterRecap, formatStageSummary, formatTimeline, summarizeChapter } from './promptFormatters/chapterFormatters'
-import { formatCharacter, formatCharacterNeedSlice, formatCharacterStateLedgerSlice } from './promptFormatters/characterFormatters'
+import { formatWritingCards, formatCharacterStateLedgerSlice } from './promptFormatters/characterFormatters'
 import { formatForeshadowingOperationTable, selectedCharacters, selectedForeshadowings, uniqueById } from './promptFormatters/foreshadowingFormatters'
 import { chapterNoveltyPolicyLines, fieldLine, filterPromptLinesByExclusionText, isPlaceholderText, priorityRuleText, promptBlockOrderFromFinalPrompt, renderPromptBlock, styleSampleLimit, truncateText, valueOrEmpty, formatStyleEnvelope, type PromptBlockDraft } from './promptFormatters/promptUtils'
 export { inferPromptBlockOrderFromPrompt, parseChapterNumbersFromText } from './promptFormatters/promptUtils'
@@ -27,6 +30,9 @@ export class PromptBuilderService {
         bible: input.bible,
         chapters: input.chapters,
         characters: input.characters,
+        characterStateFacts: input.characterStateFacts,
+        characterStateTransactions: input.characterStateTransactions,
+        stateSourceChapters: input.stateSourceChapters,
         foreshadowings: input.foreshadowings,
         timelineEvents: input.timelineEvents,
         stageSummaries: input.stageSummaries
@@ -45,6 +51,7 @@ export class PromptBuilderService {
   }
 
   static buildResult(input: PromptBuildInput): BuildPromptResult {
+    const stateSources = input.stateSourceChapters ?? input.chapters
     input = { ...input, chapters: activeChapters(input.chapters) }
     let workingInput = input
     const budgetSelection =
@@ -144,13 +151,14 @@ export class PromptBuilderService {
       .filter(([, value]) => isPlaceholderText(value))
       .map(([label]) => `章节任务字段缺失：${label}`)
 
-    const characterCardText = characterSelection.length
-      ? characterSelection
-          .map((character) =>
-            contextNeedPlan ? formatCharacterNeedSlice(character, characterStateLogs, contextNeedPlan) : formatCharacter(character, characterStateLogs)
-          )
-          .join('\n\n')
-      : ''
+    const scopedState = projectCharacterStatesAtChapter(
+      (characterStateFacts ?? []).filter(f => f.projectId === project.id), input.characterStateTransactions ?? [], target,
+      stateSources, input.stateSourceChapters ? 'complete' : 'partial')
+    const selectedFacts = isOpeningChapter ? [] : getRelevantCharacterStatesForPrompt(
+      characterSelection.map(c => c.id), contextNeedPlan, target, scopedState)
+    // An omitted ledger entry must not reappear through stale card prose. Only selectedFacts print their values.
+    const { text: characterCardText, cardWarnings } = formatWritingCards(characterSelection, isOpeningChapter ? [] : scopedState, characterStateLogs,
+      contextNeedPlan, target, stateSources, Boolean(input.stateSourceChapters))
     const rawCharacterStateText = (isOpeningChapter
       ? [
           '【本章任务点名人物】',
@@ -158,7 +166,7 @@ export class PromptBuilderService {
         ]
       : [
           '【角色状态账本切片】',
-          formatCharacterStateLedgerSlice(characterSelection, characterStateFacts ?? [], contextNeedPlan, target),
+          formatCharacterStateLedgerSlice(characterSelection, selectedFacts),
           '【角色卡按需切片】',
           characterCardText
         ])
@@ -176,7 +184,8 @@ export class PromptBuilderService {
       .filter(Boolean)
       .join('\n\n')
 
-    const storyDirectionGuide = workingInput.storyDirectionGuide ?? null
+    const storyDirectionGuide = workingInput.storyDirectionGuide && coversStoryDirectionChapter(workingInput.storyDirectionGuide, target)
+      ? workingInput.storyDirectionGuide : null
     // The service also supports standalone rendering, where it owns the heading.
     // Here the surrounding prompt block already owns that heading.
     const storyDirectionText = StoryDirectionService.formatForPrompt(storyDirectionGuide, target).replace(/^##\s+[^\r\n]+\r?\n?/u, '')
@@ -293,7 +302,7 @@ export class PromptBuilderService {
         sourceIds: storyDirectionGuide ? [storyDirectionGuide.id] : [],
         enabled: Boolean(storyDirectionGuide),
         body: storyDirectionText,
-        reason: '提供未来 5/10 章的软性剧情推进方向；不得覆盖上一章衔接、本章任务、角色硬状态和伏笔规则。'
+        reason: '提供指定章段的软性剧情推进方向；不得覆盖上一章衔接、本章任务、角色硬状态和伏笔规则。'
       },
       {
         id: 'current-progress',
@@ -382,13 +391,14 @@ export class PromptBuilderService {
       }
     ]
 
-    const rawPrompt = [`# 第 ${target} 章写作 Prompt`, ...blocks.map(renderPromptBlock)]
+    const renderedBlocks = blocks.map(renderPromptBlock)
+    const rawPrompt = [`# 第 ${target} 章写作 Prompt`, ...renderedBlocks]
       .filter(Boolean)
       .join('\n')
       .trim()
     const promptLintGuard = PromptLintService.guardWritingPrompt(rawPrompt)
     const finalPrompt = promptLintGuard.guardedPrompt
-    const promptBlockOrder = promptBlockOrderFromFinalPrompt(blocks, finalPrompt)
+    const promptBlockOrder = promptBlockOrderFromFinalPrompt(blocks, finalPrompt, renderedBlocks)
 
     return {
       finalPrompt,
@@ -410,6 +420,7 @@ export class PromptBuilderService {
         ...(budgetSelection?.warnings ?? []),
         ...(isOpeningChapter ? [] : continuity.warnings),
         ...taskWarnings,
+        ...(config.modules.characters ? cardWarnings : []),
         ...(characterStateFilter.omittedLineCount
           ? [`本章禁止项已从角色卡/状态账本切片隔离 ${characterStateFilter.omittedLineCount} 行（${characterStateFilter.matchedTerms.join('、')}）。`]
           : []),

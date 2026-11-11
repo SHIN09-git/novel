@@ -1,5 +1,7 @@
 export * from './base'
 export * from './project'
+export * from './chapterTitle'
+export * from './hardCanonCheck'
 export * from './character'
 export * from './foreshadowing'
 export * from './context'

@@ -8,11 +8,15 @@ import type {
   Project,
   QualityGateReport,
   EditorialVerdict,
-  ChapterAcceptanceReview
+  ChapterAcceptanceReview,
+  HardCanonAuditResult
 } from '../../../../shared/types'
 import { AuthorDecisionPolicyService } from '../../../../services/AuthorDecisionPolicyService'
 import { latestQualityReportForDraft } from '../../../../services/DraftDiagnosticBindingService'
 import { hasCompleteChapterReview } from '../../../../services/ChapterAcceptanceReviewService'
+import { ChapterTaskContractService } from '../../../../services/ChapterTaskContractService'
+import { hardCanonNotice, hardCanonReceipt } from '../../../../services/HardCanonPreflight'
+import { withCurrentHardCanonAudit } from '../../../../services/qualityGate/hardCanonQuality'
 import type { ConfirmFn } from '../../components/ConfirmDialog'
 import { newId, now } from '../../utils/format'
 import { projectData } from '../../utils/projectData'
@@ -27,6 +31,7 @@ interface UseDraftAcceptanceArgs {
   targetChapterOrder: number
   chapters: Chapter[]
   qualityGateReports: QualityGateReport[]
+  hardCanonAudit?: HardCanonAuditResult | null
   /** Optional for legacy callers; an empty collection means verdicts are authoritative. */
   editorialVerdicts?: ReadonlyArray<EditorialVerdict>
   confirmAction: ConfirmFn
@@ -45,12 +50,15 @@ export function useDraftAcceptance({
   targetChapterOrder,
   chapters,
   qualityGateReports,
+  hardCanonAudit,
   editorialVerdicts,
   confirmAction,
   setPipelineMessage
 }: UseDraftAcceptanceArgs) {
   async function acceptDraft(draft: GeneratedChapterDraft, mode: ChapterAcceptanceReview['mode'] = 'reviewed') {
     if (draft.status !== 'draft') return
+    const canonBlock = hardCanonNotice(hardCanonAudit, 'block')
+    if (canonBlock) { setPipelineMessage(`不能采纳：${canonBlock}`); return }
     if (selectedJob?.status === 'running') {
       setPipelineMessage('生成仍在运行，请先停止或等待完成再采纳。')
       return
@@ -85,9 +93,10 @@ export function useDraftAcceptance({
       }
     }
     if (report) {
-      const decision = AuthorDecisionPolicyService.assessQualityGate(report)
+      const effective = hardCanonAudit !== undefined ? withCurrentHardCanonAudit(report, hardCanonAudit) : report
+      const decision = AuthorDecisionPolicyService.assessQualityGate(effective)
       if (decision.requiresHumanReview) {
-        const qualityPrompt = AuthorDecisionPolicyService.draftAcceptancePrompt(report)
+        const qualityPrompt = AuthorDecisionPolicyService.draftAcceptancePrompt(effective)
         reviewPrompt = reviewPrompt ? { ...reviewPrompt,
           message: `${reviewPrompt.message}\n\n${qualityPrompt.message}`,
           tone: reviewPrompt.tone === 'danger' || qualityPrompt.tone === 'danger' ? 'danger' : 'default'
@@ -100,15 +109,18 @@ export function useDraftAcceptance({
     const timestamp = now()
     const chapterId = existing?.id ?? newId()
 
-    if (reviewPrompt || existing || mode === 'unreviewed') {
+    const lengthOverflowNotice = ChapterTaskContractService.lengthOverflowNotice({ body: draft.body, chapterTask: selectedJob?.chapterTaskSnapshot })
+    if (lengthOverflowNotice || reviewPrompt || existing || mode === 'unreviewed') {
       const confirmed = await confirmAction({
         title: mode === 'unreviewed' ? `未完成审稿，采纳第 ${targetOrder} 章` : `接受第 ${targetOrder} 章`,
         message: [mode === 'unreviewed' ? '当前正文尚未完成审稿。仍然采纳时会记录为“未审稿采纳”，不会标记通过，已有失败项也会保留。之后可继续审稿或修订。' : null,
+          lengthOverflowNotice ? `${lengthOverflowNotice}可以先改短正文；继续采纳会保留超限原文。` : null,
           reviewPrompt?.message,
+          hardCanonNotice(hardCanonAudit, 'review'),
           existing ? `将替换第 ${targetOrder} 章的标题和正文；当前版本会保留在版本历史中。` : '将这份草稿写入正式章节。',
           '本次不会自动接受记忆或角色状态候选，这些变化可另行处理。'].filter(Boolean).join('\n\n'),
-        confirmLabel: mode === 'unreviewed' ? '确认未审稿采纳' : reviewPrompt?.tone === 'danger' ? '确认保留并采纳' : '接受章节',
-        tone: existing ? 'danger' : reviewPrompt?.tone ?? 'default'
+        confirmLabel: mode === 'unreviewed' ? '确认未审稿采纳' : lengthOverflowNotice ? '确认采纳超限原文' : reviewPrompt?.tone === 'danger' ? '确认保留并采纳' : '接受章节',
+        tone: existing || lengthOverflowNotice ? 'danger' : reviewPrompt?.tone ?? 'default'
       })
       if (!confirmed) return
     }
@@ -146,9 +158,13 @@ export function useDraftAcceptance({
           acceptedAt: timestamp,
           chapterVersionId: newId(),
           acceptanceMode: mode,
+          reviewedLengthOverflowNotice: lengthOverflowNotice,
           requireEditorialVerdict: Boolean(authoritativeVerdicts),
           commitNote: mode === 'unreviewed' ? '作者明确选择未完成审稿即采纳，已有诊断仍保留。' : '接受 AI 草稿为正式章节。'
         })
+        if (hardCanonAudit !== undefined && bundle.acceptanceReview?.hardCanonCheck?.resultFingerprint !== hardCanonReceipt(hardCanonAudit)?.resultFingerprint) {
+          throw new Error('硬设定或全书计数在确认期间已变化，请查看最新核查后采纳。')
+        }
         const next = {
           ...applyChapterCommitBundleToAppData(current, bundle),
           projects: updateProjectTimestamp(current, project.id)

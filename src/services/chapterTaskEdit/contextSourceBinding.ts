@@ -6,7 +6,7 @@ import { stableDecisionJson } from '../candidateDecisionPrimitives'
 // Candidate inputs to prepareTaskContext's deterministic planning/selection/build steps.
 // Bind candidates, not just selected ids: an added or edited record can change selection.
 const CONTEXT_COLLECTIONS = [
-  'storyBibles', 'characters', 'characterStateLogs', 'characterStateFacts',
+  'storyBibles', 'characters', 'characterStateLogs', 'characterStateFacts', 'characterStateTransactions',
   'foreshadowings', 'timelineEvents', 'stageSummaries', 'chapterContinuityBridges', 'hardCanonPacks'
 ] as const
 
@@ -21,7 +21,9 @@ export function chapterTaskContextSourceSignature(data: AppData, projectId: ID, 
       id: project.id, name: project.name, genre: project.genre, description: project.description,
       targetReaders: project.targetReaders, coreAppeal: project.coreAppeal, style: project.style
     } : null,
-    chapters: activeChapters(data.chapters).filter((item) => item.projectId === projectId && item.order < targetChapterOrder),
+    chapters: activeChapters(data.chapters).filter((item) => item.projectId === projectId && item.order <= targetChapterOrder),
+    stateChapterDirectory: data.chapters.filter(c => c.projectId === projectId)
+      .map(c => [c.id, c.order, Boolean(c.archivedAt?.trim()), Boolean(c.body?.trim())]),
     ...sources
   }
   // Preserve array order (selection ties and first-bible/pack lookup depend on it).

@@ -1,15 +1,22 @@
 import { createHash } from 'node:crypto'
 import { copyFile, mkdir, readFile, rename, stat, writeFile } from 'node:fs/promises'
 import { dirname } from 'node:path'
-import type { AppData, CandidateDecisionCommand, CandidateDecisionReceipt, ChapterCommitBundle, GenerationRunBundle, RevisionCommitBundle } from '../shared/types'
-import type { CandidateDecisionWriteResult, StorageWriteResult } from '../shared/ipc/ipcTypes'
+import type { AppData, CandidateDecisionCommand, CandidateDecisionReceipt, CharacterCardReviewCommand, ChapterCommitBundle, ChapterWritebackFailure, GenerationRunBundle, RevisionCommitBundle } from '../shared/types'
+import type { CandidateDecisionWriteResult, CharacterCardReviewWriteResult, StorageWriteResult } from '../shared/ipc/ipcTypes'
 import { applyCandidateDecisionCommand, candidateDecisionChanges, candidateDecisionRemovals } from '../services/CandidateDecisionService'
 import { EMPTY_APP_DATA, normalizeAppData, sanitizeAppDataForPersistence } from '../shared/defaults'
 import { redactSensitiveText } from '../shared/errorUtils'
+import { normalizeChapterWritebackFailure, normalizeChapterWritebackFailures } from '../shared/normalizers/chapterWritebackFailures'
 import { applyChapterCommitBundleToAppData } from '../services/ChapterCommitBundleService'
 import { applyGenerationRunBundleToAppData } from '../services/GenerationRunBundleService'
 import { applyRevisionCommitBundleToAppData } from '../services/RevisionCommitBundleService'
 import { withJsonWriteLock } from './jsonWriteLock'
+import { jsonTitleVersionIds, readJsonChapterTitles } from './chapterTitleState'
+import { applyTitleReceiptToChapters } from '../shared/chapterTitleHistory'
+import { decideChapterTitleCommit } from '../services/ChapterTitleRenameService'
+import type { ChapterTitleActor, ChapterTitleCommit } from '../shared/types/chapterTitle'
+import type { ChapterTitleWriteResult } from '../shared/ipc/ipcTypes'
+import { applyCharacterCardReview } from '../services/characterState/cardReview'
 import {
   StorageRevisionConflictError,
   type StorageService,
@@ -134,16 +141,16 @@ export class JsonStorageService implements StorageService {
     await copyFile(this.storagePath, targetPath)
   }
 
-  async saveIfCurrent(data: AppData, expectedRevision?: string): Promise<StorageWriteResult> {
-    return withJsonWriteLock(this.storagePath, () => this.writeIfCurrent(data, expectedRevision))
+  async saveIfCurrent(data: AppData, expectedRevision?: string, onWriteStarted?: () => void): Promise<StorageWriteResult> {
+    return withJsonWriteLock(this.storagePath, () => this.writeIfCurrent(data, expectedRevision, onWriteStarted))
   }
 
-  private async writeIfCurrent(data: AppData, expectedRevision?: string): Promise<StorageWriteResult> {
+  private async writeIfCurrent(data: AppData, expectedRevision?: string, onWriteStarted?: () => void): Promise<StorageWriteResult> {
     const currentRevision = await this.readCurrentRevision()
     if (expectedRevision !== undefined && currentRevision !== expectedRevision) {
       throw new StorageRevisionConflictError()
     }
-    await this.writeData(data)
+    await this.writeData(data, onWriteStarted)
     const revision = await this.readCurrentRevision()
     const updatedAt = new Date().toISOString()
     return {
@@ -165,13 +172,18 @@ export class JsonStorageService implements StorageService {
     }
   }
 
-  private async writeData(data: AppData): Promise<void> {
+  private async writeData(data: AppData, onWriteStarted?: () => void): Promise<void> {
+    await this.replaceDocument(sanitizeAppDataForPersistence(data), onWriteStarted)
+  }
+
+  private async replaceDocument(data: Partial<AppData>, onWriteStarted?: () => void): Promise<void> {
+    const raw = JSON.stringify(data, null, 2)
+    onWriteStarted?.()
     await mkdir(dirname(this.storagePath), { recursive: true })
-    const normalized = sanitizeAppDataForPersistence(data)
     const tmpPath = `${this.storagePath}.tmp`
     const backupPath = `${this.storagePath}.bak`
 
-    await writeFile(tmpPath, JSON.stringify(normalized, null, 2), 'utf-8')
+    await writeFile(tmpPath, raw, 'utf-8')
 
     try {
       await stat(this.storagePath)
@@ -215,7 +227,7 @@ export class JsonStorageService implements StorageService {
     }
   }
 
-  async saveChapterCommitBundle(bundle: ChapterCommitBundle, expectedRevision?: string): Promise<StorageWriteResult> {
+  async saveChapterCommitBundle(bundle: ChapterCommitBundle, expectedRevision?: string, onWriteStarted?: () => void): Promise<StorageWriteResult> {
     const snapshot = await this.loadSnapshot()
     if (expectedRevision !== undefined && snapshot.revision !== expectedRevision) {
       throw new StorageRevisionConflictError()
@@ -230,7 +242,7 @@ export class JsonStorageService implements StorageService {
         savedCollections: []
       }
     }
-    const persisted = await this.saveIfCurrent(next, snapshot.revision)
+    const persisted = await this.saveIfCurrent(next, snapshot.revision, onWriteStarted)
     const updatedAt = new Date().toISOString()
     return {
       ...persisted,
@@ -253,7 +265,7 @@ export class JsonStorageService implements StorageService {
     }
   }
 
-  async saveRevisionCommitBundle(bundle: RevisionCommitBundle, expectedRevision?: string): Promise<StorageWriteResult> {
+  async saveRevisionCommitBundle(bundle: RevisionCommitBundle, expectedRevision?: string, onWriteStarted?: () => void): Promise<StorageWriteResult> {
     const snapshot = await this.loadSnapshot()
     if (expectedRevision !== undefined && snapshot.revision !== expectedRevision) {
       throw new StorageRevisionConflictError()
@@ -268,7 +280,7 @@ export class JsonStorageService implements StorageService {
         savedCollections: []
       }
     }
-    const persisted = await this.saveIfCurrent(next, snapshot.revision)
+    const persisted = await this.saveIfCurrent(next, snapshot.revision, onWriteStarted)
     const updatedAt = new Date().toISOString()
     return {
       ...persisted,
@@ -285,6 +297,23 @@ export class JsonStorageService implements StorageService {
     }
   }
 
+  async recordChapterWritebackFailureIfUncommitted(failure: ChapterWritebackFailure): Promise<void> {
+    await withJsonWriteLock(this.storagePath, async () => {
+      // A missing/corrupt file is not evidence of absence. Do not initialize it or save a fallback snapshot.
+      const data = JSON.parse(await readFile(this.storagePath, 'utf-8')) as Partial<AppData>
+      const safe = normalizeChapterWritebackFailure(failure, data.settings?.apiKey)
+      if (!safe || !data.projects?.some((row) => row.id === safe.projectId) ||
+        data.chapterVersions?.some((row) => row.id === safe.versionId)) return
+      const hasReceipt = failure.kind === 'chapter_commit'
+        ? data.chapterCommitBundles?.some((row) => row.commitId === failure.commitId || row.id === failure.commitId)
+        : data.revisionCommitBundles?.some((row) => row.revisionCommitId === failure.commitId || row.id === failure.commitId)
+      if (hasReceipt) return
+      const history = normalizeChapterWritebackFailures(data.chapterWritebackFailures, data.settings?.apiKey, data.projects)
+      if (history.some((row) => row.id === safe.id)) return
+      await this.replaceDocument({ ...data, chapterWritebackFailures: [...history, safe] })
+    })
+  }
+
   async executeCandidateDecision(command: CandidateDecisionCommand, expectedRevision?: string): Promise<CandidateDecisionWriteResult> {
     const snapshot = await this.loadSnapshot()
     const hasReceipt = snapshot.data.candidateDecisionReceipts.some((item) => item.id === command.id)
@@ -297,5 +326,32 @@ export class JsonStorageService implements StorageService {
     const saved = await this.saveIfCurrent(result.data, snapshot.revision)
     return { ...saved, changes, removedRecords, receipt: result.receipt, replayed: false,
       savedCollections: [...new Set([...Object.keys(changes), ...removedRecords.map((item) => item.collection)])] }
+  }
+
+  async reviewCharacterCard(command: CharacterCardReviewCommand, expectedRevision: string): Promise<CharacterCardReviewWriteResult> {
+    return withJsonWriteLock(this.storagePath, async () => {
+      const raw = await readFile(this.storagePath, 'utf-8')
+      if (!expectedRevision || revisionForRaw(raw) !== expectedRevision) throw new StorageRevisionConflictError()
+      const original = JSON.parse(raw) as AppData
+      const updatedAt = new Date().toISOString()
+      const character = applyCharacterCardReview(normalizeAppData(original), command, updatedAt)
+      // Preserve unrelated records exactly, including fields from a newer import.
+      await this.replaceDocument({ ...original, characters: original.characters.map(c =>
+        c.id === character.id && c.projectId === character.projectId ? character : c) })
+      return { ok: true, storagePath: this.storagePath, revision: await this.readCurrentRevision(),
+        updatedAt, savedCollections: ['characters'], character }
+    })
+  }
+
+  async renameChapterTitles(commit: ChapterTitleCommit, actor: ChapterTitleActor): Promise<ChapterTitleWriteResult> {
+    return withJsonWriteLock(this.storagePath, async () => {
+      const { data, state, revision } = await readJsonChapterTitles(this.storagePath, commit.command.projectId)
+      const { receipt, replayed } = decideChapterTitleCommit(state, commit, this.storagePath, revision, actor,
+        () => jsonTitleVersionIds(data, state.projectId))
+      if (!replayed) await this.replaceDocument({ ...data, chapters: applyTitleReceiptToChapters(data.chapters!, receipt),
+        chapterTitleReceipts: [...data.chapterTitleReceipts ?? [], receipt] })
+      return { ok: true, storagePath: this.storagePath, revision: replayed ? revision : await this.readCurrentRevision(),
+        updatedAt: receipt.createdAt, savedCollections: replayed ? [] : ['chapters', 'chapterTitleReceipts'], receipt, replayed }
+    })
   }
 }

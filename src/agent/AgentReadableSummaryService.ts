@@ -1,5 +1,5 @@
 import type { AppData, ID } from '../shared/types'
-import { AgentDecisionService } from './AgentDecisionService'
+import { AgentDecisionService, type AgentAcceptanceRecommendation } from './AgentDecisionService'
 import type { AgentProjectOverviewData } from './agentProjectOverviewData'
 import {
   getCandidateDetail,
@@ -53,7 +53,7 @@ export class AgentReadableSummaryService {
   static getNextChapterTarget(
     data: AgentProjectOverviewData,
     projectId: ID
-  ): { projectId: ID; nextChapterOrder: number; reason: string } {
+  ): ReturnType<typeof getNextChapterTarget> {
     return getNextChapterTarget(data, projectId)
   }
 
@@ -69,8 +69,8 @@ export class AgentReadableSummaryService {
     return getChapterProductionState(data, projectId, chapterOrder)
   }
 
-  static getRunDiagnostics(data: AppData, jobId: ID): AgentRunDiagnostics {
-    return getRunDiagnostics(data, jobId)
+  static getRunDiagnostics(data: AppData, jobId: ID, options: AgentReadOptions = {}): AgentRunDiagnostics {
+    return getRunDiagnostics(data, jobId, options)
   }
 
   static getChapterVersionChain(
@@ -146,16 +146,7 @@ export class AgentReadableSummaryService {
   static getAcceptanceRecommendation(
     data: AppData,
     jobId: ID
-  ): {
-    jobId: ID
-    recommendation: 'accept' | 'revise' | 'reject' | 'wait' | 'pause'
-    confidence: number
-    riskLevel: string
-    reasons: string[]
-    draftId: ID | null
-    nextActions: string[]
-    requiresHumanApproval: boolean
-  } {
+  ): AgentAcceptanceRecommendation {
     return AgentDecisionService.buildAcceptanceRecommendation(data, jobId)
   }
 }

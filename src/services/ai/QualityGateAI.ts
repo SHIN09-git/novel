@@ -105,7 +105,7 @@ export class QualityGateAI {
       `Context:\n${context}`
     ].join('\n')
 
-    return this.client.requestJson(REVIEW_SYSTEM_PROMPT, userPrompt, ensureQualityGateEvaluation, fallback, undefined, validateQualityGateSchema)
+    return this.client.requestJson(REVIEW_SYSTEM_PROMPT, userPrompt, ensureQualityGateEvaluation, fallback, undefined, validateQualityGateSchema, { phase: 'review' })
   }
 
 
@@ -132,7 +132,7 @@ export class QualityGateAI {
       `Context:\n${context}`
     ].join('\n')
 
-    return this.client.requestJson(REVIEW_SYSTEM_PROMPT, userPrompt, ensureRevisionCandidate, fallback, undefined, validateRevisionCandidateSchema)
+    return this.client.requestJson(REVIEW_SYSTEM_PROMPT, userPrompt, ensureRevisionCandidate, fallback, undefined, validateRevisionCandidateSchema, { phase: 'revision' })
   }
 
 }

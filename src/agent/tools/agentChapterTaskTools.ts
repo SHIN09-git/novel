@@ -15,6 +15,7 @@ import { getChapterTaskForJob, prepareChapterTaskEdit, TASK_SCOPE_LABELS } from 
 import { stableDecisionJson } from '../../services/candidateDecisionPrimitives'
 import type { AgentRuntimeData } from '../AgentRuntime'
 import { saveAgentRuntimeData } from '../AgentRuntime'
+import { assertEarlierRunTargetsWritten } from '../agentBatchWriteback'
 import { booleanArg, findProjectId, requiredPositiveInteger, requiredString } from './agentToolArguments'
 import type { AgentToolHandlerResult } from './agentToolTypes'
 
@@ -148,6 +149,7 @@ function resolveCommand(data: AppData, args: Record<string, unknown>): ChapterTa
   const agentRunId = requiredString(args, 'agentRunId')
   const agentRun = data.agentRuns.find((run) => run.id === agentRunId && run.projectId === source.projectId)
   if (!agentRun) throw new Error(`AgentRun does not belong to project: ${agentRunId}`)
+  assertEarlierRunTargetsWritten(data, agentRun, source.targetChapterOrder)
   const operationId = requiredString(args, 'operationId')
   return {
     ...source,
@@ -358,10 +360,12 @@ function attachJobToAgentRun(
     result: 'applied',
     createdAt: timestamp
   }
+  const targetChapterOrders = [...new Set([...command.agentRun.targetChapterOrders, command.targetChapterOrder])].sort((a, b) => a - b)
   const run: AgentRun = {
     ...command.agentRun,
     status: command.agentRun.status === 'running' ? 'running' : 'paused',
-    targetChapterOrders: [...new Set([...command.agentRun.targetChapterOrders, command.targetChapterOrder])].sort((a, b) => a - b),
+    targetChapterOrders,
+    mode: targetChapterOrders.length > 1 && command.agentRun.mode === 'single_chapter' ? 'multi_chapter' : command.agentRun.mode,
     createdJobIds: [...new Set([...command.agentRun.createdJobIds, job.id])],
     decisions: [...command.agentRun.decisions.filter((item) => item.id !== decision.id), decision],
     summary: `Chapter ${command.targetChapterOrder} task edit is saved as job ${job.id}; pipeline execution has not started.`,

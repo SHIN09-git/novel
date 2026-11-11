@@ -1,6 +1,6 @@
 {
   "name": "novel-director",
-  "version": "0.1.6-preview.18",
+  "version": "0.1.6-preview.20",
   "productName": "Novel Director",
   "description": "AI long-form novel creation management desktop MVP",
   "license": "MIT",
@@ -32,6 +32,7 @@
     "perf:novelty": "node scripts/benchmark-novelty-audit.mjs --output tmp/performance/novelty-audit.json",
     "perf:ui": "node scripts/benchmark-production-ui.mjs --output tmp/performance/production-ui.json",
     "perf:prompt": "node scripts/benchmark-prompt-composition.mjs --output tmp/performance/prompt-composition.json",
+    "perf:redundancy": "node scripts/benchmark-redundant-work.mjs --baseline-ref 04e0a01 --output tmp/performance/redundant-work.json",
     "perf:post-draft": "node scripts/benchmark-post-draft-analysis.mjs --output tmp/performance/post-draft-analysis.json",
     "perf:storage": "node scripts/benchmark-long-novel-storage.mjs",
     "perf:backend": "node scripts/benchmark-backend-checkpoints.mjs",

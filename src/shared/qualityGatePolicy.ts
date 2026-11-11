@@ -11,6 +11,7 @@ export function qualityGateHasRequiredFixes(report: QualityGateReport): boolean 
 export function qualityGateSatisfiesPassCriteria(report: QualityGateReport): boolean {
   return (
     report.overallScore >= QUALITY_GATE_PASS_SCORE &&
+    !report.hardCanonAudit?.findings.some((finding) => finding.severity === 'block') &&
     !report.issues.some((issue) => issue.severity === 'high') &&
     !qualityGateHasRequiredFixes(report)
   )

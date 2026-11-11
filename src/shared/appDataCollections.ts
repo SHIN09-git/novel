@@ -7,6 +7,7 @@ export type AppDataArrayKey = {
 export const PROJECT_SCOPED_COLLECTIONS = [
   'storyBibles',
   'chapters',
+  'chapterTitleReceipts',
   'characters',
   'characterStateLogs',
   'characterStateFacts',
@@ -39,6 +40,7 @@ export const PROJECT_SCOPED_COLLECTIONS = [
   'chapterVersions',
   'chapterCommitBundles',
   'revisionCommitBundles',
+  'chapterWritebackFailures',
   'agentRuns',
   'agentActionPreviews'
 ] as const satisfies readonly AppDataArrayKey[]
@@ -62,6 +64,7 @@ export const APP_DATA_COLLECTION_LABELS = {
   projects: '项目',
   storyBibles: '小说圣经',
   chapters: '章节',
+  chapterTitleReceipts: '正式章节改名记录',
   characters: '角色',
   characterStateLogs: '角色状态日志',
   characterStateFacts: '动态状态账本',
@@ -97,6 +100,7 @@ export const APP_DATA_COLLECTION_LABELS = {
   chapterVersions: '章节历史版本',
   chapterCommitBundles: '章节提交记录',
   revisionCommitBundles: '修订提交记录',
+  chapterWritebackFailures: '正式章节写回失败记录',
   agentRuns: 'Agent 批次',
   agentActionPreviews: 'Agent 操作预览'
 } satisfies Record<AppDataArrayKey, string>

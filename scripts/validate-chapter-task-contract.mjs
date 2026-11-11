@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import { mkdir, readFile, rm } from 'node:fs/promises'
+import { mkdir, rm } from 'node:fs/promises'
 import { join } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { build } from 'esbuild'
@@ -81,7 +81,7 @@ const { ChapterTaskContractService } = await bundle('src/services/ChapterTaskCon
 const { QualityGateService } = await bundle('src/services/QualityGateService.ts', 'quality-gate-service.mjs')
 const { shouldQualityGateRequireHumanReview } = await bundle('src/shared/qualityGatePolicy.ts', 'quality-policy.mjs')
 const { buildAuthoritativeOpeningDraftPrompt } = await bundle('src/services/ai/GenerationPipelineAI.ts', 'generation-prompt.mjs')
-const { validateAuthoritativeChapterTaskDraft } = await bundle('src/renderer/src/views/generation/pipelineUtils.ts', 'pipeline-utils.mjs')
+const { validateAuthoritativeChapterTaskDraft, validateGeneratedChapterDraft } = await bundle('src/renderer/src/views/generation/pipelineUtils.ts', 'pipeline-utils.mjs')
 
 const shortBody = `我${'做饭'.repeat(1144)}呀。`
 assert([...shortBody.replace(/\s/gu, '')].length === 2291, 'Short-body regression fixture must remain exactly 2291 visible characters.')
@@ -529,7 +529,34 @@ for (const dimension of ['promptCompliance', 'pacing', 'styleMatch']) {
   assert(shouldQualityGateRequireHumanReview(report), `${dimension}=65 的存量报告必须进入人工复核。`)
 }
 
-const chapterGeneration = await readFile(join(root, 'src/renderer/src/views/generation/pipelineSteps/chapterGeneration.ts'), 'utf8')
-assert((chapterGeneration.match(/validateAuthoritativeChapterTaskDraft/g) ?? []).length === 3, '权威任务合约必须在首次草稿和择优后的最终草稿上都校验。')
+const overflowTask = task({ targetWordCount: '1200-1300' })
+const overflowBody = '钟楼落雨，灯未熄。'.repeat(220) + '灯还亮着。'
+const retainOverflow = { allowReviewableLengthOverflow: true }
+assert(ChapterTaskContractService.lengthOverflowNotice({ body: overflowBody, chapterTask: overflowTask }) ===
+  '目标 1200–1300 字，实际 1985 字，超出上限 685 字。', '作者应能看到真实目标、字数和差值。')
+assert(ChapterTaskContractService.lengthOverflowNotice({ body: overflowBody, chapterTask: task({ targetWordCount: '1200' }) }) === null,
+  '单一目标不能被推断成作者的硬上限。')
+assert(validateAuthoritativeChapterTaskDraft(overflowBody, '', '1200-1300', true, overflowTask, retainOverflow) === null,
+  '仅有明确超限不应使可读正文丢失。')
+assert(validateAuthoritativeChapterTaskDraft(overflowBody, '', '1200-1300', true, overflowTask) !== null,
+  '保留为候选不等于通过正式任务契约。')
+assert(validateAuthoritativeChapterTaskDraft(overflowBody, '', '1200-1300', true,
+  { ...overflowTask, styleRequirement: '禁止使用“钟楼”。' }, retainOverflow) !== null,
+  '同时违反明确禁词时仍需处理，不能被超限例外覆盖。')
+for (const ending of ['他停在开口前。', '他停在开口前……', '“他停在开口前”', '他停在开口前——', '他停在开口前']) {
+  assert(validateGeneratedChapterDraft(overflowBody + ending, '1200-1300', true) === null, '不能仅凭末尾标点判定截断。', ending)
+}
+for (const unusable of ['', '{"title":"未完', '[{"body":"未完', '【本章目标】留下悬念。']) {
+  assert(validateGeneratedChapterDraft(unusable, '', false) !== null, '损坏结构、空结果和任务书不应变成正文。', unusable)
+}
+const overflowReport = await QualityGateService.evaluateChapterDraft({
+  projectId: 'project-1', jobId: 'overflow', chapterId: null, draftId: 'retained', chapterDraft: { title: '雨夜', body: overflowBody },
+  context: '', chapterPlan: null, chapterTask: overflowTask, noveltyAuditResult: passNoveltyAudit(),
+  aiService: { async generateQualityGateReport() { return {
+    ok: true, usedAI: true, data: { overallScore: 99, pass: true, dimensions: strongDimensions(99), issues: [], requiredFixes: [], optionalSuggestions: [] }
+  } } }
+})
+assert(!overflowReport.pass && overflowReport.issues.some((item) => item.type === 'chapter_task_length'),
+  '超限保稿不能让高模型评分绕过正式审稿。')
 
 console.log('ChapterTask contract validation passed.')

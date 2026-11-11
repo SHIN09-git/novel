@@ -78,6 +78,8 @@ import type {
   StoryDirectionGuideStatus,
   StoryDirectionHorizon
 } from '../types'
+import { readTokenUsage } from '../tokenUsage'
+import { isChapterOrder, isStoryDirectionLength } from '../storyDirectionRange'
 
 import { normalizeTreatmentMode } from '../foreshadowingTreatment'
 import { arrayOrEmpty, objectOrEmpty, stringArrayValue, stringValue } from './common'
@@ -182,16 +184,9 @@ function normalizeAiCallTrace(value: unknown, index: number): GenerationRunTrace
     durationMs: numberOrUndefined(call.durationMs) ?? 0,
     attempts: Math.round(numberOrUndefined(call.attempts) ?? 0),
     responseFormatFallback: call.responseFormatFallback === true,
+    ...(call.usageJournalIncomplete === true ? { usageJournalIncomplete: true as const } : {}),
     finishReason: stringValue(call.finishReason).slice(0, 120) || undefined,
-    usage: Object.keys(usage).length
-      ? {
-          promptTokens: numberOrUndefined(usage.promptTokens),
-          completionTokens: numberOrUndefined(usage.completionTokens),
-          totalTokens: numberOrUndefined(usage.totalTokens),
-          reasoningTokens: numberOrUndefined(usage.reasoningTokens),
-          cachedPromptTokens: numberOrUndefined(usage.cachedPromptTokens)
-        }
-      : undefined,
+    usage: readTokenUsage(usage),
     terminationCategory:
       call.terminationCategory === 'cancelled' || call.terminationCategory === 'timeout'
         ? call.terminationCategory
@@ -358,6 +353,9 @@ function normalizePromptCompositionMetrics(value: unknown, fallbackTotalTokenEst
 
 export function normalizeGenerationRunTrace(value: GenerationRunTrace | Record<string, unknown>): GenerationRunTrace {
   const trace = objectOrEmpty(value)
+  const start = isChapterOrder(trace.storyDirectionGuideStartChapterOrder) ? trace.storyDirectionGuideStartChapterOrder : null
+  const end = isChapterOrder(trace.storyDirectionGuideEndChapterOrder) ? trace.storyDirectionGuideEndChapterOrder : null
+  const horizon = start !== null && end !== null && end >= start ? end - start + 1 : trace.storyDirectionGuideHorizon
   const timestamp = new Date().toISOString()
   const continuitySource =
     trace.continuitySource === 'saved_bridge' || trace.continuitySource === 'auto_from_previous_ending' || trace.continuitySource === 'manual'
@@ -435,9 +433,9 @@ export function normalizeGenerationRunTrace(value: GenerationRunTrace | Record<s
       trace.storyDirectionGuideSource === 'user_polished' || trace.storyDirectionGuideSource === 'mixed' || trace.storyDirectionGuideSource === 'ai_generated'
         ? trace.storyDirectionGuideSource
         : null,
-    storyDirectionGuideHorizon: trace.storyDirectionGuideHorizon === 5 || trace.storyDirectionGuideHorizon === 10 ? trace.storyDirectionGuideHorizon : null,
-    storyDirectionGuideStartChapterOrder: typeof trace.storyDirectionGuideStartChapterOrder === 'number' ? trace.storyDirectionGuideStartChapterOrder : null,
-    storyDirectionGuideEndChapterOrder: typeof trace.storyDirectionGuideEndChapterOrder === 'number' ? trace.storyDirectionGuideEndChapterOrder : null,
+    storyDirectionGuideHorizon: isStoryDirectionLength(horizon) ? horizon : null,
+    storyDirectionGuideStartChapterOrder: start,
+    storyDirectionGuideEndChapterOrder: end,
     storyDirectionBeatId: stringValue(trace.storyDirectionBeatId) || null,
     storyDirectionAppliedToChapterTask: typeof trace.storyDirectionAppliedToChapterTask === 'boolean' ? trace.storyDirectionAppliedToChapterTask : false,
     hardCanonPackItemCount: typeof trace.hardCanonPackItemCount === 'number' ? trace.hardCanonPackItemCount : 0,

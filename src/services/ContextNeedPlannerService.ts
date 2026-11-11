@@ -14,6 +14,7 @@ import type {
 } from '../shared/types'
 import { isForeshadowingAvailableAtChapter } from '../shared/foreshadowingTreatment'
 import { StoryDirectionService } from './StoryDirectionService'
+import { coversStoryDirectionChapter } from '../shared/storyDirectionRange'
 import { buildCharacterNeedPlanSlice } from './contextNeedPlanner/characterNeeds'
 import type { BuildNeedPlanInput } from './contextNeedPlanner/types'
 import {
@@ -54,7 +55,7 @@ export class ContextNeedPlannerService {
     const taskOnlyText = combinedTaskText(input.chapterTaskDraft)
     const freeformNegativeText = negativeTaskText(input.chapterTaskDraft)
     const forbiddenText = [textValue(input.chapterTaskDraft.forbiddenPayoffs), freeformNegativeText].filter(Boolean).join('\n')
-    const storyDirectionText = isolateOpeningLegacyContext
+    const storyDirectionText = isolateOpeningLegacyContext || (input.storyDirectionGuide && !coversStoryDirectionChapter(input.storyDirectionGuide, input.targetChapterOrder))
       ? ''
       : input.storyDirectionPromptText ?? StoryDirectionService.formatForPrompt(input.storyDirectionGuide ?? null, input.targetChapterOrder)
     const continuityBridge = isolateOpeningLegacyContext ? null : input.continuityBridge

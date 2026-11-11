@@ -90,7 +90,8 @@ const checks = [
   },
   {
     ok:
-      /useSelectedPipelineJob\(scoped,\s*selectedJobId,\s*preparingNewTask\)/.test(generationPipelineView) &&
+      /useSelectedPipelineJob\(scoped,\s*initialJobId\s*\?\?\s*selectedJobId,\s*preparingNewTask\)/.test(generationPipelineView) &&
+      /scoped\.chapterGenerationJobs\.find\(item => item\.id === initialJobId\)/.test(generationPipelineView) &&
       /selectedJob\s*\?\s*scoped\.chapterGenerationSteps/.test(selectedPipelineJobHook),
     message: 'GenerationPipelineView delegates selected step lookup through scoped project data'
   },

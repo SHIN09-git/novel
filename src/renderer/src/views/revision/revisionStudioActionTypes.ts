@@ -8,6 +8,7 @@ import type {
   Project,
   QualityGateReport,
   RevisionCommitBundle,
+  RevisionGenerationRequest,
   RevisionRequest,
   RevisionRequestType,
   RevisionSession,
@@ -30,6 +31,7 @@ export interface RevisionStudioActionContext {
   confirmAction: ConfirmFn
   getAiService: () => Promise<AIService>
   buildRevisionContext: () => string
+  confirmUsage?: (request: RevisionGenerationRequest, context: string) => Promise<boolean>
   sourceKind: 'chapter' | 'draft'
   selectedChapter: Chapter | null
   selectedDraft: GeneratedChapterDraft | null

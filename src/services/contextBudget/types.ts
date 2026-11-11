@@ -3,6 +3,8 @@ import type {
   ChapterTask,
   CharacterCardField,
   Character,
+  CharacterStateFact,
+  CharacterStateTransaction,
   ContextBudgetProfile,
   ContextNeedItem,
   ContextNeedPriority,
@@ -28,6 +30,9 @@ export interface ProjectContextData {
   bible: StoryBible | null
   chapters: Chapter[]
   characters: Character[]
+  characterStateFacts?: CharacterStateFact[]
+  characterStateTransactions?: CharacterStateTransaction[]
+  stateSourceChapters?: Chapter[]
   foreshadowings: Foreshadowing[]
   timelineEvents: TimelineEvent[]
   stageSummaries: StageSummary[]
@@ -45,6 +50,7 @@ export interface ForcedContextSelection {
 
 export interface ScoringContext {
   targetChapterOrder: number
+  characterStateFacts?: readonly CharacterStateFact[]
   task?: Partial<ChapterTask> | null
   forcedCharacterIds: Set<ID>
   forcedForeshadowingIds: Set<ID>

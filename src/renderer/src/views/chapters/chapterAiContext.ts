@@ -1,10 +1,13 @@
-import type { Chapter, Character, Foreshadowing, Project, StoryBible } from '../../../../shared/types'
+import type { Chapter, Character, CharacterStateFact, Foreshadowing, Project, StoryBible } from '../../../../shared/types'
+import { getRelevantCharacterStatesForPrompt } from '../../../../services/characterState/stateSelection'
+import { formatCharacterStateLedgerSlice } from '../../../../services/promptFormatters/characterFormatters'
 
 interface ChapterAiContextInput {
   project: Project
   bible: StoryBible | null
   chapters: Chapter[]
   characters: Character[]
+  characterStateFacts?: CharacterStateFact[]
   foreshadowings: Foreshadowing[]
   selectedChapter: Chapter | null
 }
@@ -19,6 +22,7 @@ export function buildChapterAiContext({
   bible,
   chapters,
   characters,
+  characterStateFacts = [],
   foreshadowings,
   selectedChapter
 }: ChapterAiContextInput): string {
@@ -30,6 +34,10 @@ export function buildChapterAiContext({
     .filter(Boolean)
     .join('\n')
   const mainCharacters = characters.filter((character) => character.isMain).map((character) => character.name).filter(Boolean).join('、')
+  const cast = characters.filter(c => c.projectId === project.id && (c.isMain || (c.name && selectedChapter?.body.includes(c.name))))
+  const facts = selectedChapter ? getRelevantCharacterStatesForPrompt(cast.map(c => c.id), null, selectedChapter.order,
+    characterStateFacts.filter(f => f.projectId === project.id)) : []
+  const ledger = formatCharacterStateLedgerSlice(cast, facts)
   const activeForeshadowings = foreshadowings
     .filter((item) => item.status !== 'resolved' && item.status !== 'abandoned')
     .map((item) => item.title)
@@ -44,6 +52,7 @@ export function buildChapterAiContext({
     bible?.mainConflict ? `主线冲突：${bible.mainConflict}` : '',
     bible?.immutableFacts ? `重要不可违背设定：${bible.immutableFacts}` : '',
     mainCharacters ? `主要角色：${mainCharacters}` : '',
+    ledger ? `【角色状态账本切片】\n${ledger}` : '',
     activeForeshadowings ? `未回收伏笔：${activeForeshadowings}` : '',
     recentChapters ? `最近章节摘要：\n${recentChapters}` : '未提供最近章节摘要；请只依据当前正文和已给出的项目资料分析，不要补写历史剧情。'
   ].filter(Boolean).join('\n')

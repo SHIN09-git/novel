@@ -8,7 +8,6 @@ import type {
   ChapterTask,
   ChapterPlan,
   ConsistencyReviewReport,
-  ContextBudgetMode,
   ContextBudgetProfile,
   ContextNeedPlan,
   ContextSelectionResult,
@@ -25,13 +24,14 @@ import type {
   MemoryUpdateCandidate,
   NoveltyAuditResult,
   PipelineContextSource,
-  PipelineMode,
   PipelineAIRole,
   Project,
   PromptContextSnapshot,
   StoryDirectionGuide
 } from '../../../../shared/types'
 import { newId, now } from '../../utils/format'
+import { usePipelineUsageConfirmation } from './usePipelineUsageConfirmation'
+import type { PipelineRunOptions } from './pipelineRunnerTypes'
 import { getNovelDirectorAiApi } from '../../platform/novelDirectorBridge'
 import { releasePipelineRunLock, tryAcquirePipelineRunLock } from '../../utils/pipelineRunLock'
 import { createPipelineAIRunConfig, resolvePipelineRoleSettings, resolvePipelineRunSettings } from '../../../../services/PipelineRunContextService'
@@ -47,7 +47,7 @@ type GenerationRunBundleServiceModule = typeof import('../../../../services/Gene
 // source-based regression checks: blockType: 'character_state_fact', blockType: 'hard_canon'.
 // Step order anchor for source-based checks:
 // 'generate_chapter_plan' -> 'context_need_planning_from_plan' -> 'context_budget_selection_delta' -> 'rebuild_context_with_plan' -> 'generate_chapter_draft'.
-interface UsePipelineRunnerArgs {
+interface UsePipelineRunnerArgs extends PipelineRunOptions {
   data: AppData
   project: Project
   scoped: {
@@ -62,12 +62,6 @@ interface UsePipelineRunnerArgs {
   }
   saveData: SaveDataHandler
   saveGenerationRunBundle?: (next: SaveDataInput, bundle: GenerationRunBundle) => Promise<void>
-  targetChapterOrder: number
-  pipelineMode: PipelineMode
-  estimatedWordCount: string
-  readerEmotionTarget: string
-  budgetMode: ContextBudgetMode
-  budgetMaxTokens: number
   contextSource: PipelineContextSource
   selectedSnapshot: PromptContextSnapshot | null
   setSelectedJobId: (id: ID) => void
@@ -90,10 +84,12 @@ export function usePipelineRunner({
   setSelectedJobId
 }: UsePipelineRunnerArgs) {
   const [pipelineMessage, setPipelineMessage] = useState('')
+  const confirmPipelineUsage = usePipelineUsageConfirmation(data, project, setPipelineMessage)
   const pipelineRunLockRef = useRef(false)
   const [isPipelineRunning, setIsPipelineRunning] = useState(false)
-  const getAiService = useCallback(async (settings: AppData['settings'], runId: ID) => {
-    const { AIService } = await import('../../../../services/AIService'); return new AIService(settings, { runId })
+  const getAiService = useCallback(async (settings: AppData['settings'], runId: ID, projectId: ID) => {
+    const { AIService } = await import('../../../../services/AIService')
+    return new AIService(settings, { runId, projectId })
   }, [])
 
   function makeInitialSteps(jobId: ID): ChapterGenerationStep[] {
@@ -162,7 +158,6 @@ export function usePipelineRunner({
       setPipelineMessage('流水线正在运行，请等待当前任务结束后再启动。')
       return
     }
-    setIsPipelineRunning(true)
     try {
     if (runContextSource === 'prompt_snapshot' && !runSnapshot) {
       setPipelineMessage('请先选择一个 Prompt 构建器上下文快照，或切换为自动构建上下文。')
@@ -190,6 +185,16 @@ export function usePipelineRunner({
       updatedAt: timestamp,
       errorMessage: ''
     }
+    const options: PipelineRunOptions = {
+      targetChapterOrder: runTargetChapterOrder,
+      pipelineMode,
+      estimatedWordCount,
+      readerEmotionTarget,
+      budgetMode,
+      budgetMaxTokens
+    }
+    if (!await confirmPipelineUsage(job, 'context_need_planning', options)) return
+    setIsPipelineRunning(true)
     const steps = makeInitialSteps(job.id)
     let working: AppData = {
       ...data,
@@ -198,14 +203,7 @@ export function usePipelineRunner({
     }
     await persistWorking(working, job.id)
     setSelectedJobId(job.id)
-    await runPipelineFromStep(working, job.id, 'context_need_planning', {
-      targetChapterOrder: runTargetChapterOrder,
-      pipelineMode,
-      estimatedWordCount,
-      readerEmotionTarget,
-      budgetMode,
-      budgetMaxTokens
-    })
+    await runPipelineFromStep(working, job.id, 'context_need_planning', options)
     } catch (error) {
       setPipelineMessage(error instanceof Error ? error.message : String(error))
     } finally {
@@ -277,12 +275,13 @@ export function usePipelineRunner({
       setPipelineMessage('流水线正在运行，请等待当前任务结束后再重试。')
       return
     }
-    setIsPipelineRunning(true)
     try {
       const firstStep = data.chapterGenerationSteps.find((step) => step.jobId === job.id && step.type === stepType)
       if (!firstStep) return
       const fallbackOptions = { targetChapterOrder: job.targetChapterOrder, pipelineMode, estimatedWordCount, readerEmotionTarget, budgetMode, budgetMaxTokens }
       const options = normalizePipelineOptions(parseOutput(firstStep.inputSnapshot, fallbackOptions), fallbackOptions)
+      if (!await confirmPipelineUsage(job, stepType, options)) return
+      setIsPipelineRunning(true)
       await runPipelineFromStep(data, job.id, stepType, options)
     } catch (error) {
       setPipelineMessage(error instanceof Error ? error.message : String(error))
@@ -296,17 +295,11 @@ export function usePipelineRunner({
     initialData: AppData,
     jobId: ID,
     fromStep: ChapterGenerationStepType,
-    inputOptions: {
-      targetChapterOrder: number
-      pipelineMode: PipelineMode
-      estimatedWordCount: string
-      readerEmotionTarget: string
-      budgetMode: ContextBudgetMode
-      budgetMaxTokens: number
-    }
+    inputOptions: PipelineRunOptions
   ) {
     const { runPipelineFromStepEngine } = await import('./pipelineRunnerEngine')
     const pipelineJob = initialData.chapterGenerationJobs.find((item) => item.id === jobId)
+    if (!pipelineJob || pipelineJob.projectId !== project.id) throw new Error('流水线任务不属于本项目。')
     const aiSettings = resolvePipelineRunSettings(pipelineJob?.aiRunConfig, data.settings)
     const roleSettings = (role: PipelineAIRole) => resolvePipelineRoleSettings(pipelineJob?.aiRunConfig, data.settings, role)
     return runPipelineFromStepEngine(initialData, jobId, fromStep, inputOptions, {
@@ -319,7 +312,7 @@ export function usePipelineRunner({
       readerEmotionTarget,
       budgetMode,
       budgetMaxTokens,
-      getAiService: (role) => getAiService(roleSettings(role), jobId),
+      getAiService: (role) => getAiService(roleSettings(role), jobId, pipelineJob.projectId),
       getAiSettings: roleSettings,
       aiSettings,
       runId: jobId,

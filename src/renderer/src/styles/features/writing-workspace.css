@@ -1,7 +1,7 @@
 /* Writing routes share the application palette; only their chrome is denser so prose gets the room. */
 .app-shell[data-writing-workspace="true"] {
   --topbar-height: 48px;
-  --workspace-sticky-offset: 60px;
+  --workspace-sticky-offset: 64px;
   --shadow-card: none;
   --shadow-soft: none;
   --shadow: none;

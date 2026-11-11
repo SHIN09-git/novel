@@ -63,6 +63,15 @@ export type CharacterStateRiskLevel = 'low' | 'medium' | 'high'
 
 export type ContinuityCheckCategory = 'location' | 'injury' | 'money' | 'inventory' | 'knowledge' | 'relationship' | 'promise' | 'ability' | 'timeline'
 
+export interface CharacterCardReview {
+  chapterId: ID
+  chapterOrder: number
+  chapterVersionId: ID | null
+  basisFingerprint: string
+  reviewedAt: string
+  decision: 'keep' | 'update'
+}
+
 export interface Character {
   id: ID
   projectId: ID
@@ -86,10 +95,23 @@ export interface Character {
   relationshipTension: string
   futureHooks: string
   lastChangedChapter: number | null
+  lastCardReview?: CharacterCardReview
   isMain: boolean
   createdAt: string
   updatedAt: string
 }
+
+export type CharacterProfilePatch = Partial<Pick<Character, CharacterCardField | 'name' | 'role' | 'deepDesire' |
+  'selfDeception' | 'knownInformation' | 'unknownInformation' | 'protagonistRelationship' | 'emotionalState' |
+  'nextActionTendency' | 'forbiddenWriting' | 'lastChangedChapter' | 'isMain'>>
+
+export type CharacterCardReviewCommand = {
+  projectId: ID
+  characterId: ID
+  chapterId: ID
+  chapterOrder: number
+  expectedFingerprint: string
+} & ({ decision: 'keep'; patch?: never } | { decision: 'update'; patch: CharacterProfilePatch })
 
 export interface CharacterStateLog {
   id: ID
@@ -122,6 +144,8 @@ export interface CharacterStateFact {
   status: CharacterStateFactStatus
   sourceChapterId: ID | null
   sourceChapterOrder: number | null
+  /** Read-time only: undated current author setting for this new chapter. Not a story-time source. */
+  currentAsOfChapter?: number
   evidence: string
   confidence: number
   createdAt: string
@@ -143,9 +167,18 @@ export interface CharacterStateTransaction {
   evidence: string
   source: CharacterStateTransactionSource
   status: CharacterStateTransactionStatus
+  /** Identity and presentation when the change took effect, independent of later edits to the ledger row. */
+  factDefinition?: CharacterStateFactDefinition
+  /** Bound at extraction, not at acceptance of a possibly stale suggestion. */
+  sourceBodyHash?: string
+  reversesTransactionIds?: ID[]
+  preservedPriorFact?: boolean
   createdAt: string
   updatedAt: string
 }
+
+export type CharacterStateFactDefinition = Pick<CharacterStateFact,
+  'category' | 'key' | 'unit' | 'label' | 'valueType' | 'trackingLevel' | 'promptPolicy' | 'linkedCardFields' | 'confidence' | 'status'>
 
 export interface CharacterStateChangeSuggestion {
   characterId: ID

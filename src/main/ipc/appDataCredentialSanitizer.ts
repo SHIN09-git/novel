@@ -31,7 +31,7 @@ export async function secureAndSanitizeAppData(
 
   if (legacyApiKey && migrateLegacyApiKey) {
     try {
-      await context.credentialService.migrateLegacyApiKey(legacyApiKey)
+      await context.credentialService.migrateLegacyApiKey(legacyApiKey, normalized.settings.baseUrl)
       hasApiKey = true
       migratedLegacyApiKey = true
     } catch (error) {

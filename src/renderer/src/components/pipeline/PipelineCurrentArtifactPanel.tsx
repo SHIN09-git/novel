@@ -1,5 +1,6 @@
 import type { ReactNode } from 'react'
 import type { ChapterAcceptanceReview, ChapterGenerationJob, ChapterGenerationStep, ChapterGenerationStepType, GeneratedChapterDraft } from '../../../../shared/types'
+import { readChapterStepFragment } from '../../../../shared/chapterStepFragment'
 import { StatusBadge } from '../UI'
 import { PipelineDraftPanel } from './PipelineDraftPanel'
 
@@ -9,6 +10,18 @@ function latestPlanOutput(steps: ChapterGenerationStep[]) {
   return steps.find((step) => step.type === 'generate_chapter_plan' && step.output.trim())?.output ?? ''
 }
 
+function StepOutput({ step }: { step: ChapterGenerationStep }) {
+  const fragment = readChapterStepFragment(step)
+  if (!fragment) return step.output ? <pre>{step.output.slice(0, 1200)}</pre> : <p className="muted">暂无输出。</p>
+  return (
+    <>
+      <p className="notice">保留的不完整片段，仅供查看，不能采纳。{fragment.finishReason ? `结束原因：${fragment.finishReason}` : ''}</p>
+      {fragment.title ? <strong>{fragment.title}</strong> : null}
+      <pre>{fragment.body}</pre>
+    </>
+  )
+}
+
 export function PipelineCurrentArtifactPanel({
   activeTab,
   taskEditor,
@@ -16,6 +29,9 @@ export function PipelineCurrentArtifactPanel({
   job,
   isRunning,
   draft,
+  previousDraft,
+  lengthOverflowNotice,
+  hardCanonBlock,
   steps,
   labels,
   onAcceptDraft,
@@ -35,6 +51,9 @@ export function PipelineCurrentArtifactPanel({
   job: ChapterGenerationJob | null
   isRunning: boolean
   draft: GeneratedChapterDraft | null
+  previousDraft?: GeneratedChapterDraft
+  lengthOverflowNotice?: string | null
+  hardCanonBlock?: string | null
   steps: ChapterGenerationStep[]
   labels: Record<ChapterGenerationStepType, string>
   onAcceptDraft: (draft: GeneratedChapterDraft) => void
@@ -67,7 +86,7 @@ export function PipelineCurrentArtifactPanel({
         <button className={effectiveTab === 'plan' ? 'active' : ''} onClick={() => onActiveTabChange('plan')}>
           任务书
         </button>
-        <button className={effectiveTab === 'draft' ? 'active' : ''} disabled={!job} onClick={() => onActiveTabChange('draft')}>
+        <button className={effectiveTab === 'draft' ? 'active' : ''} disabled={!draft} onClick={() => onActiveTabChange('draft')}>
           草稿
         </button>
         <button className={effectiveTab === 'steps' ? 'active' : ''} disabled={!job} onClick={() => onActiveTabChange('steps')}>
@@ -79,6 +98,8 @@ export function PipelineCurrentArtifactPanel({
         <PipelineDraftPanel
           draft={draft}
           job={job}
+          lengthOverflowNotice={lengthOverflowNotice}
+          hardCanonBlock={hardCanonBlock}
           isRunning={isRunning}
           onAccept={onAcceptDraft}
           onAcceptUnreviewed={onAcceptUnreviewedDraft}
@@ -98,6 +119,7 @@ export function PipelineCurrentArtifactPanel({
       {effectiveTab === 'steps' ? (
         <div className="pipeline-step-output-list">
           {steps.length === 0 ? <p className="muted">还没有步骤输出。</p> : null}
+          {previousDraft ? <details><summary>此前的完整草稿：{previousDraft.title}</summary><pre>{previousDraft.body}</pre></details> : null}
           {steps.map((step) => (
             <details key={step.id} className={`pipeline-step-output ${step.status}`} open={step.status === 'failed' || step.status === 'running'}>
               <summary>
@@ -105,7 +127,7 @@ export function PipelineCurrentArtifactPanel({
                 <StatusBadge tone={step.status === 'failed' ? 'danger' : step.status === 'completed' ? 'success' : step.status === 'running' ? 'accent' : 'neutral'}>{step.status}</StatusBadge>
               </summary>
               {step.errorMessage ? <p className="error-text">{step.errorMessage}</p> : null}
-              {step.output ? <pre>{step.output.slice(0, 1200)}</pre> : <p className="muted">暂无输出。</p>}
+              <StepOutput step={step} />
               <div className="row-actions">
                 <button className="ghost-button" disabled={!job || isRunning || step.status === 'running'} onClick={() => job && onRetryStep(job, step.type)}>
                   重试

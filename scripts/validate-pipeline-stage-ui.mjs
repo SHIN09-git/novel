@@ -55,7 +55,7 @@ if (!consoleView.includes('<PipelineStageDecisionProvider') || !consoleView.incl
 if (!pipelineView.includes('getEditorialVerdictForDraft(data, latestDraft.id)') || !pipelineView.includes('editorialVerdict,')) {
   throw new Error('Pipeline view must look up and pass the verdict for the exact current draft')
 }
-for (const fragment of ['editorialVerdict: EditorialVerdict | null', 'editorialVerdict.summary', 'editorialVerdict.blockers', 'editorialVerdict.advisories', 'actions.slice(0, 3)', 'pipeline-original-reports', '质量报告 JSON', '审稿报告 JSON']) {
+for (const fragment of ['editorialVerdict: EditorialVerdict | null', 'editorialVerdict.summary', 'editorialVerdict.blockers', 'editorialVerdict.advisories', 'nextActions.slice(0, 3)', 'pipeline-original-reports', '质量报告 JSON', '审稿报告 JSON']) {
   if (!diagnostics.includes(fragment)) throw new Error(`Editorial diagnostics UI is missing: ${fragment}`)
 }
 for (const selector of ['.pipeline-stage-board', '.pipeline-stage-list', '.pipeline-raw-steps', '.pipeline-editorial-section', '.pipeline-original-reports', '@media (max-width: 620px)']) {

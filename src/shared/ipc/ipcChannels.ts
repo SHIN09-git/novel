@@ -1,5 +1,9 @@
 export const IPC_CHANNELS = {
+  DATA_GET_PROJECT_USAGE: 'data:get-project-usage',
   DATA_EXECUTE_CANDIDATE_DECISION: 'data:execute-candidate-decision',
+  DATA_REVIEW_CHARACTER_CARD: 'data:review-character-card',
+  DATA_PREVIEW_CHAPTER_TITLES: 'data:preview-chapter-titles',
+  DATA_RENAME_CHAPTER_TITLES: 'data:rename-chapter-titles',
   STORAGE_GET: 'storage:get',
   STORAGE_SAVE: 'storage:save',
   DATA_SAVE_GENERATION_RUN_BUNDLE: 'data:save-generation-run-bundle',

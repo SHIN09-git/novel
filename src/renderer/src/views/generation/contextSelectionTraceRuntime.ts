@@ -1,4 +1,5 @@
 import type {
+  Character,
   CharacterStateFact,
   ContextNeedPlan,
   ContextSelectionMode,
@@ -8,15 +9,32 @@ import type {
 } from '../../../../shared/types'
 import { TokenEstimator } from '../../../../services/TokenEstimator'
 
-export function characterStateFactsPresentInPrompt(prompt: string, facts: CharacterStateFact[]): CharacterStateFact[] {
-  const normalizedPrompt = prompt.replace(/\s+/g, '')
+export function characterStateFactsPresentInPrompt(prompt: string, facts: CharacterStateFact[], characters: Character[] = []): CharacterStateFact[] {
+  const ledger = prompt.split('【角色状态账本切片】')[1]?.split(/【|^##\s/m)[0]
+  const linesByName = new Map<string, string[]>()
+  let name = ''
+  for (const line of ledger?.split(/\r?\n/) ?? []) {
+    const heading = /^###\s*角色[：:]\s*(.+)/.exec(line)
+    if (heading) { name = heading[1].trim(); continue }
+    if (name && line.startsWith('- ')) {
+      const lines = linesByName.get(name) ?? []
+      lines.push(line.slice(2).trim())
+      linesByName.set(name, lines)
+    }
+  }
+  const names = new Map(characters.map(c => [c.id, c.name || '未命名角色']))
+  const legacy = prompt.match(/【当前角色硬状态】([^【\n]+)/)?.[1]?.trim()
   return facts.filter((fact) => {
-    const label = (fact.label || fact.key).replace(/\s+/g, '')
-    if (label.length >= 2 && normalizedPrompt.includes(label)) return true
-    const value = typeof fact.value === 'string' || typeof fact.value === 'number' || typeof fact.value === 'boolean'
-      ? String(fact.value).replace(/\s+/g, '')
-      : ''
-    return value.length >= 4 && normalizedPrompt.includes(value.slice(0, Math.min(24, value.length)))
+    const label = fact.label || fact.key
+    const value = Array.isArray(fact.value) ? fact.value.join('、') : String(fact.value)
+    const prefix = `${label}：${value}${fact.unit ? ' ' + fact.unit : ''}。`
+    const owner = names.get(fact.characterId)
+    const lines = owner ? linesByName.get(owner) ?? [] : characters.length ? [] : [...linesByName.values()].flat()
+    if (lines.some(line => line.startsWith(prefix) &&
+      (!fact.sourceChapterOrder || line.includes(`来源：第 ${fact.sourceChapterOrder} 章。`)))) return true
+    // Old snapshots could name a condition without a ledger table. A balance label alone proves no amount.
+    return !!legacy && !ledger && !fact.unit && typeof fact.value === 'string' &&
+      (legacy === label + '。' || legacy === value || legacy === prefix)
   })
 }
 
@@ -59,7 +77,7 @@ export function enrichContextSelectionTrace(
   }
 ): ContextSelectionTrace | null {
   if (!baseTrace) return null
-  const selectedBlocks = [...baseTrace.selectedBlocks]
+  const selectedBlocks = baseTrace.selectedBlocks.filter(block => block.blockType !== 'character_state_fact')
   const droppedBlocks = [...baseTrace.droppedBlocks]
   const factsByCharacterId = new Set(args.includedCharacterStateFacts.map((fact) => fact.characterId))
   const includedHardCanonIds = new Set(args.hardCanonTrace.includedItemIds)

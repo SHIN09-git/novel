@@ -109,12 +109,108 @@ export function buildAuthoritativeOpeningDraftPrompt(
   ].join('\n')
 }
 
+type PlanPromptOptions = { mode: PipelineMode; targetChapterOrder: number; estimatedWordCount: string; readerEmotionTarget: string; chapterTask: ChapterTask }
+type DraftPromptOptions = { mode: PipelineMode; targetChapterOrder: number; estimatedWordCount: string; readerEmotionTarget: string; chapterTask: ChapterTask; authoritativeChapterTask?: boolean; retryReason?: string; previousDraft?: ChapterDraftResult; retryIssueTypes?: string[] }
+
+export function chapterPlanMessages(context: string, options: PlanPromptOptions) {
+  const { chapterTask } = options
+  const isOpeningChapter = options.targetChapterOrder === 1
+  const userPrompt = [
+    'You are planning the target chapter for a long-form novel pipeline.',
+    'Return strict JSON only with keys:',
+    '{"chapterTitle":"","chapterGoal":"","conflictToPush":"","characterBeats":"","foreshadowingToUse":"","foreshadowingNotToReveal":"","endingHook":"","readerEmotionTarget":"","estimatedWordCount":"","openingContinuationBeat":"","carriedPhysicalState":"","carriedEmotionalState":"","unresolvedMicroTensions":"","forbiddenResets":"","allowedNovelty":"","forbiddenNovelty":""}',
+    isOpeningChapter
+      ? 'The JSON schema retains opening boundary fields. Fill them only with explicit no-prior-chapter boundaries and task-listed daily friction; they are not permission to invent continuity, backstory, or unresolved plot tension.'
+      : 'The plan must include continuity bridge fields: openingContinuationBeat, carriedPhysicalState, carriedEmotionalState, unresolvedMicroTensions, forbiddenResets.',
+    isOpeningChapter
+      ? 'The plan must include allowedNovelty and forbiddenNovelty. For chapter 1, named people/places, backstory, relationships, plot events, clues, and mechanisms are task-closed. Unnamed mundane vendors/bystanders, generic ingredients/utensils, and routine sensory/action details are allowed only when they carry no lore, clue, or hook.'
+      : 'The plan must include allowedNovelty and forbiddenNovelty. New named characters, rules, organizations, lore, and key props require explicit task permission or prior setup.',
+    isOpeningChapter
+      ? 'Opening-chapter hard rules: this is chapter 1. Establish the task-specified scene naturally. Do not invent a previous chapter, prior hook, off-page action, carried injury, or emotional aftermath.'
+      : 'Continuity hard rules: first scene must continue the previous chapter ending, preserve physical/emotional state, answer or carry the last hook within the first 300 Chinese characters, and avoid "meanwhile" or "some time later" unless explicitly requested.',
+    isOpeningChapter
+      ? `Mode: ${options.mode}. Chapter 1 remains plot-closed in every mode: organize the task-listed daily situation, allow only non-plot mundane texture, and do not propose extra conflict or foreshadowing.`
+      : `Mode: ${options.mode}. conservative = obey canon and add little; standard = moderate progress; aggressive = may propose new conflict/foreshadowing but mark it as candidate only.`,
+    isOpeningChapter
+      ? 'No existing foreshadowing is selected for this opening chapter. Do not add, hint at, advance, or explain any unlisted clue.'
+      : 'Foreshadowing treatment modes in context are binding: hidden/pause must not be used by default; hint stays subtle; advance cannot reveal truth; payoff alone may resolve.',
+    'The authoritative chapter task below is the immutable creative contract for this job. Preserve every specific instruction. If context contains generic or stale direction that conflicts with it, the authoritative chapter task wins.',
+    `Authoritative chapter task:\n${JSON.stringify(chapterTask, null, 2)}`,
+    `Target chapter: ${options.targetChapterOrder}`,
+    `Expected word count: ${chapterTask.targetWordCount || options.estimatedWordCount}`,
+    `Reader emotion target: ${chapterTask.readerEmotion || options.readerEmotionTarget || 'not specified'}`,
+    '',
+    `Context:\n${context}`
+  ].join('\n')
+  return [{ role: 'system', content: isOpeningChapter ? OPENING_CHAPTER_PLAN_SYSTEM_PROMPT : CHAPTER_PLAN_SYSTEM_PROMPT },
+    { role: 'user', content: userPrompt }] as const
+}
+
+export function chapterDraftMessages(chapterPlan: ChapterPlan, context: string, options: DraftPromptOptions) {
+  const { chapterTask } = options
+  const isOpeningChapter = options.targetChapterOrder === 1
+  const useCompactOpeningPrompt = isOpeningChapter && options.authoritativeChapterTask === true
+  const draftScopeRules = isOpeningChapter
+    ? [
+        'Scope hard rules: named people/places, backstory, relationships, plot events, clues, and mechanisms must come from the authoritative task. You may add unnamed ordinary vendors/bystanders, generic ingredients/utensils, and routine daily details only when they introduce no lore, clue, solution, or hook.',
+        'No existing foreshadowing is selected. Do not invent or hint at an unlisted clue, backstory, mechanism, organization, key prop, or named person.',
+        'Do not solve a small conflict with a new convenience introduced only in this draft.'
+      ]
+    : [
+        'Redundancy hard rules: do not repeat already-known environment descriptions or re-explain prior mechanisms; add only necessary new information.',
+        'Foreshadowing treatment rules are mandatory: hidden/pause must not advance; hint stays subtle; advance cannot reveal truth; payoff alone may resolve.',
+        'Novelty hard rules: do not invent unforeshadowed rescue rules, temporary permissions, organizations, ranks, or core lore to solve the current crisis.',
+        'Crisis resolution must come from provided rules, already foreshadowed clues, existing character abilities/resources, or mechanisms explicitly allowed in the chapter plan.',
+        'Any explicitly allowed new rule or mechanism must create cost, risk, or complication; it cannot be a free convenience.',
+        'Do not name unknown people unless the plan allows it or the context already identifies them.',
+        'Do not convert unauthorized new lore into stable canon; any new entity, rule, or lore remains a pending candidate until human confirmation.'
+      ]
+  const userPrompt = useCompactOpeningPrompt ? buildAuthoritativeOpeningDraftPrompt(chapterTask, options.retryReason, options.previousDraft, options.retryIssueTypes) : [
+    'You are drafting a novel chapter from an approved chapter plan.',
+    'Return strict JSON only: {"title":"","body":""}',
+    'The body must be complete prose, not an outline, summary, beat sheet, checklist, or bracketed notes.',
+    isOpeningChapter
+      ? 'Write a full chapter with scenes, actions, dialogue, and concrete daily details. End only on the task-specified closing beat; do not intensify it into an extra danger, destiny, or web-fiction hook.'
+      : 'Write a full chapter with scenes, actions, dialogue, sensory details, and an ending hook.',
+    'Do not stop mid-sentence. If the requested length is too high for the token budget, produce a shorter but complete chapter ending cleanly.',
+    'Do not reveal foreshadowing listed as forbidden.',
+    isOpeningChapter
+      ? 'Opening-chapter hard rules: this is chapter 1. Start naturally from the authoritative task. Do not invent a previous chapter, prior hook, off-page action, carried injury, or emotional aftermath.'
+      : 'Continuity hard rules: first scene must continue the previous chapter ending; do not restart the chapter with a fresh world introduction; preserve carried physical and emotional state; answer or carry the previous hook within the first 300 Chinese characters; avoid "meanwhile" / "some time later" unless the plan explicitly asks for a time jump.',
+    ...draftScopeRules,
+    'Do not change long-term canon, power rules, or stable worldbuilding.',
+    isOpeningChapter
+      ? 'Keep behavior consistent only with the task-listed relationship and immediate situation; do not infer a pre-existing dramatic arc or carried state.'
+      : 'Do not make characters suddenly OOC. Preserve current dramatic state.',
+    'The authoritative chapter task below is the immutable creative contract for this job. Follow every specific instruction. If the generated chapter plan or context conflicts with it, the authoritative chapter task wins.',
+    `Authoritative chapter task:\n${JSON.stringify(chapterTask, null, 2)}`,
+    `Mode: ${options.mode}`,
+    `Target chapter: ${options.targetChapterOrder}`,
+    `Expected word count: ${chapterTask.targetWordCount || options.estimatedWordCount}`,
+    `Reader emotion target: ${chapterTask.readerEmotion || options.readerEmotionTarget || chapterPlan.readerEmotionTarget}`,
+    options.retryReason
+      ? options.previousDraft?.body.trim()
+        ? `Previous draft was rejected because: ${options.retryReason}. Revise the supplied draft in place, preserve compliant facts and scene order, and return the complete revised prose chapter. Do not return a patch.`
+        : `Previous draft was rejected because: ${options.retryReason}. Regenerate a complete prose chapter now.`
+      : '',
+    '',
+    `Chapter plan:\n${JSON.stringify(chapterPlan, null, 2)}`,
+    '',
+    `Context:\n${context}`,
+    options.retryReason && options.previousDraft?.body.trim()
+      ? `\nPrevious draft to revise (not an additional canon source):\n${JSON.stringify(options.previousDraft, null, 2)}`
+      : ''
+  ].join('\n')
+  return [{ role: 'system', content: isOpeningChapter ? OPENING_CHAPTER_DRAFT_SYSTEM_PROMPT : CHAPTER_DRAFT_SYSTEM_PROMPT },
+    { role: 'user', content: userPrompt }] as const
+}
+
 export class GenerationPipelineAI {
   constructor(private readonly client: AIClient) {}
 
   async generateChapterPlan(
     context: string,
-    options: { mode: PipelineMode; targetChapterOrder: number; estimatedWordCount: string; readerEmotionTarget: string; chapterTask: ChapterTask }
+    options: PlanPromptOptions
   ): Promise<AIResult<ChapterPlan>> {
     const chapterTask = options.chapterTask
     const isOpeningChapter = options.targetChapterOrder === 1
@@ -141,41 +237,16 @@ export class GenerationPipelineAI {
         : 'Do not invent rescue rules, unforeshadowed permissions, new core canon mechanisms, arbitrary names for unknown people, or early explanations of protected mysteries.'
     }
 
-    const userPrompt = [
-      'You are planning the target chapter for a long-form novel pipeline.',
-      'Return strict JSON only with keys:',
-      '{"chapterTitle":"","chapterGoal":"","conflictToPush":"","characterBeats":"","foreshadowingToUse":"","foreshadowingNotToReveal":"","endingHook":"","readerEmotionTarget":"","estimatedWordCount":"","openingContinuationBeat":"","carriedPhysicalState":"","carriedEmotionalState":"","unresolvedMicroTensions":"","forbiddenResets":"","allowedNovelty":"","forbiddenNovelty":""}',
-      isOpeningChapter
-        ? 'The JSON schema retains opening boundary fields. Fill them only with explicit no-prior-chapter boundaries and task-listed daily friction; they are not permission to invent continuity, backstory, or unresolved plot tension.'
-        : 'The plan must include continuity bridge fields: openingContinuationBeat, carriedPhysicalState, carriedEmotionalState, unresolvedMicroTensions, forbiddenResets.',
-      isOpeningChapter
-        ? 'The plan must include allowedNovelty and forbiddenNovelty. For chapter 1, named people/places, backstory, relationships, plot events, clues, and mechanisms are task-closed. Unnamed mundane vendors/bystanders, generic ingredients/utensils, and routine sensory/action details are allowed only when they carry no lore, clue, or hook.'
-        : 'The plan must include allowedNovelty and forbiddenNovelty. New named characters, rules, organizations, lore, and key props require explicit task permission or prior setup.',
-      isOpeningChapter
-        ? 'Opening-chapter hard rules: this is chapter 1. Establish the task-specified scene naturally. Do not invent a previous chapter, prior hook, off-page action, carried injury, or emotional aftermath.'
-        : 'Continuity hard rules: first scene must continue the previous chapter ending, preserve physical/emotional state, answer or carry the last hook within the first 300 Chinese characters, and avoid "meanwhile" or "some time later" unless explicitly requested.',
-      isOpeningChapter
-        ? `Mode: ${options.mode}. Chapter 1 remains plot-closed in every mode: organize the task-listed daily situation, allow only non-plot mundane texture, and do not propose extra conflict or foreshadowing.`
-        : `Mode: ${options.mode}. conservative = obey canon and add little; standard = moderate progress; aggressive = may propose new conflict/foreshadowing but mark it as candidate only.`,
-      isOpeningChapter
-        ? 'No existing foreshadowing is selected for this opening chapter. Do not add, hint at, advance, or explain any unlisted clue.'
-        : 'Foreshadowing treatment modes in context are binding: hidden/pause must not be used by default; hint stays subtle; advance cannot reveal truth; payoff alone may resolve.',
-      'The authoritative chapter task below is the immutable creative contract for this job. Preserve every specific instruction. If context contains generic or stale direction that conflicts with it, the authoritative chapter task wins.',
-      `Authoritative chapter task:\n${JSON.stringify(chapterTask, null, 2)}`,
-      `Target chapter: ${options.targetChapterOrder}`,
-      `Expected word count: ${chapterTask.targetWordCount || options.estimatedWordCount}`,
-      `Reader emotion target: ${chapterTask.readerEmotion || options.readerEmotionTarget || 'not specified'}`,
-      '',
-      `Context:\n${context}`
-    ].join('\n')
+    const [system, user] = chapterPlanMessages(context, options)
 
     const result = await this.client.requestJson(
-      isOpeningChapter ? OPENING_CHAPTER_PLAN_SYSTEM_PROMPT : CHAPTER_PLAN_SYSTEM_PROMPT,
-      userPrompt,
+      system.content,
+      user.content,
       ensureChapterPlan,
       fallback,
       undefined,
-      validateChapterPlanSchema
+      validateChapterPlanSchema,
+      { phase: 'planning' }
     )
     if (result.data) return result
 
@@ -186,6 +257,7 @@ export class GenerationPipelineAI {
       rawText: result.rawText,
       parseError: result.parseError,
       finishReason: result.finishReason,
+      telemetry: result.telemetry,
       error: result.error
         ? `远程 AI 任务书生成失败，已降级为本地任务书模板。原始错误：${result.error}`
         : '远程 AI 任务书生成失败，已降级为本地任务书模板。'
@@ -196,26 +268,8 @@ export class GenerationPipelineAI {
   async generateChapterDraft(
     chapterPlan: ChapterPlan,
     context: string,
-    options: { mode: PipelineMode; targetChapterOrder: number; estimatedWordCount: string; readerEmotionTarget: string; chapterTask: ChapterTask; authoritativeChapterTask?: boolean; retryReason?: string; previousDraft?: ChapterDraftResult; retryIssueTypes?: string[] }
+    options: DraftPromptOptions
   ): Promise<AIResult<ChapterDraftResult>> {
-    const chapterTask = options.chapterTask
-    const isOpeningChapter = options.targetChapterOrder === 1
-    const useCompactOpeningPrompt = isOpeningChapter && options.authoritativeChapterTask === true
-    const draftScopeRules = isOpeningChapter
-      ? [
-          'Scope hard rules: named people/places, backstory, relationships, plot events, clues, and mechanisms must come from the authoritative task. You may add unnamed ordinary vendors/bystanders, generic ingredients/utensils, and routine daily details only when they introduce no lore, clue, solution, or hook.',
-          'No existing foreshadowing is selected. Do not invent or hint at an unlisted clue, backstory, mechanism, organization, key prop, or named person.',
-          'Do not solve a small conflict with a new convenience introduced only in this draft.'
-        ]
-      : [
-          'Redundancy hard rules: do not repeat already-known environment descriptions or re-explain prior mechanisms; add only necessary new information.',
-          'Foreshadowing treatment rules are mandatory: hidden/pause must not advance; hint stays subtle; advance cannot reveal truth; payoff alone may resolve.',
-          'Novelty hard rules: do not invent unforeshadowed rescue rules, temporary permissions, organizations, ranks, or core lore to solve the current crisis.',
-          'Crisis resolution must come from provided rules, already foreshadowed clues, existing character abilities/resources, or mechanisms explicitly allowed in the chapter plan.',
-          'Any explicitly allowed new rule or mechanism must create cost, risk, or complication; it cannot be a free convenience.',
-          'Do not name unknown people unless the plan allows it or the context already identifies them.',
-          'Do not convert unauthorized new lore into stable canon; any new entity, rule, or lore remains a pending candidate until human confirmation.'
-        ]
     const fallback: ChapterDraftResult = {
       title: chapterPlan.chapterTitle || '未命名章节',
       body: [
@@ -240,50 +294,16 @@ export class GenerationPipelineAI {
       ].join('\n')
     }
 
-    const userPrompt = useCompactOpeningPrompt ? buildAuthoritativeOpeningDraftPrompt(chapterTask, options.retryReason, options.previousDraft, options.retryIssueTypes) : [
-      'You are drafting a novel chapter from an approved chapter plan.',
-      'Return strict JSON only: {"title":"","body":""}',
-      'The body must be complete prose, not an outline, summary, beat sheet, checklist, or bracketed notes.',
-      isOpeningChapter
-        ? 'Write a full chapter with scenes, actions, dialogue, and concrete daily details. End only on the task-specified closing beat; do not intensify it into an extra danger, destiny, or web-fiction hook.'
-        : 'Write a full chapter with scenes, actions, dialogue, sensory details, and an ending hook.',
-      'Do not stop mid-sentence. If the requested length is too high for the token budget, produce a shorter but complete chapter ending cleanly.',
-      'Do not reveal foreshadowing listed as forbidden.',
-      isOpeningChapter
-        ? 'Opening-chapter hard rules: this is chapter 1. Start naturally from the authoritative task. Do not invent a previous chapter, prior hook, off-page action, carried injury, or emotional aftermath.'
-        : 'Continuity hard rules: first scene must continue the previous chapter ending; do not restart the chapter with a fresh world introduction; preserve carried physical and emotional state; answer or carry the previous hook within the first 300 Chinese characters; avoid "meanwhile" / "some time later" unless the plan explicitly asks for a time jump.',
-      ...draftScopeRules,
-      'Do not change long-term canon, power rules, or stable worldbuilding.',
-      isOpeningChapter
-        ? 'Keep behavior consistent only with the task-listed relationship and immediate situation; do not infer a pre-existing dramatic arc or carried state.'
-        : 'Do not make characters suddenly OOC. Preserve current dramatic state.',
-      'The authoritative chapter task below is the immutable creative contract for this job. Follow every specific instruction. If the generated chapter plan or context conflicts with it, the authoritative chapter task wins.',
-      `Authoritative chapter task:\n${JSON.stringify(chapterTask, null, 2)}`,
-      `Mode: ${options.mode}`,
-      `Target chapter: ${options.targetChapterOrder}`,
-      `Expected word count: ${chapterTask.targetWordCount || options.estimatedWordCount}`,
-      `Reader emotion target: ${chapterTask.readerEmotion || options.readerEmotionTarget || chapterPlan.readerEmotionTarget}`,
-      options.retryReason
-        ? options.previousDraft?.body.trim()
-          ? `Previous draft was rejected because: ${options.retryReason}. Revise the supplied draft in place, preserve compliant facts and scene order, and return the complete revised prose chapter. Do not return a patch.`
-          : `Previous draft was rejected because: ${options.retryReason}. Regenerate a complete prose chapter now.`
-        : '',
-      '',
-      `Chapter plan:\n${JSON.stringify(chapterPlan, null, 2)}`,
-      '',
-      `Context:\n${context}`,
-      options.retryReason && options.previousDraft?.body.trim()
-        ? `\nPrevious draft to revise (not an additional canon source):\n${JSON.stringify(options.previousDraft, null, 2)}`
-        : ''
-    ].join('\n')
+    const [system, user] = chapterDraftMessages(chapterPlan, context, options)
 
     return this.client.requestJson(
-      isOpeningChapter ? OPENING_CHAPTER_DRAFT_SYSTEM_PROMPT : CHAPTER_DRAFT_SYSTEM_PROMPT,
-      userPrompt,
+      system.content,
+      user.content,
       ensureChapterDraft,
       fallback,
       (rawText) => rawTextAsChapterDraft(rawText, chapterPlan.chapterTitle || fallback.title),
-      validateChapterDraftSchema
+      validateChapterDraftSchema,
+      { phase: 'writing' }
     )
   }
 
@@ -318,7 +338,7 @@ export class GenerationPipelineAI {
       `Context:\n${context}`
     ].join('\n')
 
-    return this.client.requestJson(REVIEW_SYSTEM_PROMPT, userPrompt, ensureConsistencyReview, fallback, undefined, validateConsistencyReviewSchema)
+    return this.client.requestJson(REVIEW_SYSTEM_PROMPT, userPrompt, ensureConsistencyReview, fallback, undefined, validateConsistencyReviewSchema, { phase: 'review' })
   }
 
 }

@@ -1,4 +1,6 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
+import { currentHardCanonAudit, hardCanonNotice } from '../../../services/HardCanonPreflight'
+import { withCurrentHardCanonAudit } from '../../../services/qualityGate/hardCanonQuality'
 import type {
   AppData,
   CandidateDecisionCommand,
@@ -12,6 +14,7 @@ import type {
 } from '../../../shared/types'
 import { getEditorialVerdictForDraft } from '../../../services/EditorialVerdictService'
 import { hasCompleteChapterReview } from '../../../services/ChapterAcceptanceReviewService'
+import { ChapterTaskContractService } from '../../../services/ChapterTaskContractService'
 import { useConfirm } from '../components/ConfirmDialog'
 import { PipelineTaskEditor } from '../components/pipeline/PipelineTaskEditor'
 import type { PipelineArtifactTab } from '../components/pipeline/PipelineCurrentArtifactPanel'
@@ -39,6 +42,8 @@ interface ProjectProps {
   onOpenRevision?: (prefill: { chapterId: ID | null; draftId: ID | null; requestId: ID }) => void
   initialSnapshotId?: ID | null
   onInitialSnapshotConsumed?: () => void
+  initialJobId?: ID | null
+  onInitialJobConsumed?: () => void
 }
 
 export function GenerationPipelineView({
@@ -50,7 +55,9 @@ export function GenerationPipelineView({
   saveChapterCommitBundle,
   onOpenRevision,
   initialSnapshotId,
-  onInitialSnapshotConsumed
+  onInitialSnapshotConsumed,
+  initialJobId,
+  onInitialJobConsumed
 }: ProjectProps) {
   const confirmAction = useConfirm()
   const scoped = useProjectData(data, project.id)
@@ -99,6 +106,7 @@ export function GenerationPipelineView({
     jobs,
     selectedJob,
     selectedSteps,
+    selectedDrafts,
     selectedCandidates,
     selectedReports,
     selectedRevisionCandidates,
@@ -107,13 +115,22 @@ export function GenerationPipelineView({
     selectedTraceSnapshot,
     consistencyIssueById,
     latestDraft,
-    latestQualityReport,
+    latestQualityReport: storedQualityReport,
     traceConsistencyReport,
     traceQualityReport,
     traceContinuityBridge,
     traceRedundancyReport,
     selectedStepsKey
-  } = useSelectedPipelineJob(scoped, selectedJobId, preparingNewTask)
+  } = useSelectedPipelineJob(scoped, initialJobId ?? selectedJobId, preparingNewTask)
+  const hardCanonAudit = useMemo(() => selectedJob && latestDraft ? currentHardCanonAudit(data, {
+    projectId: selectedJob.projectId, chapterOrder: selectedJob.targetChapterOrder, chapterId: latestDraft.chapterId, body: latestDraft.body
+  }) : null, [data.hardCanonPacks, data.chapters, data.characters, data.characterStateFacts, data.characterStateTransactions, selectedJob, latestDraft])
+  const hardCanonBlock = hardCanonNotice(hardCanonAudit, 'block')
+  const latestQualityReport = useMemo(() => storedQualityReport && withCurrentHardCanonAudit(storedQualityReport, hardCanonAudit),
+    [storedQualityReport, hardCanonAudit])
+  const lengthOverflowNotice = useMemo(() => latestDraft
+    ? ChapterTaskContractService.lengthOverflowNotice({ body: latestDraft.body, chapterTask: selectedJob?.chapterTaskSnapshot })
+    : null, [latestDraft, selectedJob?.chapterTaskSnapshot])
   const editorialVerdict = latestDraft ? getEditorialVerdictForDraft(data, latestDraft.id) : null
   const acceptanceVerdicts = selectedJob?.pipelineRecipe || editorialVerdict ? data.editorialVerdicts : undefined
   const incompleteReview = !hasCompleteChapterReview(latestQualityReport, editorialVerdict, Boolean(acceptanceVerdicts))
@@ -123,6 +140,13 @@ export function GenerationPipelineView({
   useEffect(() => {
     if (initialSnapshotId) { setPreparingNewTask(true); setActiveArtifactTab('plan') }
   }, [initialSnapshotId])
+
+  useEffect(() => {
+    if (!initialJobId) return
+    const job = scoped.chapterGenerationJobs.find(item => item.id === initialJobId)
+    if (job) { setSelectedJobId(job.id); setTargetChapterOrder(job.targetChapterOrder) }
+    onInitialJobConsumed?.()
+  }, [initialJobId, onInitialJobConsumed, scoped.chapterGenerationJobs, setSelectedJobId, setTargetChapterOrder])
 
   useEffect(() => {
     if (latestDraft) {
@@ -210,6 +234,7 @@ export function GenerationPipelineView({
     targetChapterOrder,
     chapters: scoped.chapters,
     qualityGateReports: scoped.qualityGateReports,
+    hardCanonAudit,
     editorialVerdicts: acceptanceVerdicts,
     confirmAction,
     setPipelineMessage
@@ -274,6 +299,8 @@ export function GenerationPipelineView({
     selectedSteps,
     latestDraft,
     latestQualityReport,
+    lengthOverflowNotice,
+    hardCanonBlock,
     isPipelineRunning,
     onStartPipeline: startPipeline,
     onStartNextChapter: startNextChapter,
@@ -300,6 +327,7 @@ export function GenerationPipelineView({
           contextSource,
           snapshot: selectedSnapshot ?? selectedTraceSnapshot,
           qualityReport: latestQualityReport,
+          lengthOverflowNotice,
           draft: latestDraft,
           isRunning: isPipelineRunning,
           primaryActionLabel: primaryAction.primaryActionLabel,
@@ -352,6 +380,9 @@ export function GenerationPipelineView({
           isRunning: isPipelineRunning,
           draft: latestDraft,
           steps: selectedSteps,
+          previousDraft: !latestDraft ? selectedDrafts[0] : undefined,
+          lengthOverflowNotice,
+          hardCanonBlock,
           labels: PIPELINE_STEP_LABELS,
           onAcceptDraft: draftAcceptance.acceptDraft,
           onAcceptUnreviewedDraft: incompleteReview ? draftAcceptance.acceptDraftUnreviewed : undefined,
@@ -377,6 +408,7 @@ export function GenerationPipelineView({
         riskBanner={{
           job: selectedJob,
           draft: latestDraft,
+          lengthOverflowNotice,
           qualityReport: latestQualityReport,
           consistencyReports: selectedReports,
           memoryCandidates: selectedCandidates,
@@ -396,7 +428,9 @@ export function GenerationPipelineView({
         }}
         diagnosticsPanel={{
           editorialVerdict,
-          qualityReport: latestQualityReport,
+          hardCanonAudit,
+          lengthOverflowNotice,
+          qualityReport: storedQualityReport,
           consistencyReports: selectedReports,
           revisionCandidates: selectedRevisionCandidates,
           latestDraft,

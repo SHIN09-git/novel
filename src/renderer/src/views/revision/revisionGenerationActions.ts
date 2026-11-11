@@ -1,5 +1,6 @@
 import type {
   QualityGateIssue,
+  RevisionGenerationRequest,
   RevisionRequest,
   RevisionVersion
 } from '../../../../shared/types'
@@ -62,7 +63,6 @@ export async function generateRevisionFromCurrent(
   }
   const type = override?.type ?? revisionType
   const finalInstruction = override?.instruction ?? instruction
-  setLoading(true)
   setMessage('')
   try {
     if (hasOverrideSourceText && context.selectedVersion && ['draft', 'pending'].includes(context.selectedVersion.status)) {
@@ -74,17 +74,13 @@ export async function generateRevisionFromCurrent(
     }
     // Validate the selection before a paid request, not only when merging its response.
     if (isLocalRevision) mergeLocalRevisionSafely(fullChapterText, rawTarget, rawTarget.trim())
+    const generationRequest: RevisionGenerationRequest = { type, targetRange: isLocalRevision ? rawTarget.trim() : undefined,
+      instruction: finalInstruction, revisionScope: isLocalRevision ? 'local' : 'full', fullChapterText }
+    const preparedContext = buildRevisionContext()
+    if (context.confirmUsage && !await context.confirmUsage(generationRequest, preparedContext)) return
+    setLoading(true)
     const aiService = await getAiService()
-    const result = await aiService.generateRevision(
-      {
-        type,
-        targetRange: isLocalRevision ? rawTarget.trim() : undefined,
-        instruction: finalInstruction,
-        revisionScope: isLocalRevision ? 'local' : 'full',
-        fullChapterText
-      },
-      buildRevisionContext()
-    )
+    const result = await aiService.generateRevision(generationRequest, preparedContext)
     if (!result.data) {
       setMessage(result.error || '修订生成失败。')
       return

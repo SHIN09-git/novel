@@ -30,6 +30,8 @@ export function buildRunTraceSummary(
     storyDirectionGuideId: trace.storyDirectionGuideId,
     storyDirectionGuideSource: trace.storyDirectionGuideSource,
     storyDirectionGuideHorizon: trace.storyDirectionGuideHorizon,
+    storyDirectionGuideStartChapterOrder: trace.storyDirectionGuideStartChapterOrder,
+    storyDirectionGuideEndChapterOrder: trace.storyDirectionGuideEndChapterOrder,
     storyDirectionBeatId: trace.storyDirectionBeatId,
     storyDirectionAppliedToChapterTask: trace.storyDirectionAppliedToChapterTask,
     hardCanonPackItemCount: trace.hardCanonPackItemCount,

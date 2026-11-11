@@ -74,7 +74,7 @@ export async function previewAgentChapterAcceptance(data: AppData, args: Record<
     if (decisionFingerprint(bindingFor(prior)) !== decisionFingerprint(binding)) throw new Error('同一操作编号不能预览不同正文或采纳决定。')
     return { ...output(prior, binding), replayed: true }
   }
-  const recommendation = AgentDecisionService.buildAcceptanceRecommendation(data, binding.jobId)
+  const recommendation = AgentDecisionService.buildAcceptanceRecommendation(data, binding.jobId, binding.draftId)
   const timestamp = new Date().toISOString()
   const preview: AgentActionPreview = { id, projectId: binding.projectId, agentRunId: binding.agentRunId, jobId: binding.jobId,
     chapterId: data.generatedChapterDrafts.find((item) => item.id === binding.draftId)?.chapterId ?? null,
@@ -132,7 +132,7 @@ export async function applyAgentChapterAcceptance(data: AppData, args: Record<st
   return new AgentAuthorizationService(runtime.userDataPath).withAuthorization(scopeFor(runtime, binding), async (grant) => {
     const bundle = buildAcceptedDraftCommitBundle({ appData: data, projectId, draftId: binding.draftId,
       targetChapterOrder: binding.chapterOrder, commitId, chapterId: `${preview.id}:chapter`,
-      acceptedAt: new Date().toISOString(), acceptanceMode: binding.review.mode,
+      acceptedAt: new Date().toISOString(), acceptanceMode: binding.review.mode, reviewedLengthOverflowNotice: binding.review.lengthOverflowNotice,
       commitNote: `Agent director: ${preview.reason}; grant ${grant.id}.` })
     bundle.acceptedBy = 'agent'
     bundle.actor = { kind: 'agent', agentRunId: binding.agentRunId, actionPreviewId: preview.id, authorizationGrantId: grant.id }

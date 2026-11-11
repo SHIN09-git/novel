@@ -62,6 +62,8 @@ try {
         import { SqliteStorageService, loadSqliteSnapshotReadonly as readNative,
           loadSqliteCollectionsReadonly as readNativeCollections } from 'real-undo-sqlite';
         export { SqliteStorageService };
+        export const loadChapterTitlesReadonly = () => { throw new Error('Unexpected title query in undo test'); };
+        export const loadSqliteUsageHistoryReadonly = () => { throw new Error('Unexpected usage query in undo test'); };
         function check(path) { if (!globalThis.__candidateUndoNativePaths.has(path)) throw new Error('Unregistered SQLite path forbidden: ' + path); }
         export const createStorageService = (path) => {
           check(path);

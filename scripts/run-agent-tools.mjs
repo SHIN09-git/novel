@@ -24,6 +24,7 @@ await build({
 
 const child = spawn(process.execPath, [outfile, ...process.argv.slice(2)], {
   cwd: root,
+  env: { ...process.env, NODE_USE_ENV_PROXY: process.env.NODE_USE_ENV_PROXY ?? '1' },
   stdio: 'inherit',
   shell: false
 })

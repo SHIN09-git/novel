@@ -11,6 +11,7 @@ import type {
 } from '../shared/types'
 import { buildRevisionCommitBundle } from './RevisionCommitBundleService'
 import { draftContentHash } from './DraftDiagnosticBindingService'
+import { chapterTitleForVersion } from '../shared/chapterTitleHistory'
 
 export type ChapterVersionSourceKind =
   | 'current'
@@ -132,12 +133,12 @@ function toCurrentEntry(chapter: Chapter): ChapterVersionChainEntry {
   }
 }
 
-function toVersionEntry(version: ChapterVersion, chapter: Chapter): ChapterVersionChainEntry {
+function toVersionEntry(version: ChapterVersion, fallbackTitle: string): ChapterVersionChainEntry {
   const sourceKind = versionSourceKind(version)
   return {
     id: version.id,
     chapterId: version.chapterId,
-    title: version.title || chapter.title,
+    title: version.title || fallbackTitle,
     body: version.body,
     source: version.source,
     sourceKind,
@@ -155,13 +156,13 @@ function chapterCommitEntryId(commitId: ID): string {
   return `chapter-commit:${commitId}`
 }
 
-function toLegacyChapterCommitEntry(commit: ChapterCommitBundle, chapter: Chapter): ChapterVersionChainEntry {
+function toLegacyChapterCommitEntry(commit: ChapterCommitBundle, fallbackTitle: string): ChapterVersionChainEntry {
   const version: ChapterVersion = {
     id: chapterCommitEntryId(commit.commitId),
     projectId: commit.projectId,
     chapterId: commit.chapterId,
     source: 'generated_draft',
-    title: commit.chapter.title || chapter.title,
+    title: commit.chapter.title || fallbackTitle,
     body: commit.chapter.body,
     note: commit.commitNote || '旧版 AI 草稿采纳记录。',
     createdAt: commit.acceptedAt,
@@ -169,10 +170,10 @@ function toLegacyChapterCommitEntry(commit: ChapterCommitBundle, chapter: Chapte
     linkedGenerationRunTraceId: commit.generationRunTraceId ?? null,
     baseChapterVersionId: commit.chapterVersion?.source === 'before_accept_draft' ? commit.chapterVersion.id : null
   }
-  return toVersionEntry(version, chapter)
+  return toVersionEntry(version, fallbackTitle)
 }
 
-function missingRevisionBaselines(appData: AppData, chapter: Chapter, entries: ChapterVersionChainEntry[]): ChapterVersionChainEntry[] {
+function missingRevisionBaselines(appData: AppData, chapter: Chapter, entries: ChapterVersionChainEntry[], titleFor: (id: string) => string): ChapterVersionChainEntry[] {
   const representedBodies = new Set(entries.map((entry) => entry.body))
   const baselines: ChapterVersionChainEntry[] = []
   for (const commit of [...appData.revisionCommitBundles].sort((a, b) => a.revisedAt.localeCompare(b.revisedAt))) {
@@ -181,7 +182,7 @@ function missingRevisionBaselines(appData: AppData, chapter: Chapter, entries: C
     representedBodies.add(commit.beforeText)
     baselines.push({
       id: `revision-before:${commit.revisionCommitId}`, chapterId: chapter.id,
-      title: chapter.title, body: commit.beforeText,
+      title: titleFor(`revision-before:${commit.revisionCommitId}`), body: commit.beforeText,
       source: 'pre_revision_snapshot', sourceKind: 'pre_revision_snapshot', sourceLabel: '修订前正文',
       createdAt: commit.revisedAt, isCurrent: false, version: null,
       linkedChapterCommitId: null, linkedRevisionCommitId: commit.revisionCommitId,
@@ -194,9 +195,10 @@ function missingRevisionBaselines(appData: AppData, chapter: Chapter, entries: C
 export function getChapterVersionChain(appData: AppData, chapterId: ID): ChapterVersionChainEntry[] {
   const chapter = appData.chapters.find((item) => item.id === chapterId)
   if (!chapter) return []
+  const titleFor = chapterTitleForVersion(appData, chapter)
   const persistedEntries = appData.chapterVersions
     .filter((version) => version.chapterId === chapterId && version.projectId === chapter.projectId)
-    .map((version) => toVersionEntry(version, chapter))
+    .map((version) => toVersionEntry(version, titleFor(version.id)))
   const representedChapterCommitIds = new Set(
     persistedEntries.map((entry) => entry.linkedChapterCommitId).filter((id): id is ID => Boolean(id))
   )
@@ -208,13 +210,13 @@ export function getChapterVersionChain(appData: AppData, chapterId: ID): Chapter
         !representedChapterCommitIds.has(commit.commitId) &&
         commit.chapter?.body
     )
-    .map((commit) => toLegacyChapterCommitEntry(commit, chapter))
+    .map((commit) => toLegacyChapterCommitEntry(commit, titleFor(chapterCommitEntryId(commit.commitId))))
   const representedEntries = [...persistedEntries, ...legacyCommitEntries]
   // Older/manual chapters may never have had a ChapterVersion before their first
   // revision. The immutable commit already preserves that text; expose it without a migration.
-  const historicalEntries = [...representedEntries, ...missingRevisionBaselines(appData, chapter, representedEntries)].sort(byCreatedAtDesc)
+  const historicalEntries = [...representedEntries, ...missingRevisionBaselines(appData, chapter, representedEntries, titleFor)].sort(byCreatedAtDesc)
   const currentEntryIndex = historicalEntries.findIndex(
-    (entry) => entry.body === chapter.body && entry.title === chapter.title
+    (entry) => entry.body === chapter.body && entry.title === titleFor(entry.id)
   )
   if (currentEntryIndex < 0) return [toCurrentEntry(chapter), ...historicalEntries]
   return historicalEntries.map((entry, index) => (index === currentEntryIndex ? { ...entry, isCurrent: true } : entry))

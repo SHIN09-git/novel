@@ -1,4 +1,4 @@
-import { createHash } from 'node:crypto'
+import { loadJsonSnapshotReadonly } from '../storage/jsonReadonly'
 import { existsSync } from 'node:fs'
 import { readFile } from 'node:fs/promises'
 import { homedir } from 'node:os'
@@ -8,6 +8,8 @@ import type { StorageWriteResult } from '../shared/ipc/ipcTypes'
 import type { CandidateDecisionCommand } from '../shared/types/candidateDecision'
 import { applyCandidateDecisionChanges, CandidateDecisionError, previewCandidateDecisions } from '../services/CandidateDecisionService'
 import { previewCandidateDecisionUndo } from '../services/CandidateDecisionUndoService'
+import { observeFormalChapterWrites } from '../services/ChapterWritebackFailureService'
+import type { FormalChapterCommitWriter, StorageService } from '../storage/StorageService'
 import { normalizeAppData } from '../shared/defaults'
 import { JsonStorageService } from '../storage/JsonStorageService'
 import { createStorageService, loadSqliteSnapshotReadonly } from '../storage/SqliteStorageService'
@@ -97,11 +99,7 @@ export async function loadAgentRuntimeData(options: AgentRuntimeLoadOptions = {}
 
   const siblingJsonPath = existsSync(jsonPath) ? jsonPath : join(dirname(sqlitePath), JSON_DATA_FILE_NAME)
   if (existsSync(siblingJsonPath)) {
-    const raw = await readFile(siblingJsonPath, 'utf-8')
-    const snapshot = {
-      data: normalizeAppData(JSON.parse(raw) as Partial<AppData>),
-      revision: createHash('sha256').update(raw).digest('hex')
-    }
+    const snapshot = await loadJsonSnapshotReadonly(siblingJsonPath)
     return {
       data: snapshot.data,
       storagePath: siblingJsonPath,
@@ -184,26 +182,17 @@ async function resolveAgentRuntimeSaveTarget(runtime: AgentRuntimeData | AgentRu
   }
 }
 
-export async function saveAgentChapterCommitBundle(
-  bundle: ChapterCommitBundle,
-  runtime: AgentRuntimeData | AgentRuntimeLoadOptions
+async function saveAgentFormalCommit(
+  runtime: AgentRuntimeData | AgentRuntimeLoadOptions,
+  write: (storage: FormalChapterCommitWriter, revision?: string) => Promise<StorageWriteResult>
 ): Promise<StorageWriteResult> {
   const resolved = await resolveAgentRuntimeSaveTarget(runtime)
   const isJson = resolved.source === 'json' || resolved.storagePath.toLowerCase().endsWith('.json')
-  if (isJson) {
-    const result = await new JsonStorageService(resolveJsonStoragePath(resolved.storagePath)).saveChapterCommitBundle(
-      bundle,
-      isLoadedAgentRuntime(runtime) ? runtime.revision : undefined
-    )
-    adoptRuntimeWriteResult(runtime, result)
-    return result
-  }
-  const storage = createStorageService(resolveSqliteStoragePath(resolved.storagePath))
+  const storage: StorageService = isJson
+    ? new JsonStorageService(resolveJsonStoragePath(resolved.storagePath))
+    : createStorageService(resolveSqliteStoragePath(resolved.storagePath))
   try {
-    const result = await storage.saveChapterCommitBundle(
-      bundle,
-      isLoadedAgentRuntime(runtime) ? runtime.revision : undefined
-    )
+    const result = await write(observeFormalChapterWrites(storage), isLoadedAgentRuntime(runtime) ? runtime.revision : undefined)
     adoptRuntimeWriteResult(runtime, result)
     return result
   } finally {
@@ -211,31 +200,18 @@ export async function saveAgentChapterCommitBundle(
   }
 }
 
+export async function saveAgentChapterCommitBundle(
+  bundle: ChapterCommitBundle,
+  runtime: AgentRuntimeData | AgentRuntimeLoadOptions
+): Promise<StorageWriteResult> {
+  return saveAgentFormalCommit(runtime, (storage, revision) => storage.saveChapterCommitBundle(bundle, revision))
+}
+
 export async function saveAgentRevisionCommitBundle(
   bundle: RevisionCommitBundle,
   runtime: AgentRuntimeData | AgentRuntimeLoadOptions
 ): Promise<StorageWriteResult> {
-  const resolved = await resolveAgentRuntimeSaveTarget(runtime)
-  const isJson = resolved.source === 'json' || resolved.storagePath.toLowerCase().endsWith('.json')
-  if (isJson) {
-    const result = await new JsonStorageService(resolveJsonStoragePath(resolved.storagePath)).saveRevisionCommitBundle(
-      bundle,
-      isLoadedAgentRuntime(runtime) ? runtime.revision : undefined
-    )
-    adoptRuntimeWriteResult(runtime, result)
-    return result
-  }
-  const storage = createStorageService(resolveSqliteStoragePath(resolved.storagePath))
-  try {
-    const result = await storage.saveRevisionCommitBundle(
-      bundle,
-      isLoadedAgentRuntime(runtime) ? runtime.revision : undefined
-    )
-    adoptRuntimeWriteResult(runtime, result)
-    return result
-  } finally {
-    storage.close?.()
-  }
+  return saveAgentFormalCommit(runtime, (storage, revision) => storage.saveRevisionCommitBundle(bundle, revision))
 }
 
 export async function saveAgentCandidateDecision(

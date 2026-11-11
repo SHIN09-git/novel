@@ -5,6 +5,7 @@ import type {
   CharacterStateLog,
   CharacterStateTransaction
 } from '../../shared/types'
+import { resourceAccountScope, stateFactDefinition } from '../../shared/characterStateDefinition'
 import {
   applyStateTransactionValue,
   inferStateValueType,
@@ -28,6 +29,46 @@ function currentConvertibleLog(log: CharacterStateLog, appData: AppData): Charac
   return current
 }
 
+function observation(fact: CharacterStateFact, before: CharacterStateFact | null, reason: string): CharacterStateTransaction {
+  return {
+    id: newStateId(), projectId: fact.projectId, characterId: fact.characterId, factId: fact.id,
+    chapterId: fact.sourceChapterId, chapterOrder: fact.sourceChapterOrder,
+    transactionType: fact.status === 'resolved' ? 'resolve' : fact.status !== 'active' ? 'invalidate' : before ? 'update' : 'create',
+    beforeValue: before?.value ?? null, afterValue: fact.value, delta: null,
+    factDefinition: stateFactDefinition(fact), reason, evidence: fact.evidence, source: 'manual', status: 'accepted',
+    createdAt: fact.updatedAt, updatedAt: fact.updatedAt
+  }
+}
+
+function bindSource(data: AppData, projectId: string, chapterId: string | null, order: number | null) {
+  const matches = data.chapters.filter(c => c.projectId === projectId && (chapterId ? c.id === chapterId : order != null && c.order === order))
+  const chapter = matches.length === 1 && !matches[0].archivedAt?.trim() ? matches[0] : null
+  return { sourceChapterId: chapter?.id ?? chapterId, sourceChapterOrder: chapter?.order ?? order }
+}
+
+function editSource(data: AppData, draft: CharacterStateFactDraft, existing?: CharacterStateFact | null) {
+  const newId = draft.sourceChapterId !== undefined && draft.sourceChapterId !== existing?.sourceChapterId
+  const newOrder = draft.sourceChapterOrder !== undefined && draft.sourceChapterOrder !== existing?.sourceChapterOrder
+  if (existing && !newId && !newOrder) {
+    return { sourceChapterId: existing.sourceChapterId, sourceChapterOrder: existing.sourceChapterOrder }
+  }
+  return bindSource(data, draft.projectId, draft.sourceChapterId ?? null, draft.sourceChapterOrder ?? null)
+}
+
+function priorObservation(before: CharacterStateFact | null | undefined, after: CharacterStateFact,
+  history: CharacterStateTransaction[]): CharacterStateTransaction[] {
+  if (!before || before.status !== 'active' || (!before.sourceChapterId && !before.sourceChapterOrder)) return []
+  const sameSource = (id: string | null, at: number | null) => id && before.sourceChapterId ? id === before.sourceChapterId :
+    at != null && at === before.sourceChapterOrder
+  if (sameSource(after.sourceChapterId, after.sourceChapterOrder) && before.category === after.category &&
+      before.key === after.key && before.unit === after.unit) return []
+  // This is the actual, independently dated row about to be overwritten, never a candidate's beforeValue.
+  if (history.some(t => t.projectId === before.projectId && t.characterId === before.characterId && t.factId === before.id &&
+    t.status === 'accepted' && sameSource(t.chapterId, t.chapterOrder) &&
+    JSON.stringify(t.afterValue) === JSON.stringify(before.value))) return []
+  return [{ ...observation(before, null, '保留变更前已入账的来源事实'), preservedPriorFact: true }]
+}
+
 export function createOrUpdateFact(factInput: CharacterStateFactDraft, appData: AppData): AppData {
   const timestamp = stateTimestamp()
   const existing = factInput.id ? appData.characterStateFacts.find((fact) => fact.id === factInput.id) : null
@@ -48,15 +89,20 @@ export function createOrUpdateFact(factInput: CharacterStateFactDraft, appData: 
     trackingLevel: factInput.trackingLevel ?? existing?.trackingLevel ?? 'hard',
     promptPolicy: factInput.promptPolicy ?? existing?.promptPolicy ?? 'when_relevant',
     status: factInput.status ?? existing?.status ?? 'active',
-    sourceChapterId: factInput.sourceChapterId ?? existing?.sourceChapterId ?? null,
-    sourceChapterOrder: factInput.sourceChapterOrder ?? existing?.sourceChapterOrder ?? null,
+    ...editSource(appData, factInput, existing),
     evidence: factInput.evidence ?? existing?.evidence ?? '',
     confidence: factInput.confidence ?? existing?.confidence ?? 1,
     createdAt: existing?.createdAt ?? timestamp,
     updatedAt: timestamp
   }
+  const changed = !existing || JSON.stringify(existing.value) !== JSON.stringify(value) || existing.status !== fact.status ||
+    existing.category !== fact.category || existing.key !== fact.key || existing.unit !== fact.unit ||
+    existing.sourceChapterId !== fact.sourceChapterId || existing.sourceChapterOrder !== fact.sourceChapterOrder
+  const history = appData.characterStateTransactions
   return {
     ...appData,
+    characterStateTransactions: changed
+      ? [observation(fact, existing ?? null, fact.evidence || '手工设置状态'), ...priorObservation(existing, fact, history), ...history] : history,
     characterStateFacts: existing
       ? appData.characterStateFacts.map((item) => (item.id === fact.id ? fact : item))
       : [fact, ...appData.characterStateFacts]
@@ -83,27 +129,8 @@ export function createFactFromLog(log: CharacterStateLog, draft: CharacterStateF
   )
   const fact = nextData.characterStateFacts.find((item) => item.id === factId)
   if (!fact) return nextData
-  const transaction: CharacterStateTransaction = {
-    id: newStateId(),
-    projectId: currentLog.projectId,
-    characterId: currentLog.characterId,
-    factId,
-    chapterId: currentLog.chapterId,
-    chapterOrder: currentLog.chapterOrder,
-    transactionType: 'create',
-    beforeValue: null,
-    afterValue: fact.value,
-    delta: null,
-    reason: currentLog.note,
-    evidence: currentLog.note,
-    source: 'manual',
-    status: 'accepted',
-    createdAt: timestamp,
-    updatedAt: timestamp
-  }
   return {
     ...nextData,
-    characterStateTransactions: [transaction, ...nextData.characterStateTransactions],
     characterStateLogs: nextData.characterStateLogs.map((item) =>
       item.id === currentLog.id ? { ...item, linkedFactId: factId, convertedAt: timestamp } : item
     )
@@ -182,15 +209,14 @@ export function previewStateChangeCandidate(candidate: CharacterStateChangeCandi
   if (candidate.targetFactId && !target && !proposed) {
     throw new Error('状态候选引用的目标事实不存在，无法安全接受。')
   }
-  const existing =
-    target ??
-    appData.characterStateFacts.find(
-      (fact) =>
-        fact.projectId === candidate.projectId &&
-        fact.characterId === candidate.characterId &&
-        fact.key === proposed?.key &&
-        fact.status === 'active'
-    )
+  const matches = !target && proposed ? appData.characterStateFacts.filter(fact =>
+    fact.projectId === candidate.projectId && fact.characterId === candidate.characterId && fact.status === 'active' &&
+    fact.category === proposed.category && fact.key === proposed.key && fact.unit === proposed.unit &&
+    (fact.category !== 'resource' || resourceAccountScope(fact.key, fact.label) === resourceAccountScope(proposed.key, proposed.label))) : []
+  if (matches.length > 1 && !matches.some(f => f.id === proposed?.id)) {
+    throw new Error('候选对应多条已确认状态，请先指定要更新的账本条目。')
+  }
+  const existing = target ?? matches.find(f => f.id === proposed?.id) ?? matches[0]
   const proposedIdCollision = proposed ? appData.characterStateFacts.find((fact) => fact.id === proposed.id) : null
   const retiredByUndo = proposedIdCollision?.status === 'inactive' && (appData.candidateDecisionReceipts ?? []).some((receipt) =>
     receipt.projectId === candidate.projectId && receipt.decisions.some((decision) => decision.kind === 'character_state' && decision.candidateId === candidate.id) &&
@@ -201,7 +227,8 @@ export function previewStateChangeCandidate(candidate: CharacterStateChangeCandi
     throw new Error('状态候选 proposedFact.id 已被其他事实占用，无法安全接受。')
   }
 
-  const transactionType = candidate.proposedTransaction?.transactionType ?? (candidate.candidateType === 'create_fact' ? 'create' : 'update')
+  const transactionType = candidate.candidateType === 'resolve_fact' ? 'resolve' :
+    candidate.proposedTransaction?.transactionType ?? (candidate.candidateType === 'create_fact' ? 'create' : 'update')
   const nextValue = existing
     ? applyStateTransactionValue(existing.value, candidate.afterValue, candidate.proposedTransaction?.delta ?? null, transactionType)
     : proposed?.value ?? candidate.afterValue ?? ''
@@ -243,10 +270,9 @@ export function applyStateChangeCandidate(candidateId: string, appData: AppData)
     characterId: candidate.characterId,
     value: nextValue,
     linkedCardFields: withDefaultLinkedCardFields(baseFact.linkedCardFields, baseFact.category),
-    status: candidate.candidateType === 'resolve_fact' ? 'resolved' : existing?.status ?? proposed?.status ?? 'active',
-    sourceChapterId: candidate.chapterId ?? existing?.sourceChapterId ?? null,
-    sourceChapterOrder: candidate.chapterOrder ?? existing?.sourceChapterOrder ?? null,
-    evidence: candidate.evidence || existing?.evidence || '',
+    status: transactionType === 'resolve' ? 'resolved' : transactionType === 'invalidate' ? 'inactive' : existing?.status ?? proposed?.status ?? 'active',
+    ...bindSource(appData, candidate.projectId, candidate.chapterId, candidate.chapterOrder),
+    evidence: candidate.evidence,
     confidence: candidate.confidence ?? existing?.confidence ?? 0.7,
     updatedAt: timestamp
   }
@@ -255,11 +281,13 @@ export function applyStateChangeCandidate(candidateId: string, appData: AppData)
     projectId: candidate.projectId,
     characterId: candidate.characterId,
     factId: fact.id,
-    chapterId: candidate.chapterId,
-    chapterOrder: candidate.chapterOrder,
+    chapterId: fact.sourceChapterId,
+    chapterOrder: fact.sourceChapterOrder,
     transactionType,
     beforeValue: existing?.value ?? candidate.beforeValue ?? null,
     afterValue: fact.value,
+    factDefinition: stateFactDefinition(fact),
+    ...(candidate.proposedTransaction?.sourceBodyHash ? { sourceBodyHash: candidate.proposedTransaction.sourceBodyHash } : {}),
     delta: candidate.proposedTransaction?.delta ?? null,
     reason: candidate.proposedTransaction?.reason ?? candidate.evidence,
     evidence: candidate.evidence,
@@ -273,7 +301,7 @@ export function applyStateChangeCandidate(candidateId: string, appData: AppData)
     characterStateFacts: existing
       ? appData.characterStateFacts.map((item) => (item.id === fact.id ? fact : item))
       : [fact, ...appData.characterStateFacts],
-    characterStateTransactions: [transaction, ...appData.characterStateTransactions],
+    characterStateTransactions: [transaction, ...priorObservation(existing, fact, appData.characterStateTransactions), ...appData.characterStateTransactions],
     characterStateChangeCandidates: appData.characterStateChangeCandidates.map((item) =>
       item.id === candidate.id ? { ...item, status: 'accepted', updatedAt: timestamp } : item
     )

@@ -8,6 +8,8 @@ import type {
   HardCanonStatus,
   ID
 } from '../shared/types'
+import { parseHardCanonCheck } from '../shared/normalizers/hardCanonCheck'
+import { compareHardCanonItems, type HardCanonDuplicates } from './hardCanonDuplicates'
 import { TokenEstimator } from './TokenEstimator'
 import { promptExclusionTerms } from './promptFormatters/promptUtils'
 
@@ -69,13 +71,20 @@ function formatPriority(priority: HardCanonPriority): string {
 }
 
 function upsertPack(data: AppData, pack: HardCanonPack): AppData {
-  const exists = data.hardCanonPacks.some((item) => item.id === pack.id)
+  const index = data.hardCanonPacks.findIndex((item) => item.projectId === pack.projectId && item.id === pack.id)
   return {
     ...data,
-    hardCanonPacks: exists
-      ? data.hardCanonPacks.map((item) => (item.id === pack.id ? pack : item))
+    hardCanonPacks: index >= 0
+      ? data.hardCanonPacks.map((item, i) => (i === index ? pack : item))
       : [pack, ...data.hardCanonPacks]
   }
+}
+
+function packContaining(data: AppData, itemId: ID, projectId?: ID): HardCanonPack | undefined {
+  const candidates = projectId === undefined ? data.hardCanonPacks : data.hardCanonPacks.filter((p) => p.projectId === projectId).slice(0, 1)
+  const matches = candidates.filter((pack) => pack.items.some((item) => item.id === itemId))
+  if (matches.length > 1) throw new Error('该条目 ID 在多个设定包中出现，请指定项目。')
+  return matches[0]
 }
 
 export class HardCanonPackService {
@@ -103,61 +112,59 @@ export class HardCanonPackService {
   }
 
   static upsertHardCanonItem(data: AppData, item: HardCanonItem): AppData {
-    const timestamp = now()
+    return this.saveAuthoredItem(data, item).data
+  }
+
+  static saveAuthoredItem(data: AppData, item: HardCanonItem, timestamp = now()): {
+    data: AppData; item: HardCanonItem; duplicates: HardCanonDuplicates; reused: boolean
+  } {
     const pack = this.getHardCanonPackForProject(data, item.projectId)
+    const { check: rawCheck, ...rest } = item
+    const check = rawCheck === undefined ? undefined : parseHardCanonCheck(rawCheck)
+    if (check?.kind === 'actor_action' && check.characterId &&
+        !data.characters.some((character) => character.projectId === item.projectId && character.id === check.characterId)) {
+      throw new Error('检查条件 check.characterId：没有找到本项目的角色。')
+    }
+    if (!item.title?.trim() || !item.content?.trim()) throw new Error('请填写硬设定的标题和内容。')
+    const existing = pack.items.find((entry) => entry.id === item.id)
     const normalized = normalizeArrays({
-      ...item,
+      ...rest, ...(check && { check }),
       id: item.id || newId('hard-canon-item'),
       title: item.title.trim(),
       content: item.content.trim(),
       sourceType: item.sourceType ?? 'manual',
       status: item.status ?? 'active',
       priority: item.priority ?? 'medium',
-      createdAt: item.createdAt || timestamp,
+      createdAt: existing?.createdAt || item.createdAt || timestamp,
       updatedAt: timestamp
     })
 
-    const duplicate = pack.items.find((existing) =>
-      existing.id !== normalized.id &&
-      existing.sourceId &&
-      existing.sourceId === normalized.sourceId &&
-      existing.sourceType === normalized.sourceType &&
-      existing.category === normalized.category &&
-      existing.content.trim() === normalized.content.trim()
-    )
-    const targetId = duplicate?.id ?? normalized.id
-    const nextItem = { ...normalized, id: targetId, createdAt: duplicate?.createdAt ?? normalized.createdAt }
-    const exists = pack.items.some((existing) => existing.id === targetId)
+    const duplicates = compareHardCanonItems(pack.items, normalized)
+    if (duplicates.exact) {
+      if (existing) {
+        throw new Error(`相同规则已存在：「${duplicates.exact.title}」（${duplicates.exact.id}）。不能把当前条目改写到另一条记录上。`)
+      }
+      return { data, item: duplicates.exact, duplicates, reused: true }
+    }
     const nextPack: HardCanonPack = {
       ...pack,
-      items: exists ? pack.items.map((existing) => (existing.id === targetId ? nextItem : existing)) : [nextItem, ...pack.items],
+      items: existing ? pack.items.map((entry) => entry.id === existing.id ? normalized : entry) : [normalized, ...pack.items],
       updatedAt: timestamp
     }
-    return upsertPack(data, nextPack)
+    return { data: upsertPack(data, nextPack), item: normalized, duplicates, reused: false }
   }
 
-  static removeHardCanonItem(data: AppData, itemId: ID): AppData {
-    const timestamp = now()
-    return {
-      ...data,
-      hardCanonPacks: data.hardCanonPacks.map((pack) =>
-        pack.items.some((item) => item.id === itemId)
-          ? { ...pack, items: pack.items.filter((item) => item.id !== itemId), updatedAt: timestamp }
-          : pack
-      )
-    }
+  static removeHardCanonItem(data: AppData, itemId: ID, projectId?: ID): AppData {
+    const pack = packContaining(data, itemId, projectId)
+    return pack ? upsertPack(data, { ...pack, items: pack.items.filter((item) => item.id !== itemId), updatedAt: now() }) : data
   }
 
-  static setHardCanonItemStatus(data: AppData, itemId: ID, status: HardCanonStatus): AppData {
+  static setHardCanonItemStatus(data: AppData, itemId: ID, status: HardCanonStatus, projectId?: ID): AppData {
+    const pack = packContaining(data, itemId, projectId)
+    if (!pack) return data
     const timestamp = now()
-    return {
-      ...data,
-      hardCanonPacks: data.hardCanonPacks.map((pack) => ({
-        ...pack,
-        items: pack.items.map((item) => (item.id === itemId ? { ...item, status, updatedAt: timestamp } : item)),
-        updatedAt: pack.items.some((item) => item.id === itemId) ? timestamp : pack.updatedAt
-      }))
-    }
+    return upsertPack(data, { ...pack, updatedAt: timestamp,
+      items: pack.items.map((item) => item.id === itemId ? { ...item, status, updatedAt: timestamp } : item) })
   }
 
   static activateHardCanonItem(data: AppData, itemId: ID): AppData {

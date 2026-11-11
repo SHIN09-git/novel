@@ -15,6 +15,8 @@ import { Header } from '../components/Layout'
 import { useProjectData } from '../hooks/useProjectData'
 import { newId, now } from '../utils/format'
 import { CharacterFocusCard } from './characters/CharacterFocusCard'
+import { CharacterCardReviewPanel } from './characters/CharacterCardReviewPanel'
+import type { RunPersistedStorageOperation } from '../utils/saveDataState'
 import { CharacterListPane } from './characters/CharacterListPane'
 import { CharacterProfilePanels } from './characters/CharacterProfilePanels'
 import { CharacterStateLedgerPanel } from './characters/CharacterStateLedgerPanel'
@@ -25,7 +27,10 @@ import { useCharacterWorkspaceDraft } from './characters/useCharacterWorkspaceDr
 import type { ProjectProps } from './viewTypes'
 import { updateProjectTimestamp } from './viewTypes'
 
-export function CharactersView({ data, project, saveData }: ProjectProps) {
+export function CharactersView({ data, project, saveData, runPersistedStorageOperation, onOpenChapter }: ProjectProps & {
+  runPersistedStorageOperation?: RunPersistedStorageOperation
+  onOpenChapter?: (id: ID) => void
+}) {
   const confirmAction = useConfirm()
   const scoped = useProjectData(data, project.id)
   const characters = useMemo(
@@ -115,7 +120,7 @@ export function CharactersView({ data, project, saveData }: ProjectProps) {
     return saveData((current) => ({
       ...current,
       projects: updateProjectTimestamp(current, project.id),
-      characters: current.characters.map((character) => (character.id === id ? { ...character, ...patch, updatedAt: now() } : character))
+      characters: current.characters.map((character) => (character.projectId === project.id && character.id === id ? { ...character, ...patch, updatedAt: now() } : character))
     }))
   }
 
@@ -318,7 +323,10 @@ export function CharactersView({ data, project, saveData }: ProjectProps) {
               <CharacterFocusCard character={selected} />
               <CharacterWorkspaceTabs activeTab={activeTab} onChange={setActiveTab} pendingCount={stateCandidates.length} />
               <section id="character-panel-profile" role="tabpanel" aria-labelledby="character-tab-profile" hidden={activeTab !== 'profile'}>
-              <CharacterProfilePanels character={selected} onUpdate={(patch) => updateCharacter(selected.id, patch)} onDelete={() => deleteCharacter(selected)} />
+              <CharacterCardReviewPanel key={workspace.key} data={data} character={selected}
+                runOperation={runPersistedStorageOperation} onOpenChapter={onOpenChapter}>
+                <CharacterProfilePanels character={selected} onUpdate={(patch) => updateCharacter(selected.id, patch)} onDelete={() => deleteCharacter(selected)} />
+              </CharacterCardReviewPanel>
               </section>
               <section id="character-panel-ledger" role="tabpanel" aria-labelledby="character-tab-ledger" hidden={activeTab !== 'ledger'}>
               <CharacterStateLedgerPanel

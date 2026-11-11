@@ -46,6 +46,14 @@
 
 > 只出现任务模板、没有真实正文，通常不是模型文风差，而是 API 没有真正调用成功。先看步骤错误和 Run Trace，再改 Prompt 或设定。
 
+### 查这本书用了多少，下一次大概花多少
+
+打开 **工作台 → 全书模型用量**。可以按写作、审稿、修订等环节查看；未采纳的修订和实际发出的重试也在内。“未知”不是零。需要看钱，点 **编辑价目**，按你的服务地址、模型填每百万输入、输出和可选的缓存输入价格。人民币和美元分别显示，不自动换汇。这里按**当前价目**折算已知用量，不是服务商账单，也查不到你的账户余额。
+
+桌面启动流水线或生成修订前可以看单次请求估算。还没组好的请求、后续审稿、重试和全书总额不会被算成已知；取消不发送这次请求。订阅 CLI 不按 API 价目折算。
+
+**换电脑或移动书库：**关闭程序，将数据文件和旁边的同名 `.usage` 目录一起备份。例如，`novel-director-data.sqlite` 对应 `novel-director-data.sqlite.usage`。普通作品 JSON 导出不含这份逐次用量记录。工作台以外的调用无法补记，旧书只能补回原生成记录中确实留存的 token。
+
 ---
 
 ## 0. 先理解它的工作方式
@@ -507,7 +515,27 @@ HardCanon：不得临时新增无铺垫救命规则。
 | 伏笔账本 | 伏笔标题、状态、权重、treatmentMode、回收方向 | 泛泛灵感池 | 按权重最多选择 10 条相关伏笔 |
 | 时间线 | 不可改变的事件顺序和因果锚点 | 普通剧情复述 | 本章相关时作为时间锚点进入 prompt |
 | 阶段摘要 | 远期旧章节剧情压缩 | 角色关系、伏笔、下一阶段规划 | 只作远期背景，低于硬状态和伏笔 |
-| 剧情导向 | 未来 5/10 章软性方向 | 已发生事实、硬设定、正式回收结论 | 作为软指导进入 prompt，不覆盖硬事实 |
+| 剧情导向 | 指定起止章的软性方向，例如第 91–96 章 | 已发生事实、硬设定、正式回收结论 | 作为软指导进入 prompt，不覆盖硬事实 |
+
+**想让成稿也受检查？** 打开“硬设定包”，编辑条目的“检查方式”。例如要控制“半步”的重复，选“字面用语与次数”，填入“半步”和你决定的本章或全书上限。要检查某个角色不能用右手端杯，选“角色动作”，填写角色、动作“端”、侧别“右”和物件“杯”。先用“仅提示作者复核”试读；需要拦住确证的违反，再选“确证违规时阻断采纳”。旧条目默认只作写作提示。
+
+在“生产流水线”看命中原句；要核对已采纳的正文，打开“章节 → 版本历史 → 核对硬设定”。两处都按当前规则本地核对，不消耗模型额度，也不自动改正文。
+
+### 看全书还缺哪一章
+
+回到**工作台 → 全书进度与缺章**。点铅笔图标可填全书字数下限或上限，两项都可以留空。正文累计只算未归档的当前正文：忽略空白，含标点，一个扩展汉字也算一个字。修订或恢复旧稿会替换该章字数，不把版本相加。
+
+展开清单，勾选**仅看问题**，或输入起止章号查看一卷。比如进度显示“从第 1 章连续写至第 65 章”，下一可分配章号却是 97，就先查看中间缺少哪些正文。未带提交记录的手写、导入旧章显示“历史正文”，照常计数。若第 92 章修订写回失败，旧正文仍计数，新修订不计；从该行回到对应稿件，重新核对后再提交。只有实际记录过的写回失败才会标红。
+
+Agent 的只读工具 `agent.getBookProgress` 返回同一清单。连写任务核对前一个目标的采纳回执和正式版本后才继续；有意跳写时可以另开单章任务。查询进度不调用模型。
+
+### 角色卡还是旧余额时怎么办
+
+假设第 10 章的小葵只有十文，第 12 章又挣了二十文。先在**角色 → 动态状态账本**确认同一笔随身现金的余额、单位和来源章。仅有自然语言日志或待确认候选，不会让余额从十文变成三十文。重新构建第 13 章 Prompt 时，角色切片用三十文；重建第 11 章时，只用当时有依据的十文。船队的公款、欠款和不同币种不会自动并入她的钱袋。
+
+在**角色 → 角色卡核对**选择一章，展开证据。卡上会分开显示最后变化章、最后人工核对章和最近已确认事实章。卡片没必要改，可以点“保留原卡，核对到第 N 章”；需要改文字时，选“编辑卡片后核对”。这些操作都不会替你采纳一条账本候选。旧 Prompt 快照仍是当时的原文，需要新余额时请重新构建。
+
+打开**工作台 → 全书核对**，按章段和类别查钱款、人数、物件、人物下落、承诺、季节或倒计时。**冲突**表示证据能比、结果对不上；**待核**表示缺少起始余额、计时依据、归属或可定位原句；**未结**表示尚待交代的事项，不等于写错。点章号可回到正式正文。核对不收费，也不会自动改稿。
 
 ### 一条信息到底应该放哪里
 
@@ -537,7 +565,7 @@ HardCanon：不得临时新增无铺垫救命规则。
 | 近期伏笔 | 2-5 条 | 只录近期会暗示、推进或禁止揭示的线索；单个 prompt 最多调度 10 条 |
 | 时间线 | 只录不可逆节点 | 死亡、身份公开、关键物品易手、重大因果发生后再记 |
 | 阶段摘要 | 每 5-15 章按需压缩 | 只写旧剧情压缩、不可逆变化和结尾承接状态 |
-| 剧情导向 | 未来 5 或 10 章 | 写方向和每章 beat，不把候选新设定写成 canon |
+| 剧情导向 | 填起始章节和结束章节；末尾只剩一章也可以 | 起止均计入；第 91–96 章对应六个节拍，不把候选新设定写成 canon |
 
 如果你发现自己在“设定”里写了几千字但还没写下一章任务，先停下来。对生成质量最直接的通常是上一章结尾、本章任务、当前角色硬状态和本章伏笔规则。
 
@@ -1112,6 +1140,8 @@ This quickstart helps a first-time author complete the practical Novel Director 
 
 All examples are synthetic demo data. Do not publish real API keys, private manuscripts, local data files, screenshots, or exported real project JSON.
 
+**Usage and finishing a book.** On the dashboard, expand **全书模型用量** (book usage) and edit the rate card to estimate costs. Only reported usage is counted; unaccepted revisions and actual retries count. Amounts use the current rate in its own currency, not the provider's invoice or balance. The preflight quote covers one prepared request, not the entire run. Back up the data file and its adjacent `.usage` directory together; ordinary JSON project exports omit the per-request ledger. For a six-chapter finale, enter 91 and 96 in Story Direction. In Chapters, preview official title changes before committing; title history is separate from prose revisions.
+
 ### 1. Configure the AI Provider
 
 Open Settings and configure an OpenAI-compatible provider:
@@ -1135,6 +1165,12 @@ Write only the facts that prevent continuity mistakes:
 - Character State Ledger: location, injury, inventory, money, known secrets, promises, and ability limits.
 - Foreshadowing: title, status, weight, treatment mode, payoff direction.
 - Timeline: irreversible event order and causal anchors.
+
+HardCanon entries are writing hints unless you explicitly configure a check. In the HardCanon editor, choose a term limit or an actor/action condition, then choose advisory or blocking. The pipeline highlights matching passages; chapter version history can recheck older text against today's rules. Neither check calls a model or changes the manuscript.
+
+On the dashboard, expand **全书进度与缺章** (Book Progress). Set an optional word-count range, filter missing chapters or unsuccessful writebacks, and reopen the relevant manuscript or draft. Only current, non-archived manuscript text contributes to the total, including imported and handwritten chapters. The count excludes whitespace and includes punctuation, measured in Unicode code points. A failed revision does not erase the previous manuscript. The read-only `agent.getBookProgress` tool exposes the same report without a model call.
+
+For a stale balance, confirm the dated change to the same personal account and unit in the character ledger. A pending suggestion is not a balance. Rebuilding a later writing prompt uses the confirmed balance; reconstructing an earlier chapter uses only evidence available by then. Use **角色卡核对** on the character page to inspect the evidence and keep or edit the card. Saved prompt snapshots remain unchanged. **全书核对** on the dashboard compares chapter evidence, distinguishing contradictions from missing evidence and open threads. Neither reading a report nor reviewing a card accepts a pending change.
 
 Avoid huge encyclopedias, unused side-character biographies, far-future reveals, vague style slogans, and `TBD` placeholders.
 

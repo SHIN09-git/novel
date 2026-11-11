@@ -4,7 +4,7 @@ export type StoryDirectionGuideStatus = 'draft' | 'active' | 'archived'
 
 export type StoryDirectionGuideSource = 'user_polished' | 'ai_generated' | 'mixed'
 
-export type StoryDirectionHorizon = 5 | 10
+export type StoryDirectionHorizon = number
 
 export interface StoryDirectionChapterBeat {
   id: ID

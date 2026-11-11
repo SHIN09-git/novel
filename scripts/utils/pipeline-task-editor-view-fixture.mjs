@@ -39,6 +39,7 @@ function createHookHost() {
 function viewFixturePlugin() {
   const modules = {
     react: `export const useState = initial => globalThis.__pipelineTaskEditorView.hooks.state(initial);
+      export const useMemo = read => read();
       export const useEffect = (callback, dependencies) => globalThis.__pipelineTaskEditorView.hooks.effect(callback, dependencies);`,
     'react/jsx-runtime': `export const jsx = (type, props, key) => typeof type === 'function' ? type({...props, key}) : {type, props, key};
       export const jsxs = jsx; export const Fragment = 'fragment';`,
@@ -78,7 +79,7 @@ function viewFixturePlugin() {
       env.selectionArgs = {selectedJobId, preparingNewTask};
       const selectedJob = preparingNewTask ? null : env.jobs.find(job => job.id === selectedJobId) ?? null;
       const selectedSteps = selectedJob ? env.steps.filter(step => step.jobId === selectedJob.id) : [];
-      return { jobs: env.jobs, selectedJob, selectedSteps, selectedCandidates: [], selectedReports: [], selectedRevisionCandidates: [],
+      return { jobs: env.jobs, selectedJob, selectedSteps, selectedDrafts: [], selectedCandidates: [], selectedReports: [], selectedRevisionCandidates: [],
         selectedTrace: null, selectedAuthorSummary: null, selectedTraceSnapshot: null, consistencyIssueById: new Map(), latestDraft: null,
         latestQualityReport: null, traceConsistencyReport: null, traceQualityReport: null, traceContinuityBridge: null,
         traceRedundancyReport: null, selectedStepsKey: selectedSteps.map(step => step.id + ':' + step.status).join('|') };

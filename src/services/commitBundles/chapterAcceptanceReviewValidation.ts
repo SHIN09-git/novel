@@ -6,6 +6,9 @@ import {
 } from '../../shared/normalizers/reports'
 import { normalizeGenerationRunTrace } from '../../shared/normalizers/runTrace'
 import { buildChapterAcceptanceReview } from '../ChapterAcceptanceReviewService'
+import { assertHardCanonCanCommit, currentHardCanonAudit } from '../HardCanonPreflight'
+import { ChapterTaskContractService } from '../ChapterTaskContractService'
+import { hasCurrentChapterFragment } from '../../shared/chapterStepFragment'
 import { draftContentHash, noveltyAuditMatchesDraft } from '../DraftDiagnosticBindingService'
 import { isChapterArchived } from '../ChapterLifecycleService'
 import { assertImmutableCommit, requireCommitText } from './commitBundleUtils'
@@ -41,14 +44,27 @@ export function validateAcceptanceReviewShape(bundle: ChapterCommitBundle): void
 /** Re-evaluate new commits inside the storage transaction; historical replay is checked elsewhere. */
 export function validateCurrentAcceptanceReview(bundle: ChapterCommitBundle, data: AppData): void {
   const review = bundle.acceptanceReview
-  if (!review) return
-  const draft = data.generatedChapterDrafts.find((item) => item.id === bundle.generatedDraftId && item.projectId === bundle.projectId && item.jobId === bundle.jobId)
-  const job = data.chapterGenerationJobs.find((item) => item.id === bundle.jobId && item.projectId === bundle.projectId)
-  if (!draft || !job) throw new Error('来源草稿或生成任务已不存在，请重新打开当前章节。')
+  const draft = data.generatedChapterDrafts.find((item) => item.id === bundle.generatedDraftId && item.projectId === bundle.projectId)
+  const jobId = bundle.jobId ?? draft?.jobId ?? bundle.generatedDraft?.jobId
+  const job = data.chapterGenerationJobs.find((item) => item.id === jobId && item.projectId === bundle.projectId)
+  if (!review) {
+    assertHardCanonCanCommit(currentHardCanonAudit(data, { projectId: bundle.projectId, chapterOrder: bundle.chapter.order,
+      chapterId: bundle.chapterId, body: bundle.chapter.body }))
+    if (job && hasCurrentChapterFragment(data.chapterGenerationSteps, job.id, draft)) {
+      throw new Error('本次生成只保留了片段，不能用旧预览采纳上一份草稿。')
+    }
+    const notice = ChapterTaskContractService.lengthOverflowNotice({ body: bundle.chapter.body, chapterTask: job?.chapterTaskSnapshot })
+    if (notice) throw new Error(`${notice}请改短正文，或重新预览并明确确认采纳。`)
+    return
+  }
+  if (!draft || draft.jobId !== bundle.jobId || !job) throw new Error('来源草稿或生成任务已不存在，请重新打开当前章节。')
   if (job.status === 'running') throw new Error('生成仍在运行，请先停止或等待完成再采纳。')
   if (draft.body !== bundle.chapter.body || draft.title !== bundle.chapter.title ||
     (draft.chapterId && draft.chapterId !== bundle.chapterId)) throw new Error('来源草稿已变化，请核对最新正文后采纳。')
   const current = buildChapterAcceptanceReview(data, draft, review.mode, review.editorialRequired)
+  if (current.hardCanonCheck?.resultFingerprint !== review.hardCanonCheck?.resultFingerprint) {
+    throw new Error('正文适用的硬设定或全书计数已变化，请查看本次核查后重新采纳。')
+  }
   assertImmutableCommit({ id: bundle.id, ...current }, { id: bundle.id, ...review }, 'ChapterAcceptanceReview')
 
   const chapter = data.chapters.find((item) => item.projectId === bundle.projectId && item.order === bundle.chapter.order)

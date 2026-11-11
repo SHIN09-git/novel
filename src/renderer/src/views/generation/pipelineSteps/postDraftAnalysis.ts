@@ -11,6 +11,8 @@ import {
   sanitizeChapterReviewForPostDraft
 } from '../../../../../services/ai/AIResponseNormalizer'
 import { newId, now } from '../../../utils/format'
+import { characterStatesForProjectAtChapter } from '../../../../../services/characterState/stateAsOf'
+import { draftContentHash } from '../../../../../services/DraftDiagnosticBindingService'
 import { appendGenerationRunTraceAiCall } from '../../../utils/runTrace'
 import { noveltyAdjustedConfidence, noveltyWarnings, serializeOutput } from '../pipelineUtils'
 import { parseOutput } from '../pipelineRuntimeBasics'
@@ -179,10 +181,11 @@ export async function runChapterReviewStep(ctx: PipelineStepHandlerContext) {
     createdAt: timestamp,
     updatedAt: timestamp
   }] : []
+  const stateFacts = review.characterStateChangeSuggestions.length ? characterStatesForProjectAtChapter(state.working, project.id, options.targetChapterOrder) : []
+  const sourceBodyHash = review.characterStateChangeSuggestions.length ? draftContentHash(state.draftResult.body) : undefined
   const stateCandidates: CharacterStateChangeCandidate[] = review.characterStateChangeSuggestions.map((suggestion) => {
-    const existingFact = state.working.characterStateFacts.find(
-      (fact) => fact.projectId === project.id && fact.characterId === suggestion.characterId && fact.key === suggestion.key && fact.status === 'active'
-    )
+    const matches = stateFacts.filter(f => f.characterId === suggestion.characterId && f.category === suggestion.category && f.key === suggestion.key)
+    const existingFact = matches.length === 1 ? matches[0] : undefined
     const fact: CharacterStateFact = {
       id: existingFact?.id ?? newId(), projectId: project.id, characterId: suggestion.characterId,
       category: suggestion.category, key: suggestion.key, label: suggestion.label,
@@ -199,7 +202,7 @@ export async function runChapterReviewStep(ctx: PipelineStepHandlerContext) {
       chapterId: null, chapterOrder: options.targetChapterOrder, transactionType: suggestion.suggestedTransactionType,
       beforeValue: suggestion.beforeValue ?? existingFact?.value ?? null, afterValue: suggestion.afterValue,
       delta: suggestion.delta, reason: suggestion.evidence, evidence: suggestion.evidence,
-      source: 'pipeline', status: 'pending', createdAt: timestamp, updatedAt: timestamp
+      source: 'pipeline', sourceBodyHash, status: 'pending', createdAt: timestamp, updatedAt: timestamp
     }
     return {
       id: newId(), projectId: project.id, jobId: job.id, characterId: suggestion.characterId,

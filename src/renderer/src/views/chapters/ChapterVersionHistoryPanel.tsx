@@ -1,4 +1,5 @@
 import { useMemo, useState } from 'react'
+import { chapterTitleHistory } from '../../../../shared/chapterTitleHistory'
 import type { AppData, Chapter } from '../../../../shared/types'
 import {
   getChapterVersionChain,
@@ -8,6 +9,8 @@ import {
 } from '../../../../services/ChapterVersionChainService'
 import { formatDate } from '../../utils/format'
 import { RevisionDiffView } from '../revision/RevisionDiffView'
+import { currentHardCanonAudit } from '../../../../services/HardCanonPreflight'
+import { HardCanonAuditPanel } from '../../components/HardCanonAuditPanel'
 
 interface ChapterVersionHistoryPanelProps {
   data: AppData
@@ -17,7 +20,7 @@ interface ChapterVersionHistoryPanelProps {
   onDeleteVersion: (entry: ChapterVersionChainEntry) => void
 }
 
-type VersionDetailTab = 'preview' | 'diff' | 'links'
+type VersionDetailTab = 'preview' | 'diff' | 'links' | 'canon'
 
 function textLength(text: string): string {
   return text.replace(/\s/g, '').length.toLocaleString()
@@ -48,10 +51,14 @@ export function ChapterVersionHistoryPanel({
   onDeleteVersion
 }: ChapterVersionHistoryPanelProps) {
   const entries = useMemo(() => getChapterVersionChain(data, selected.id), [data, selected.id])
+  const titleHistory = useMemo(() => chapterTitleHistory(data, selected), [data.chapterTitleReceipts, selected.id, selected.projectId])
   const [selectedEntryId, setSelectedEntryId] = useState<string | null>(entries[0]?.id ? String(entries[0].id) : null)
   const [tab, setTab] = useState<VersionDetailTab>('preview')
   const selectedEntry = entries.find((entry) => String(entry.id) === selectedEntryId) ?? entries[0] ?? null
   const detail = useMemo(() => (selectedEntry ? getChapterVersionDetail(data, selectedEntry.id) : null), [data, selectedEntry])
+  const canon = useMemo(() => tab === 'canon' && selectedEntry ? currentHardCanonAudit(data, {
+    projectId: selected.projectId, chapterOrder: selected.order, chapterId: selected.id, body: selectedEntry.body
+  }) : null, [tab, data, selected.id, selected.projectId, selected.order, selectedEntry])
   const savedVersionCount = entries.filter((entry) => entry.sourceKind !== 'current').length
   const canRestore = Boolean(selectedEntry && !selectedEntry.isCurrent && selectedEntry.body !== selected.body)
   const versionProtectionReason = selectedEntry?.version
@@ -73,6 +80,12 @@ export function ChapterVersionHistoryPanel({
       {savedVersionCount === 0 ? (
         <p className="muted">暂无历史版本。接受 AI 草稿、正式修订或恢复历史版本后，这里会形成可追溯的版本链。</p>
       ) : null}
+      {titleHistory.length > 0 && <details className="chapter-title-history"><summary>章名变更记录（{titleHistory.length}）</summary>
+        <ol>{titleHistory.map(({ row, receipt }) => <li key={receipt.id}>
+          {formatDate(receipt.createdAt)} · {receipt.actor.kind === 'user' ? '作者' : 'Agent'} · 第 {row.chapterOrder} 章：
+          {row.oldTitle || '（空）'} → {row.newTitle}
+        </li>)}</ol>
+      </details>}
       <div className="version-chain-layout">
         <div className="version-history-list">
           {entries.map((entry) => {
@@ -140,9 +153,16 @@ export function ChapterVersionHistoryPanel({
               <button className={tab === 'links' ? 'active' : ''} onClick={() => setTab('links')}>
                 关联记录
               </button>
+              <button className={tab === 'canon' ? 'active' : ''} onClick={() => setTab('canon')}>
+                核对硬设定
+              </button>
             </div>
             {tab === 'preview' ? <pre className="version-preview-text">{selectedEntry.body}</pre> : null}
             {tab === 'diff' ? <RevisionDiffView originalText={selected.body} revisedText={selectedEntry.body} /> : null}
+            {tab === 'canon' ? <>
+              <p className="muted">按今天启用的规则核对所选版本，不改写当时的审稿记录。</p>
+              {canon ? <HardCanonAuditPanel audit={canon} body={selectedEntry.body} scope={selectedEntry.isCurrent ? 'chapter' : 'historical_version'} /> : <p className="muted">本章没有启用可核查的硬设定。</p>}
+            </> : null}
             {tab === 'links' ? (
               <div className="version-links-grid">
                 <span>草稿采纳提交</span>

@@ -19,6 +19,8 @@ export function isolateOpeningCharacterCards(characters: Character[]): Character
     protagonistRelationship: '',
     emotionalState: '',
     nextActionTendency: '',
-    forbiddenWriting: ''
+    forbiddenWriting: '',
+    roleFunction: '', deepNeed: '', decisionLogic: '', abilitiesAndResources: '',
+    weaknessAndCost: '', relationshipTension: '', futureHooks: ''
   }))
 }

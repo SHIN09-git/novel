@@ -65,7 +65,8 @@ async function handleRequest(request: JsonRpcRequest): Promise<JsonRpcResponse |
             tools: AgentToolService.listTools().map((tool) => ({
               name: tool.name,
               description: tool.description,
-              inputSchema: tool.inputSchema
+              inputSchema: tool.inputSchema,
+              ...(tool.annotations && { annotations: tool.annotations })
             }))
           }
         }

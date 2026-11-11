@@ -12,6 +12,8 @@ npm.cmd run agent:setup:codex
 
 ## 标准流程
 
+在本机调用模型 API 前读取用户目录的 `.config/ai/api-registry.json`。按服务条目的 Base URL 和 `keyEnv` 取用凭据，密钥值仅由发请求的进程读取。主密钥缺失或收到 401 时，可以使用同一条目的 `backupKeyEnv`。桌面版和 MCP 写作流程会按每个工作环节的实际地址选择密钥。
+
 1. 用 `agent.listProjects` 定位项目，再用 `agent.getProjectDigest` 和 `agent.getNextChapterTarget` 读取当前权威状态。
 2. 按章完成生成、审阅、决定和提交。提交后重新读取最新状态，再推进下一章；不能把旧 Prompt、旧草稿或本地镜像当作当前正史。
 3. 用 `agent.getChapterProductionState`、`agent.getRunDiagnostics` 和 `agent.getAcceptanceRecommendation` 形成审稿判断。日常读取保持 compact；只有正文、Prompt、完整诊断或逐句证据确有需要时才传 `detail: "full"`。

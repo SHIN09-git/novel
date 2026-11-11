@@ -68,7 +68,7 @@ check('AI chat request validation is split out of registerIpcHandlers', /from '\
 check('AI chat validation helper owns provider and message validation', /const apiProviders = new Set/.test(aiChatValidation) && /const chatMessageRoles = new Set/.test(aiChatValidation) && /export function validateChatCompletionRequest/.test(aiChatValidation))
 check(
   'AIService wraps chat completion HTTP call with retryWithBackoff',
-  /retryWithBackoff\([\s\S]*?this\.performChatCompletion\(/.test(aiService)
+  /const send = async \(\) =>[\s\S]*?this\.performChatCompletion\([\s\S]*?await retryWithBackoff\([\s\S]*?return await send\(\)/.test(aiService)
 )
 check('AIHttpClient preserves response_format fallback', /response_format\|json_object\|unsupported/.test(aiHttpClient) && /fallbackBody/.test(aiHttpClient))
 check('AI retry logs sanitized retry summaries', /AI request retry scheduled/.test(aiService) && /sanitizeAiErrorText\(describeAiRetryError/.test(aiService))

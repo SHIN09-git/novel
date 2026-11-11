@@ -1,21 +1,24 @@
 import type { Character } from '../../../../shared/types'
 import { NumberInput, TextArea, TextInput, Toggle } from '../../components/FormFields'
+import { CARD_FIELD_LABELS } from './characterStateUi'
 
 interface CharacterProfilePanelsProps {
   character: Character
   onUpdate: (patch: Partial<Character>) => void | Promise<unknown>
-  onDelete: () => void
+  onDelete?: () => void
+  staged?: boolean
 }
 
-export function CharacterProfilePanels({ character, onUpdate, onDelete }: CharacterProfilePanelsProps) {
+export function CharacterProfilePanels({ character, onUpdate, onDelete, staged = false }: CharacterProfilePanelsProps) {
   const bufferedFieldProps = { debounceMs: 500, bufferKey: character.id }
+  if (staged) bufferedFieldProps.debounceMs = 0
   return (
     <>
       <div className="panel character-basics-panel">
         <h2>基础设定</h2>
         <div className="form-grid compact">
           <TextInput {...bufferedFieldProps} label="角色名" value={character.name} onChange={(name) => onUpdate({ name })} />
-          <TextInput {...bufferedFieldProps} label="角色定位" value={character.role} onChange={(role) => onUpdate({ role })} />
+          <TextInput {...bufferedFieldProps} label="角色定位（基础设定）" value={character.role} onChange={(role) => onUpdate({ role })} />
         </div>
         <div className="form-grid">
           <TextArea {...bufferedFieldProps} label="表层目标" value={character.surfaceGoal} onChange={(surfaceGoal) => onUpdate({ surfaceGoal })} />
@@ -26,10 +29,18 @@ export function CharacterProfilePanels({ character, onUpdate, onDelete }: Charac
         </div>
         <div className="row-actions">
           <Toggle label="主要角色" checked={character.isMain} onChange={(isMain) => onUpdate({ isMain })} />
-          <button className="danger-button" onClick={onDelete}>删除角色</button>
+          {onDelete && <button className="danger-button" onClick={onDelete}>删除角色</button>}
         </div>
       </div>
 
+      <details className="character-card-fields" open={staged}>
+        <summary>角色卡专用字段</summary>
+        <div className="form-grid">
+          {(['roleFunction', 'deepNeed', 'decisionLogic', 'abilitiesAndResources', 'weaknessAndCost', 'relationshipTension', 'futureHooks'] as const)
+            .map(field => <TextArea key={field} {...bufferedFieldProps} label={CARD_FIELD_LABELS[field]}
+              value={character[field]} rows={2} onChange={value => onUpdate({ [field]: value })} />)}
+        </div>
+      </details>
       <div className="panel character-current-state-panel">
         <h2>当前状态</h2>
         <div className="form-grid">

@@ -95,7 +95,7 @@ export function handleAgentReadTool(
       return { handled: true, payload: AgentReadableSummaryService.getVersionDiff(data, findProjectId(data, args), requiredPositiveInteger(args, 'chapterOrder'), requiredString(args, 'fromVersionId'), requiredString(args, 'toVersionId'), readOptions(args)) }
     case 'agent.getRunDiagnostics':
     case 'agent.inspectPipelineJob':
-      return { handled: true, payload: AgentReadableSummaryService.getRunDiagnostics(data, requiredString(args, 'jobId')) }
+      return { handled: true, payload: AgentReadableSummaryService.getRunDiagnostics(data, requiredString(args, 'jobId'), readOptions(args)) }
     case 'agent.getFullRunTrace':
       return { handled: true, payload: AgentReadableSummaryService.getFullRunTrace(data, stringArg(args, 'traceId') ?? requiredString(args, 'jobId'), readOptions(args)) }
     case 'agent.getCandidateDetail':
@@ -103,7 +103,7 @@ export function handleAgentReadTool(
     case 'agent.getPendingHumanReviewItems':
       return { handled: true, payload: AgentReadableSummaryService.getProjectDigest(data, findProjectId(data, args)).pendingReview }
     case 'agent.getAcceptanceRecommendation':
-      return { handled: true, payload: AgentDecisionService.buildAcceptanceRecommendation(data, requiredString(args, 'jobId')) }
+      return { handled: true, payload: AgentDecisionService.buildAcceptanceRecommendation(data, requiredString(args, 'jobId'), undefined, readOptions(args).detail) }
     case 'agent.getActionPreviews':
       return { handled: true, payload: data.agentActionPreviews.filter((preview) => preview.agentRunId === requiredString(args, 'agentRunId')) }
     case 'agent.getAgentRunSummary':

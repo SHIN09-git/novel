@@ -20,8 +20,11 @@ import type { SaveDataHandler } from '../utils/saveDataState'
 import { RevisionComparisonPanel } from './revision/RevisionComparisonPanel'
 import { RevisionStudioSidebar } from './revision/RevisionStudioSidebar'
 import { buildRevisionAiContext } from './revision/revisionAiContext'
+import { revisionMessages } from '../../../services/ai/RevisionAI'
+import { estimateForSettings, usageEstimateText } from './projectUsage/usageEstimateText'
 import { useRevisionRequestRelocation } from './revision/useRevisionRequestRelocation'
 import { useRevisionStudioActions } from './revision/useRevisionStudioActions'
+import type { BookRevisionLocation } from './bookProgress/navigation'
 
 interface ProjectProps {
   data: AppData
@@ -32,6 +35,8 @@ interface ProjectProps {
   ) => Promise<void>
   prefill?: { chapterId: ID | null; draftId: ID | null; requestId: ID } | null
   onPrefillConsumed?: () => void
+  initialSource?: BookRevisionLocation | null
+  onInitialSourceConsumed?: () => void
 }
 
 export function RevisionStudioView({
@@ -40,7 +45,9 @@ export function RevisionStudioView({
   saveData,
   saveRevisionCommitBundle,
   prefill,
-  onPrefillConsumed
+  onPrefillConsumed,
+  initialSource,
+  onInitialSourceConsumed
 }: ProjectProps) {
   const confirmAction = useConfirm()
   const scoped = useProjectData(data, project.id)
@@ -56,13 +63,13 @@ export function RevisionStudioView({
     () => new Map(data.revisionRequests.map((request) => [request.id, request.type] as const)),
     [data.revisionRequests]
   )
-  const [sourceKind, setSourceKind] = useState<'chapter' | 'draft'>('chapter')
-  const [selectedChapterId, setSelectedChapterId] = useState<ID | null>(chapters[0]?.id ?? null)
-  const [selectedDraftId, setSelectedDraftId] = useState<ID | null>(drafts[0]?.id ?? null)
+  const [sourceKind, setSourceKind] = useState<'chapter' | 'draft'>(initialSource?.draftId ? 'draft' : 'chapter')
+  const [selectedChapterId, setSelectedChapterId] = useState<ID | null>(initialSource?.chapterId ?? chapters[0]?.id ?? null)
+  const [selectedDraftId, setSelectedDraftId] = useState<ID | null>(initialSource?.draftId ?? drafts[0]?.id ?? null)
   const [revisionType, setRevisionType] = useState<RevisionRequestType>('reduce_ai_tone')
   const [targetRange, setTargetRange] = useState('')
   const [instruction, setInstruction] = useState('')
-  const [selectedVersionId, setSelectedVersionId] = useState<ID | null>(null)
+  const [selectedVersionId, setSelectedVersionId] = useState<ID | null>(initialSource?.versionId ?? null)
   const [revisionViewMode, setRevisionViewMode] = useState<'revised' | 'diff'>('diff')
   const [editableVersionBody, setEditableVersionBody] = useState('')
   const persistedEditorSource = useRef<{ id: ID | null; body: string; inputSequence: number } | null>(null)
@@ -70,6 +77,8 @@ export function RevisionStudioView({
   const currentEditorVersionId = useRef<ID | null>(null)
   const [loading, setLoading] = useState(false)
   const [message, setMessage] = useState('')
+
+  useEffect(() => { if (initialSource) onInitialSourceConsumed?.() }, [initialSource, onInitialSourceConsumed])
 
   const selectedDraft = drafts.find((draft) => draft.id === selectedDraftId) ?? drafts[0] ?? null
   const linkedDraftChapter = sourceKind === 'draft' ? resolveDraftLinkedChapter(selectedDraft, chapters) : null
@@ -86,8 +95,8 @@ export function RevisionStudioView({
   const getAiService = useCallback(async () => {
     const { AIService } = await import('../../../services/AIService')
     const runSettings = resolvePipelineRoleSettings(sourceRun?.aiRunConfig, data.settings, 'revision')
-    return new AIService(runSettings, sourceRun ? { runId: sourceRun.id } : undefined)
-  }, [data.settings, sourceRun])
+    return new AIService(runSettings, { projectId: project.id, runId: sourceRun?.id })
+  }, [data.settings, project.id, sourceRun])
   const sourceSessions = scoped.revisionSessions.filter((session) =>
     sourceDraftId
       ? session.sourceDraftId === sourceDraftId
@@ -193,6 +202,13 @@ export function RevisionStudioView({
     confirmAction,
     getAiService,
     buildRevisionContext,
+    confirmUsage: (request, context) => {
+      const settings = resolvePipelineRoleSettings(sourceRun?.aiRunConfig, data.settings, 'revision')
+      const estimate = estimateForSettings(settings, project, revisionMessages(request, context))
+      return confirmAction({ title: '修订发起前估算', message: usageEstimateText(estimate,
+        request.revisionScope === 'local' ? '选区修订 · 单次请求（含完整章节上下文）' : '整章修订 · 单次请求'),
+        confirmLabel: '发起修订', cancelLabel: '取消' })
+    },
     sourceKind,
     selectedChapter,
     selectedDraft,

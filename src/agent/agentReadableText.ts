@@ -1,4 +1,5 @@
 import type { AppData, ChapterGenerationJob, ID } from '../shared/types'
+import { visibleCharacterCount } from '../services/chapterTaskContractText'
 
 export type AgentReadDetail = 'summary' | 'compact' | 'full'
 
@@ -15,6 +16,7 @@ export interface AgentTextReadResult {
   kind: 'chapter' | 'draft' | 'version' | 'prompt' | 'trace' | 'candidate'
   title: string
   charCount: number
+  wordCount?: number
   excerpt: string
   text?: string
   metadata: Record<string, unknown>
@@ -74,6 +76,7 @@ export function textPayload(
     kind,
     title,
     charCount: safeText.length,
+    ...(['chapter', 'draft', 'version'].includes(kind) ? { wordCount: visibleCharacterCount(text) } : {}),
     excerpt: compact(safeText, excerptLimit),
     text: include ? (explicitTextLimit ? safeText.slice(0, explicitTextLimit) : safeText) : undefined,
     metadata

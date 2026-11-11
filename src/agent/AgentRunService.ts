@@ -15,6 +15,7 @@ import type {
 import { isChapterArchived } from '../services/ChapterLifecycleService'
 import { createPipelineAIRunConfig } from '../services/PipelineRunContextService'
 import { PipelineRecipeService } from '../services/PipelineRecipeService'
+import { assertEarlierRunTargetsWritten } from './agentBatchWriteback'
 
 export const AGENT_PIPELINE_STEP_ORDER: ChapterGenerationStepType[] = [
   'context_need_planning',
@@ -150,6 +151,13 @@ export class AgentRunService {
     }
 
     const targetChapterOrders = targetOrdersFromInput(input)
+    const priorRun = input.agentRunId && appData.agentRuns.find((run) => run.id === input.agentRunId)
+    if (priorRun) {
+      if (priorRun.projectId !== projectId) throw new Error('AgentRun belongs to another project.')
+      assertEarlierRunTargetsWritten(appData, priorRun, targetChapterOrder)
+      throw new Error('该批次已登记。请在原批次预览并应用章节任务编辑，不要覆盖已有任务。')
+    }
+    assertEarlierRunTargetsWritten(appData, { projectId, targetChapterOrders, createdJobIds: [] }, targetChapterOrder)
     const mode: AgentRunMode = targetChapterOrders.length > 1 ? 'multi_chapter' : 'single_chapter'
     const existingChapter = appData.chapters.find((chapter) => chapter.projectId === projectId && chapter.order === targetChapterOrder) ?? null
     if (existingChapter && isChapterArchived(existingChapter)) {

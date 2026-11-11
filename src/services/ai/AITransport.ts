@@ -3,11 +3,19 @@ import type {
   ChatCompletionRequest,
   ChatCompletionResult
 } from '../../shared/ipc/ipcTypes'
+import type { ProjectUsageContext, UsagePhase } from '../../shared/projectUsage'
+
+export function projectUsageContext(projectId?: string, phase: UsagePhase = 'other'): ProjectUsageContext | undefined {
+  return projectId === undefined ? undefined : { projectId, phase }
+}
 
 export interface AIChatCompletionTransport {
   chatCompletion(request: ChatCompletionRequest): Promise<ChatCompletionResult>
+  isManagedEndpoint?(baseUrl: string): Promise<boolean>
   cancelCall?(runId: string, callId: string): Promise<CancelAiCallResult>
 }
+
+export type AIJsonTransport = Pick<AIChatCompletionTransport, 'chatCompletion' | 'isManagedEndpoint'>
 
 export class MissingAITransportBridgeError extends Error {
   constructor() {
@@ -18,6 +26,10 @@ export class MissingAITransportBridgeError extends Error {
 
 export function createRendererAITransport(): AIChatCompletionTransport {
   return {
+    async isManagedEndpoint(baseUrl) {
+      if (typeof window === 'undefined' || !window.novelDirector?.credentials?.hasApiKey) return false
+      return Boolean((await window.novelDirector.credentials.hasApiKey(baseUrl)).keyEnv)
+    },
     async chatCompletion(request) {
       const bridge = window.novelDirector
       if (!bridge?.ai?.chatCompletion) {

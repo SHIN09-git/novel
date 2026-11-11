@@ -1,0 +1,561 @@
+{
+  "benchmark": "redundant-work",
+  "measuredAt": "2026-10-31T05:05:27.444Z",
+  "baseline": "04e0a01",
+  "environment": {
+    "node": "v24.14.0",
+    "platform": "win32",
+    "arch": "x64",
+    "cpu": "AMD Ryzen 7 7800X3D 8-Core Processor           "
+  },
+  "method": {
+    "warmups": 3,
+    "iterations": 15,
+    "clock": "performance.now",
+    "order": "alternating before/after",
+    "scope": "Real services under Node, not UI latency. Baseline replaces only the six listed modules with committed source.",
+    "data": "Synthetic fixtures only; no user data, models or network. Outputs compared on every iteration except intentional revision prompt changes.",
+    "regression": "Semantic parity and operation counts are gates; timings are observational."
+  },
+  "sources": {
+    "src/services/novelty/noveltyMatcher.ts": {
+      "beforeSha256": "2bfadfef8d1b0789d6f04d84d5596762c6223613be69f899f6903322381a4336",
+      "afterSha256": "497fe7f954c3f9d0e7a4ae77cfad5cafde030ed4e0f63b93a6478ba282f19c1e"
+    },
+    "src/services/novelty/noveltyText.ts": {
+      "beforeSha256": "a0a17acec5409f0e67499b15201a1dc344c641eec88f44dac29ba10851286310",
+      "afterSha256": "79d834f84450abe4bc36c6bdf716f302bac49792e07e8fca92a3f7666b22f4dd"
+    },
+    "src/services/TokenEstimator.ts": {
+      "beforeSha256": "17f0c4a7b8035fcf7f9016e773fb1e13e3d9905fed6d26ef80431fb60cda17db",
+      "afterSha256": "73b702db2e135c61ecee9d95d84dae547828d571a41546c20106498cd544193e"
+    },
+    "src/services/PromptBuilderService.ts": {
+      "beforeSha256": "c2858e1d6e221de8ddd3b6651e5f3bbfea72450dac670e8bbbc39277a7ae29d2",
+      "afterSha256": "6496cb634a9ade429d095b4d5e061b79ff1273e4e92fe0c6d3cdda67b4cf43ba"
+    },
+    "src/services/promptFormatters/promptUtils.ts": {
+      "beforeSha256": "33b0780b4f16bbad473e2c75c6c6f55c1a3af4e75ca74046a92aec1f95e4bb58",
+      "afterSha256": "f5f29459a5ffca79f16c99f098ef3f4e555921b7330809da749d3dc243289187"
+    },
+    "src/services/ai/AIPromptTemplates.ts": {
+      "beforeSha256": "c56d4b80692810dc0bd8b05bab747dfee06fa817fcde91890d5a72a73fbb638e",
+      "afterSha256": "e8c8ebafdaf3bc0ce12a96be10ba52a2ba55f8e5ed86d8f381f59ced02933307"
+    }
+  },
+  "results": [
+    {
+      "name": "novelty-context-1000",
+      "bodyCharacters": 2000,
+      "contextCharacters": 1000,
+      "before": {
+        "p50Ms": 15.621,
+        "p95Ms": 22.111,
+        "samplesMs": [
+          22.111,
+          18.808,
+          20.792,
+          16.36,
+          16.274,
+          16.359,
+          14.241,
+          11.496,
+          14.742,
+          15.621,
+          13.851,
+          12.915,
+          16.444,
+          14.679,
+          12.774
+        ]
+      },
+      "after": {
+        "p50Ms": 3.234,
+        "p95Ms": 4.424,
+        "samplesMs": [
+          4.424,
+          4.146,
+          4.197,
+          3.234,
+          4.324,
+          2.366,
+          2.408,
+          3.888,
+          2.382,
+          2.628,
+          2.257,
+          3.179,
+          3.682,
+          2.14,
+          3.509
+        ]
+      },
+      "outputHash": "754cad4ab761a3357d6644006e11748825b7bfe0a03dee28358bf137b47e5b24"
+    },
+    {
+      "name": "novelty-context-8000",
+      "bodyCharacters": 2000,
+      "contextCharacters": 8000,
+      "before": {
+        "p50Ms": 109.519,
+        "p95Ms": 172.237,
+        "samplesMs": [
+          128.411,
+          131.531,
+          172.237,
+          159.715,
+          162.221,
+          114.931,
+          114.875,
+          109.519,
+          104.312,
+          101.321,
+          92.512,
+          91.615,
+          93.187,
+          105.516,
+          85.732
+        ]
+      },
+      "after": {
+        "p50Ms": 10.895,
+        "p95Ms": 14.459,
+        "samplesMs": [
+          11.509,
+          14.459,
+          13.021,
+          11.372,
+          13.456,
+          10.747,
+          10.895,
+          12.008,
+          8.42,
+          10.193,
+          9.114,
+          8.55,
+          11.413,
+          8.916,
+          8.863
+        ]
+      },
+      "outputHash": "754cad4ab761a3357d6644006e11748825b7bfe0a03dee28358bf137b47e5b24"
+    },
+    {
+      "name": "novelty-context-24000",
+      "bodyCharacters": 2000,
+      "contextCharacters": 24000,
+      "before": {
+        "p50Ms": 288.227,
+        "p95Ms": 542.124,
+        "samplesMs": [
+          542.124,
+          487.992,
+          452.371,
+          453.884,
+          310.154,
+          288.426,
+          288.47,
+          286.242,
+          275.733,
+          288.227,
+          269.822,
+          264.83,
+          259.519,
+          271.238,
+          280.37
+        ]
+      },
+      "after": {
+        "p50Ms": 25.513,
+        "p95Ms": 42.6,
+        "samplesMs": [
+          42.6,
+          37.235,
+          34.446,
+          33.149,
+          25.184,
+          25.072,
+          29.014,
+          25.352,
+          26.49,
+          27.788,
+          25.513,
+          22.587,
+          23.078,
+          24.446,
+          24.69
+        ]
+      },
+      "outputHash": "754cad4ab761a3357d6644006e11748825b7bfe0a03dee28358bf137b47e5b24"
+    },
+    {
+      "name": "novelty-body-2000",
+      "bodyCharacters": 2000,
+      "contextCharacters": 39,
+      "before": {
+        "p50Ms": 2.302,
+        "p95Ms": 3.196,
+        "samplesMs": [
+          3.167,
+          2.974,
+          3.196,
+          2.163,
+          2.436,
+          2.094,
+          1.935,
+          2.678,
+          3.07,
+          2.193,
+          2.083,
+          2.502,
+          2.302,
+          1.742,
+          2.187
+        ]
+      },
+      "after": {
+        "p50Ms": 1.636,
+        "p95Ms": 3.658,
+        "samplesMs": [
+          1.827,
+          2.254,
+          1.296,
+          2.556,
+          2.197,
+          1.37,
+          1.51,
+          1.769,
+          1.633,
+          1.636,
+          1.602,
+          2.009,
+          1.443,
+          1.438,
+          3.658
+        ]
+      },
+      "outputHash": "754cad4ab761a3357d6644006e11748825b7bfe0a03dee28358bf137b47e5b24"
+    },
+    {
+      "name": "novelty-body-24000",
+      "bodyCharacters": 24000,
+      "contextCharacters": 39,
+      "before": {
+        "p50Ms": 44.456,
+        "p95Ms": 90.076,
+        "samplesMs": [
+          15.829,
+          60.828,
+          55.939,
+          35.339,
+          73.213,
+          39.23,
+          44.456,
+          48.885,
+          90.076,
+          54.74,
+          40.869,
+          70.566,
+          38.54,
+          35.324,
+          36.841
+        ]
+      },
+      "after": {
+        "p50Ms": 38.247,
+        "p95Ms": 63.477,
+        "samplesMs": [
+          14.453,
+          23.421,
+          30.611,
+          26.974,
+          45.203,
+          42.767,
+          45.609,
+          58.546,
+          63.477,
+          42.129,
+          35.18,
+          38.247,
+          52.479,
+          30.934,
+          33.775
+        ]
+      },
+      "outputHash": "754cad4ab761a3357d6644006e11748825b7bfe0a03dee28358bf137b47e5b24"
+    },
+    {
+      "name": "novelty-body-160000",
+      "bodyCharacters": 160000,
+      "contextCharacters": 39,
+      "before": {
+        "p50Ms": 107.146,
+        "p95Ms": 200.67,
+        "samplesMs": [
+          200.67,
+          200.644,
+          178.671,
+          118.601,
+          107.334,
+          140.946,
+          105.604,
+          96.116,
+          100.088,
+          97.794,
+          98.248,
+          121.072,
+          82.411,
+          86.67,
+          107.146
+        ]
+      },
+      "after": {
+        "p50Ms": 107.196,
+        "p95Ms": 191.921,
+        "samplesMs": [
+          191.921,
+          176,
+          178.498,
+          149.746,
+          107.725,
+          128.874,
+          97.15,
+          95.016,
+          100.034,
+          101.563,
+          108.531,
+          101.093,
+          84.683,
+          95.872,
+          107.196
+        ]
+      },
+      "outputHash": "754cad4ab761a3357d6644006e11748825b7bfe0a03dee28358bf137b47e5b24"
+    },
+    {
+      "name": "prompt-10-chapters",
+      "chapterCount": 10,
+      "before": {
+        "p50Ms": 1.919,
+        "p95Ms": 3.498,
+        "samplesMs": [
+          2.46,
+          1.96,
+          1.906,
+          1.919,
+          1.964,
+          1.997,
+          1.874,
+          1.838,
+          1.95,
+          1.69,
+          1.716,
+          3.498,
+          3.353,
+          1.71,
+          1.79
+        ]
+      },
+      "after": {
+        "p50Ms": 1.172,
+        "p95Ms": 1.41,
+        "samplesMs": [
+          1.377,
+          1.258,
+          1.209,
+          1.327,
+          1.284,
+          1.235,
+          1.172,
+          1.152,
+          1.084,
+          1.06,
+          1.051,
+          1.41,
+          1.111,
+          1.041,
+          1.098
+        ]
+      },
+      "outputHash": "828c638052adffeb716f036d1a95a830e23b4127ce5aa1d040259d742c3937fc"
+    },
+    {
+      "name": "prompt-100-chapters",
+      "chapterCount": 100,
+      "before": {
+        "p50Ms": 3.716,
+        "p95Ms": 8.004,
+        "samplesMs": [
+          3.433,
+          5.755,
+          4.037,
+          8.004,
+          4.657,
+          4.235,
+          3.33,
+          3.255,
+          3.531,
+          3.186,
+          4.114,
+          3.306,
+          3.716,
+          3.846,
+          3.171
+        ]
+      },
+      "after": {
+        "p50Ms": 2.201,
+        "p95Ms": 4.053,
+        "samplesMs": [
+          2.201,
+          2.261,
+          2.461,
+          2.518,
+          2.274,
+          2.232,
+          2.013,
+          1.878,
+          1.84,
+          1.925,
+          1.856,
+          1.807,
+          3.089,
+          4.053,
+          1.814
+        ]
+      },
+      "outputHash": "5eeaa534d30861ce92471a510955a93429642bca9e9a10c816fc11a48aeff14b"
+    },
+    {
+      "name": "prompt-500-chapters",
+      "chapterCount": 500,
+      "before": {
+        "p50Ms": 19.099,
+        "p95Ms": 21.912,
+        "samplesMs": [
+          13.731,
+          19.55,
+          19.993,
+          17.241,
+          18.514,
+          21.015,
+          18.73,
+          19.876,
+          14.908,
+          17.172,
+          21.912,
+          21.624,
+          19.099,
+          16.34,
+          21.202
+        ]
+      },
+      "after": {
+        "p50Ms": 11.081,
+        "p95Ms": 15.487,
+        "samplesMs": [
+          11.392,
+          6.105,
+          13.198,
+          9.735,
+          11.198,
+          10.601,
+          9.832,
+          11.205,
+          9.207,
+          8.326,
+          11.081,
+          10.65,
+          15.487,
+          11.316,
+          13.731
+        ]
+      },
+      "outputHash": "cbf5b55b770f75444626bcb2882382f14aec44d9daadfa437ff5353cc5a7655a"
+    },
+    {
+      "name": "token-estimate-24000",
+      "characters": 24000,
+      "before": {
+        "p50Ms": 1.028,
+        "p95Ms": 2.213,
+        "samplesMs": [
+          0.604,
+          2.213,
+          1.111,
+          1.028,
+          0.98,
+          1.054,
+          1.27,
+          1.174,
+          0.96,
+          0.96,
+          0.93,
+          0.967,
+          1.664,
+          1.069,
+          0.969
+        ]
+      },
+      "after": {
+        "p50Ms": 0.253,
+        "p95Ms": 0.823,
+        "samplesMs": [
+          0.233,
+          0.245,
+          0.294,
+          0.285,
+          0.275,
+          0.823,
+          0.264,
+          0.252,
+          0.222,
+          0.232,
+          0.231,
+          0.239,
+          0.253,
+          0.259,
+          0.464
+        ]
+      },
+      "outputHash": "e0bcfbc4c42f4580511edf2da369b56b68566c19c524d9edc809eb8dad8b8193"
+    }
+  ],
+  "revisionPrompts": [
+    {
+      "type": "polish_style",
+      "beforeCharacters": 980,
+      "afterCharacters": 674,
+      "beforeTokens": 1044,
+      "afterTokens": 649
+    },
+    {
+      "type": "fix_character_knowledge",
+      "beforeCharacters": 995,
+      "afterCharacters": 650,
+      "beforeTokens": 1052,
+      "afterTokens": 604
+    },
+    {
+      "type": "reduce_ai_tone",
+      "beforeCharacters": 2369,
+      "afterCharacters": 2024,
+      "beforeTokens": 2722,
+      "afterTokens": 2274
+    },
+    {
+      "type": "improve_continuity",
+      "beforeCharacters": 988,
+      "afterCharacters": 683,
+      "beforeTokens": 1048,
+      "afterTokens": 655
+    },
+    {
+      "type": "reduce_redundancy",
+      "beforeCharacters": 985,
+      "afterCharacters": 685,
+      "beforeTokens": 1045,
+      "afterTokens": 658
+    }
+  ]
+}

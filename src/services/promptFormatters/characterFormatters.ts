@@ -1,24 +1,9 @@
-import type {
-  Character,
-  CharacterCardField,
-  CharacterStateFact,
-  CharacterStateLog,
-  Chapter,
-  ChapterContinuityBridge,
-  Foreshadowing,
-  ForeshadowingTreatmentMode,
-  ID,
-  ContextCompressionRecord,
-  ContextNeedPlan,
-  PromptBlockOrderItem,
-  PromptBuildInput,
-  PromptConfig,
-  PromptMode,
-  StageSummary,
-  TimelineEvent
-} from '../../shared/types'
+import type { Character, CharacterCardField, CharacterStateFact, CharacterStateLog, Chapter, ID, ContextNeedPlan } from '../../shared/types'
 
 import { CharacterStateService } from '../CharacterStateService'
+import { characterFieldValue } from '../characterState/cardFields'
+import { writingCardAtChapter } from '../characterState/writingCard'
+export { characterFieldValue } from '../characterState/cardFields'
 import { valueOrEmpty } from './promptUtils'
 
 function recentCharacterLogs(characterId: ID, logs: CharacterStateLog[]): CharacterStateLog[] {
@@ -32,15 +17,53 @@ function recentCharacterLogs(characterId: ID, logs: CharacterStateLog[]): Charac
     .slice(0, 3)
 }
 
+export function formatWritingCards(characters: Character[], facts: CharacterStateFact[], logs: CharacterStateLog[],
+  plan: ContextNeedPlan | null, target: number, chapters: Chapter[], completeSourceIndex: boolean) {
+  const byId = new Map(chapters.map(ch => [ch.id, ch]))
+  const historicalProjects = new Set(chapters.filter(ch => !ch.archivedAt?.trim() && ch.body?.trim() && ch.order >= target).map(ch => ch.projectId))
+  const ids = new Set(characters.map(c => c.id))
+  const byCharacter = new Map<ID, CharacterStateLog[]>()
+  const byFactOwner = new Map<ID, CharacterStateFact[]>()
+  for (const fact of facts) {
+    const list = byFactOwner.get(fact.characterId)
+    if (list) list.push(fact)
+    else byFactOwner.set(fact.characterId, [fact])
+  }
+  for (const log of logs) {
+    if (!ids.has(log.characterId)) continue
+    const ch = log.chapterId ? byId.get(log.chapterId) : undefined
+    const order = ch?.order ?? log.chapterOrder
+    if (ch?.archivedAt?.trim() || (ch && ch.projectId !== log.projectId) || (completeSourceIndex && log.chapterId && !ch) ||
+      (order ?? 0) > target || (!order && historicalProjects.has(log.projectId))) continue
+    const row = { ...log, chapterOrder: ch?.order ?? log.chapterOrder }
+    const list = byCharacter.get(log.characterId)
+    if (list) list.push(row)
+    else byCharacter.set(log.characterId, [row])
+  }
+  const cardWarnings = new Set<string>()
+  const text = characters.map(c => {
+    const { card, cleanLog, warnings } = writingCardAtChapter(c, byFactOwner.get(c.id) ?? [], target, historicalProjects.has(c.projectId))
+    const recent = (byCharacter.get(c.id) ?? []).filter(l => l.projectId === c.projectId).flatMap(log => {
+      const note = cleanLog(log.note)
+      return note ? [{ ...log, note }] : []
+    })
+    for (const w of warnings) cardWarnings.add(w)
+    return plan ? formatCharacterNeedSlice(card, recent, plan) : formatCharacter(card, recent)
+  }).join('\n\n')
+  return { text, cardWarnings }
+}
+
 export function formatCharacter(character: Character, logs: CharacterStateLog[]): string {
   const lines = [
     `### ${character.name || '未命名角色'}${character.isMain ? '（主要角色）' : ''}`,
-    `本章定位：${valueOrEmpty(character.role)}`,
+    `本章定位：${characterFieldValue(character, 'roleFunction')}`,
     `当前表层目标：${valueOrEmpty(character.surfaceGoal)}`,
     `当前知道的信息：${valueOrEmpty(character.knownInformation)}`,
     `当前不知道的信息：${valueOrEmpty(character.unknownInformation)}`,
-    `当前情绪/关系状态：${[valueOrEmpty(character.emotionalState), valueOrEmpty(character.protagonistRelationship)].filter(Boolean).join('；')}`,
-    `本章可行动作或行为倾向：${valueOrEmpty(character.nextActionTendency)}`,
+    character.abilitiesAndResources?.trim() ? `能力与资源：${characterFieldValue(character, 'abilitiesAndResources')}` : '',
+    character.weaknessAndCost?.trim() ? `弱点与代价：${characterFieldValue(character, 'weaknessAndCost')}` : '',
+    `当前情绪/关系状态：${[valueOrEmpty(character.emotionalState), characterFieldValue(character, 'relationshipTension')].filter(Boolean).join('；')}`,
+    `本章可行动作或行为倾向：${characterFieldValue(character, 'decisionLogic')}`,
     `禁止写法：${valueOrEmpty(character.forbiddenWriting)}`
   ]
 
@@ -68,18 +91,6 @@ export function characterFieldLabel(field: CharacterCardField): string {
     futureHooks: '后续钩子'
   }
   return labels[field]
-}
-
-export function characterFieldValue(character: Character, field: CharacterCardField): string {
-  if (field === 'roleFunction') return character.role
-  if (field === 'surfaceGoal') return character.surfaceGoal
-  if (field === 'deepNeed') return character.deepDesire
-  if (field === 'coreFear') return character.coreFear
-  if (field === 'decisionLogic') return [character.nextActionTendency, character.selfDeception].filter(Boolean).join('；')
-  if (field === 'abilitiesAndResources') return character.knownInformation
-  if (field === 'weaknessAndCost') return [character.coreFear, character.forbiddenWriting].filter(Boolean).join('；')
-  if (field === 'relationshipTension') return character.protagonistRelationship
-  return character.nextActionTendency
 }
 
 export function formatCharacterNeedSlice(character: Character, logs: CharacterStateLog[], plan: ContextNeedPlan): string {
@@ -113,14 +124,14 @@ export function formatCharacterNeedSlice(character: Character, logs: CharacterSt
 
   if (recentLogs.length > 0) {
     lines.push(
-      '最近状态事实：',
+      '近期历史日志：',
       ...recentLogs.map((log) => `- ${log.chapterOrder ? `第 ${log.chapterOrder} 章` : '未关联章节'}：${log.note}`)
     )
   }
 
   const writingConstraints = [
     valueOrEmpty(character.emotionalState) ? `- 不得违背该角色当前状态：${valueOrEmpty(character.emotionalState)}` : '',
-    valueOrEmpty(character.protagonistRelationship) ? `- 不得忽略关系状态：${valueOrEmpty(character.protagonistRelationship)}` : '',
+    characterFieldValue(character, 'relationshipTension') ? `- 不得忽略关系状态：${characterFieldValue(character, 'relationshipTension')}` : '',
     valueOrEmpty(character.forbiddenWriting) ? `- 不得触发禁止写法：${valueOrEmpty(character.forbiddenWriting)}` : ''
   ].filter(Boolean)
   if (writingConstraints.length > 0) lines.push('写作约束：', ...writingConstraints)
@@ -150,19 +161,16 @@ function stateCategoryLabel(category: string): string {
 export function formatStateFact(fact: CharacterStateFact): string {
   const value = CharacterStateService.formatFactValue(fact.value)
   const unit = fact.unit ? ` ${fact.unit}` : ''
-  const source = fact.sourceChapterOrder ? `来源：第 ${fact.sourceChapterOrder} 章。` : ''
+  const source = fact.sourceChapterOrder ? `来源：第 ${fact.sourceChapterOrder} 章。` :
+    fact.currentAsOfChapter ? '当前手工状态，未注明生效章。' : ''
   const policy = fact.trackingLevel === 'hard' ? '硬状态' : fact.trackingLevel === 'soft' ? '软状态' : '备注'
   return `- ${fact.label}：${value}${unit}。（${[policy, source].filter(Boolean).join('；')}）`
 }
 
 export function formatCharacterStateLedgerSlice(
   characters: Character[],
-  facts: CharacterStateFact[],
-  plan: ContextNeedPlan | null,
-  targetChapterOrder: number
+  selectedFacts: CharacterStateFact[]
 ): string {
-  const characterIds = characters.map((character) => character.id)
-  const selectedFacts = CharacterStateService.getRelevantCharacterStatesForPrompt(characterIds, plan, targetChapterOrder, facts)
   if (!selectedFacts.length) return ''
   const names = new Map(characters.map((character) => [character.id, character.name || '未命名角色']))
   const grouped = selectedFacts.reduce<Record<ID, CharacterStateFact[]>>((acc, fact) => {

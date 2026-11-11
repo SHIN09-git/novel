@@ -1,0 +1,37 @@
+.hard-canon-audit {
+  display: grid;
+  min-width: 0;
+  gap: 8px;
+  overflow-wrap: anywhere;
+}
+
+.hard-canon-audit :is(h4, h5, p, ol, ul, blockquote) {
+  margin: 0;
+}
+
+.hard-canon-audit :is(ol, ul) {
+  padding: 0;
+  list-style: none;
+}
+
+.hard-canon-audit li {
+  display: grid;
+  gap: 4px;
+  padding: 8px 0;
+  border-bottom: 1px solid var(--line);
+}
+
+.hard-canon-audit blockquote {
+  padding-inline-start: 10px;
+  border-inline-start: 2px solid var(--line);
+  white-space: pre-wrap;
+}
+
+.hard-canon-audit mark {
+  background: color-mix(in srgb, var(--color-accent) 18%, transparent);
+  color: inherit;
+}
+
+.hard-canon-audit :is(small, details p) {
+  color: var(--muted);
+}

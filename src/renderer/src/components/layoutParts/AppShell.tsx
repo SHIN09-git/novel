@@ -38,10 +38,10 @@ function useViewEnterAnimation(view: View) {
     if (window.matchMedia?.('(prefers-reduced-motion: reduce)').matches) return
     const animation = element.animate(
       [
-        { opacity: 0, transform: 'translateY(6px)' },
+        { opacity: 0, transform: 'translateY(4px)' },
         { opacity: 1, transform: 'none' }
       ],
-      { duration: 240, easing: 'cubic-bezier(0.22, 0.8, 0.24, 1)' }
+      { duration: 200, easing: 'cubic-bezier(0.22, 0.8, 0.24, 1)' }
     )
     return () => animation.cancel()
   }, [view])

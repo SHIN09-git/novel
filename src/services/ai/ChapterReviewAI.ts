@@ -143,7 +143,8 @@ export class ChapterReviewAI {
       (value) => ensurePostDraftAnalysis(value, characterIds, foreshadowingIds),
       fallback,
       undefined,
-      validatePostDraftAnalysisSchema
+      validatePostDraftAnalysisSchema,
+      { phase: 'extraction' }
     )
   }
 
@@ -160,7 +161,7 @@ export class ChapterReviewAI {
       chapterTextBlock(chapterText)
     ].join('\n')
 
-    return this.client.requestJson(REVIEW_SYSTEM_PROMPT, userPrompt, ensureChapterReview, fallback, undefined, validateChapterReviewSchema)
+    return this.client.requestJson(REVIEW_SYSTEM_PROMPT, userPrompt, ensureChapterReview, fallback, undefined, validateChapterReviewSchema, { phase: 'review' })
   }
 
   async generateStageSummary(chapters: Chapter[]): Promise<Omit<StageSummary, 'id' | 'projectId' | 'createdAt' | 'updatedAt'>> {
@@ -191,7 +192,8 @@ export class ChapterReviewAI {
       (value) => ensureCharacterSuggestions(value, characterIds),
       fallback,
       undefined,
-      validateCharacterSuggestionsSchema
+      validateCharacterSuggestionsSchema,
+      { phase: 'extraction' }
     )
   }
 
@@ -225,7 +227,8 @@ export class ChapterReviewAI {
       (value) => ensureForeshadowingExtraction(value, foreshadowingIds, characterIds),
       fallback,
       undefined,
-      validateForeshadowingExtractionSchema
+      validateForeshadowingExtractionSchema,
+      { phase: 'extraction' }
     )
   }
 
@@ -254,6 +257,6 @@ export class ChapterReviewAI {
       cleanText(chapter.riskWarnings) ? `风险提醒：${cleanText(chapter.riskWarnings)}` : ''
     ].join('\n')
 
-    return this.client.requestJson(REVIEW_SYSTEM_PROMPT, userPrompt, ensureNextSuggestions, fallback, undefined, validateNextSuggestionsSchema)
+    return this.client.requestJson(REVIEW_SYSTEM_PROMPT, userPrompt, ensureNextSuggestions, fallback, undefined, validateNextSuggestionsSchema, { phase: 'planning' })
   }
 }

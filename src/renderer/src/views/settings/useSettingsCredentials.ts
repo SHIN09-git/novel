@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import type { AppSettings } from '../../../../shared/types'
+import type { CredentialHasApiKeyResult } from '../../../../shared/ipc/ipcTypes'
 import { getUserFriendlyError } from '../../../../shared/errorUtils'
 import { useConfirm } from '../../components/ConfirmDialog'
 import { deleteApiKey, getApiKeyState, saveApiKey } from '../../settings/credentialApi'
@@ -14,15 +15,18 @@ export function useSettingsCredentials({ settings, updateSettings }: UseSettings
   const confirmAction = useConfirm()
   const [apiKeyInput, setApiKeyInput] = useState('')
   const [hasStoredApiKey, setHasStoredApiKey] = useState(Boolean(settings.hasApiKey))
+  const [apiKeyState, setApiKeyState] = useState<CredentialHasApiKeyResult | null>(null)
   const [credentialMessage, setCredentialMessage] = useState('')
   const [credentialBusy, setCredentialBusy] = useState(false)
 
   useEffect(() => {
     let active = true
-    getApiKeyState()
-      .then((hasApiKey) => {
+    getApiKeyState(settings.baseUrl)
+      .then((state) => {
         if (!active) return
-        setHasStoredApiKey(hasApiKey)
+        setApiKeyState(state)
+        setHasStoredApiKey(state.hasApiKey)
+        const hasApiKey = state.anyAvailable ?? state.hasApiKey
         if (hasApiKey !== settings.hasApiKey || settings.apiKey) {
           void updateSettings({ apiKey: '', hasApiKey }).then((saved) => {
             if (!saved.ok && active) {
@@ -37,9 +41,8 @@ export function useSettingsCredentials({ settings, updateSettings }: UseSettings
     return () => {
       active = false
     }
-    // Secure storage is checked once when this controller is mounted.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [])
+  }, [settings.baseUrl])
 
   async function storeApiKey() {
     setCredentialMessage('')
@@ -49,10 +52,12 @@ export function useSettingsCredentials({ settings, updateSettings }: UseSettings
     }
     setCredentialBusy(true)
     try {
-      const hasApiKey = await saveApiKey(apiKeyInput)
+      await saveApiKey(apiKeyInput, settings.baseUrl)
+      const state = await getApiKeyState(settings.baseUrl)
       setApiKeyInput('')
-      setHasStoredApiKey(hasApiKey)
-      const saved = await updateSettings({ apiKey: '', hasApiKey })
+      setHasStoredApiKey(state.hasApiKey)
+      setApiKeyState(state)
+      const saved = await updateSettings({ apiKey: '', hasApiKey: state.anyAvailable ?? state.hasApiKey })
       setCredentialMessage(
         saved.ok
           ? 'API Key 已加密保存。'
@@ -68,17 +73,19 @@ export function useSettingsCredentials({ settings, updateSettings }: UseSettings
   async function clearApiKey() {
     const confirmed = await confirmAction({
       title: '删除 API Key',
-      message: '确定删除已保存的 API Key 吗？删除后远程 AI 调用会不可用，直到重新保存。',
+      message: '确定删除工作台加密保存的密钥吗？共享清单的环境变量由系统单独管理。',
       confirmLabel: '删除密钥',
       tone: 'danger'
     })
     if (!confirmed) return
     setCredentialBusy(true)
     try {
-      const hasApiKey = await deleteApiKey()
+      await deleteApiKey()
+      const state = await getApiKeyState(settings.baseUrl)
       setApiKeyInput('')
-      setHasStoredApiKey(hasApiKey)
-      const saved = await updateSettings({ apiKey: '', hasApiKey })
+      setHasStoredApiKey(state.hasApiKey)
+      setApiKeyState(state)
+      const saved = await updateSettings({ apiKey: '', hasApiKey: state.anyAvailable ?? state.hasApiKey })
       setCredentialMessage(
         saved.ok
           ? 'API Key 已删除。'
@@ -92,6 +99,7 @@ export function useSettingsCredentials({ settings, updateSettings }: UseSettings
   }
 
   return {
+    apiKeyState,
     apiKeyInput,
     clearApiKey,
     credentialBusy,

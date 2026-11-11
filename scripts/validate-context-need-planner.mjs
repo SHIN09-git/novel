@@ -1,64 +1,17 @@
-import { mkdir, readFile, rm, writeFile } from 'node:fs/promises'
-import { dirname, join, resolve } from 'node:path'
-import { pathToFileURL } from 'node:url'
-import ts from 'typescript'
+import { loadDomainModules } from './utils/load-domain-modules.mjs'
+import { readFile } from 'node:fs/promises'
+import { join } from 'node:path'
 import { repoRoot } from './utils/repo-root.mjs'
 
 const root = repoRoot
-const outDir = join(root, 'tmp', 'context-need-planner-test')
 const timestamp = '2026-01-01T00:00:00.000Z'
 
 function assert(condition, message, details = {}) {
   return condition ? { ok: true, message } : { ok: false, message, details }
 }
 
-function rewriteRelativeImports(source) {
-  return source.replace(/(from\s+['"])(\.{1,2}\/[^'"]+?)(['"])/g, (_match, prefix, specifier, suffix) => {
-    if (/\.(mjs|js|json)$/.test(specifier)) return `${prefix}${specifier}${suffix}`
-    return `${prefix}${specifier}.mjs${suffix}`
-  })
-}
-
-async function compileTsTree(files) {
-  await rm(outDir, { recursive: true, force: true })
-  for (const relativePath of files) {
-    const source = await readFile(join(root, relativePath), 'utf-8')
-    const compiled = ts.transpileModule(source, {
-      compilerOptions: {
-        module: ts.ModuleKind.ES2022,
-        target: ts.ScriptTarget.ES2022,
-        useDefineForClassFields: true
-      }
-    })
-    const outPath = join(outDir, relativePath).replace(/\.tsx?$/, '.mjs')
-    await mkdir(dirname(outPath), { recursive: true })
-    await writeFile(outPath, rewriteRelativeImports(compiled.outputText), 'utf-8')
-  }
-}
-
-async function loadPlannerModules() {
-  await compileTsTree([
-    'src/shared/chapterText.ts',
-    'src/shared/foreshadowingTreatment.ts',
-    'src/shared/defaults/index.ts',
-    'src/services/StageSummaryService.ts',
-    'src/services/StoryDirectionService.ts',
-    'src/services/contextNeedPlanner/rules.ts',
-    'src/services/contextNeedPlanner/characterInference.ts',
-    'src/services/contextNeedPlanner/characterNeeds.ts',
-    'src/services/ContextNeedPlannerService.ts',
-    'src/renderer/src/utils/format.ts',
-    'src/renderer/src/views/promptBuilder/promptBuilderNeedPlan.ts',
-    'src/renderer/src/views/promptBuilder/promptBuilderHistoryState.ts',
-    'src/renderer/src/views/promptBuilder/promptBuilderSnapshotConsistency.ts',
-    'src/renderer/src/utils/foreshadowingRecommendations.ts'
-  ])
-  const cacheKey = Date.now()
-  const planner = await import(`${pathToFileURL(join(outDir, 'src/services/ContextNeedPlannerService.mjs')).href}?t=${cacheKey}`)
-  const editor = await import(`${pathToFileURL(join(outDir, 'src/renderer/src/views/promptBuilder/promptBuilderNeedPlan.mjs')).href}?t=${cacheKey}`)
-  const history = await import(`${pathToFileURL(join(outDir, 'src/renderer/src/views/promptBuilder/promptBuilderHistoryState.mjs')).href}?t=${cacheKey}`)
-  const recommendations = await import(`${pathToFileURL(join(outDir, 'src/renderer/src/utils/foreshadowingRecommendations.mjs')).href}?t=${cacheKey}`)
-  return { ...planner, ...editor, ...history, ...recommendations }
+function loadPlannerModules() {
+  return loadDomainModules('services/ContextNeedPlannerService', 'renderer/src/views/promptBuilder/promptBuilderNeedPlan', 'renderer/src/views/promptBuilder/promptBuilderHistoryState', 'renderer/src/utils/foreshadowingRecommendations')
 }
 
 function character(id, name, overrides = {}) {
