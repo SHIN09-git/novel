@@ -13,3 +13,7 @@
 *.docx binary
 *.woff binary
 *.woff2 binary
+
+# Byte-for-byte fixtures from preview.20; their published digests must survive checkout.
+scripts/fixtures/library-preview20/library.sqlite binary
+scripts/fixtures/library-preview20/backup.json -text

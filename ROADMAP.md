@@ -1,6 +1,6 @@
 # 路线图 / Roadmap
 
-更新日期：2026-11-11。这里只保留当前方向和下一步，不再重复各版本的施工日志、源码行数和已完成待办。历史变更见 [CHANGELOG](./CHANGELOG.md)，包的实际状态见 [发行产物说明](./docs/RELEASE_ARTIFACTS.md)。
+更新日期：2026-11-12。这里只保留当前方向和下一步，不再重复各版本的施工日志、源码行数和已完成待办。历史变更见 [CHANGELOG](./CHANGELOG.md)，包的实际状态见 [发行产物说明](./docs/RELEASE_ARTIFACTS.md)。
 
 ## 当前方向
 
@@ -13,20 +13,20 @@
 - 桌面和 Agent 共用生成、审稿、修订、候选决定及正式提交流程；项目权限可以撤回。
 - 章节阅读、局部重写、任务编辑、候选历史和作者诊断摘要已有入口。
 
-2026-10-31：复用单次 Novelty 审计的分词结果，去掉 Prompt 追踪的重复渲染，简化 token 扫描；修订指令按类型输出。范围、实测和限制见 [本轮性能记录](./docs/REDUNDANCY_PERFORMANCE.md)。已纳入本地 Preview.19 安装包和 `release/win-unpacked`，尚未上传 GitHub。
+[Preview.20](https://github.com/SHIN09-git/novel/releases/tag/v0.1.6-preview.20) 已公开发布，包含[长篇完稿修复](./docs/LONG_NOVEL_COMPLETION_REPAIR_PLAN.md)：超限保稿、成稿硬规则核查、跨章对账、按书统计用量和批量改名。用量不能反推供应商余额或缺失的历史账单。此前减少 Novelty 重复分词、Prompt 追踪重复渲染的实测见[性能记录](./docs/REDUNDANCY_PERFORMANCE.md)。
 
 ## 下一步优先事项
 
-按[长篇完稿后的修复计划](./docs/LONG_NOVEL_COMPLETION_REPAIR_PLAN.md)，源码已支持保留超限稿、成稿硬规则核查、全书进度与连写顺序、按章取余额和跨章事实核对。P2 增加按书统计模型用量、调用前估算、连接诊断、按起止章编排导向，以及可预览和追溯的批量改名。尚不能从用量反推供应商余额或旧书缺失的账单。下表保留原有维护事项；安装包要单独更新。
+执行[书库可靠性与长篇性能施工计划](./docs/LIBRARY_STABILITY_AND_PERFORMANCE_PLAN.md)。**当前只完成核查，尚未开始实施。** 从 S0 的干净主线工作区开始；下一版只需完成 S1、S2，不等所有性能工作做完才交付。
 
 | 优先级 | 工作 | 完成条件 |
 | --- | --- | --- |
-| 1 | 处理已报告的依赖安全告警 | 核对受影响调用，按兼容范围升级；完整回归和包内 SQLite 启动通过后再发包 |
-| 2 | 继续压缩实际慢入口 | 复现具体操作，测量全量数据读取、跨进程传输或诊断耗时；只有可重复收益才新增定向查询或后台计算 |
-| 3 | 用真实修订案例检查提示词 | 对比指定问题是否修好、无关段落是否保留；记录 Novelty 误报/漏报，避免继续堆全局禁令 |
-| 4 | 修补高频操作中的阻碍 | 优先未保存输入恢复、采纳失败恢复、阅读和修订切换；按用户反馈选具体入口，不做全站重设计 |
+| S1，下一版 | 书库打开失败时不切换到可写空库 | 原路径和文件不变；作者能重试、选择已有库或从备份恢复；正常首次建库不受影响 |
+| S2，下一版 | 核对运行时依赖，用 Windows 安装器验证升级 | 干净安装、从 preview.20 升级后均能读写 SQLite；重启后作品和版本链仍在 |
+| S3-A / S3-B | 先优化打开项目，再优化采纳与修订 | 更新时间不传整库；提交不读取无关项目历史。用虚构长篇对照耗时，保留并发、回滚和版本恢复能力 |
+| S4，有依据再做 | 历史详情按需读取、减少新副本或压缩自动备份 | 不把局部数据当整库保存；不删除作者采纳来源；旧备份可恢复，不自动删手动备份 |
 
-真实模型对照需要另行确认供应商、模型和费用。本地性能基准不消耗模型额度，不能替代成文质量评估。
+具体的修订质量、Novelty 误报和未保存输入仍按作者反馈跟进，不阻塞上述交付。本轮性能验收不消耗模型额度，也不替代成文质量评估。
 
 ## 保留的必要校验
 
@@ -40,7 +40,7 @@ npm.cmd test
 npm.cmd run build
 ```
 
-更新安装包时另跑 `npm.cmd run smoke:packaged`；公开发布前做密钥扫描。每项新优化必须有行为回归或实测依据，不新增只检查文案和文件行数的门槛。
+发布候选包另跑 `npm.cmd run smoke:release` 检查解包程序，再用 Setup 验证实际安装和升级；两者不能互相替代。公开发布前做密钥扫描。每项新优化必须有行为回归或实测依据，不新增只检查文案和文件行数的门槛。
 
 ## 暂缓
 
@@ -56,8 +56,8 @@ npm.cmd run build
 
 ## English
 
-Updated 2026-11-11. The [long-novel repair plan](./docs/LONG_NOVEL_COMPLETION_REPAIR_PLAN.md) now includes project-level usage, single-request cost estimates, connection diagnoses, custom story-direction ranges and auditable chapter renames, in addition to draft retention, canon checks and cross-chapter continuity. Provider balances and unrecorded historical usage remain unknown. This describes the working tree, not a new installer.
+Updated 2026-11-12. The [preview.20 prerelease](https://github.com/SHIN09-git/novel/releases/tag/v0.1.6-preview.20) includes the [long-novel fixes](./docs/LONG_NOVEL_COMPLETION_REPAIR_PLAN.md). Provider balances and unrecorded historical usage remain unknown.
 
-Next: verify dependency advisories; profile concrete slow operations before redesigning storage or threading; evaluate task-specific revision instructions with real cases; repair reported editing and acceptance friction. The [current performance record](./docs/REDUNDANCY_PERFORMANCE.md) covers the optimizations now packaged locally as Preview.19, not a claim about model quality or a GitHub publication.
+Next, follow the [library reliability and performance plan](./docs/LIBRARY_STABILITY_AND_PERFORMANCE_PLAN.md). No implementation is claimed yet. The next release candidate must distinguish an unavailable library from an empty one and pass a real Windows Setup upgrade from preview.20. Then measure and narrow project opening and chapter commits. History compaction and automatic backup compression are conditional, not release blockers.
 
 Keep project isolation, version conflict checks, idempotent commits, report provenance, rollback, backups, authorization and credential redaction. Full CRUD rewrites, FTS, graphs, cloud sync and generic extension systems remain deferred. Historical plans and measurements are references, not additional mandatory work.
