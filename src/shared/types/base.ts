@@ -51,6 +51,8 @@ export interface AiCallTelemetry {
   durationMs: number
   attempts: number
   responseFormatFallback: boolean
+  /** The model result is unchanged, but receipt persistence was not confirmed. */
+  usageJournalIncomplete?: true
   finishReason?: string
   usage?: AiTokenUsage
   terminationCategory: AiCallTerminationCategory
@@ -58,10 +60,25 @@ export interface AiCallTelemetry {
 
 export type ContinuitySource = 'saved_bridge' | 'auto_from_previous_ending' | 'manual'
 
-export interface TimelineEvent {
+export interface TimelineTimeFields {
+  timelineKey?: string
+  location?: string
+  /** A named origin; elapsedDays counts whole days from this same origin, not from the previous chapter. */
+  timeAnchor?: string
+  elapsedDays?: number
+  season?: 'spring' | 'summer' | 'autumn' | 'winter'
+  deadlineKey?: string
+  remainingDays?: number
+  timeShift?: 'flashback' | 'time_skip'
+  sourceExcerpt?: string
+}
+
+export interface TimelineEvent extends TimelineTimeFields {
   id: ID
   projectId: ID
   title: string
+  /** Absent in legacy data. Null with a chapterOrder means the chapter has not been identified. */
+  chapterId?: ID | null
   chapterOrder: number | null
   storyTime: string
   narrativeOrder: number

@@ -1,13 +1,21 @@
 import { dialog, ipcMain } from 'electron'
 import { readFile, writeFile } from 'node:fs/promises'
 import { safeParseJson } from '../../services/AIJsonParser'
+import { observeFormalChapterWrites } from '../../services/ChapterWritebackFailureService'
+import { parseChapterTitleRename, previewChapterTitleRename } from '../../services/ChapterTitleRenameService'
+import { loadChapterTitlesReadonly } from '../../storage/SqliteStorageService'
+import { StorageRevisionConflictError } from '../../storage/StorageService'
+import type { ChapterTitleCommit, ChapterTitleRename } from '../../shared/types/chapterTitle'
 import { collectionName } from '../../shared/appDataCollections'
 import { normalizeAppData, sanitizeAppDataForPersistence } from '../../shared/defaults'
 import { IPC_CHANNELS } from '../../shared/ipc/ipcChannels'
+import { readProjectUsage } from '../../storage/readProjectUsage'
 import type {
   ExportDataResult,
   ExecuteCandidateDecisionRequest,
   CandidateDecisionWriteResult,
+  CharacterCardReviewRequest,
+  CharacterCardReviewWriteResult,
   ImportDataResult,
   ImportDataRequest,
   SaveChapterCommitBundleRequest,
@@ -27,6 +35,38 @@ import { secureAndSanitizeAppData } from './appDataCredentialSanitizer'
 import { assertCurrentStorage, maybeCreateAutomaticBackup } from './storageDataOperations'
 
 export function registerDataIpcHandlers(context: StorageDataOperationContext): void {
+  ipcMain.handle(IPC_CHANNELS.DATA_PREVIEW_CHAPTER_TITLES, safeIpcHandler(async (_event,
+    request: { command: ChapterTitleRename; expectedRevision: string }) => {
+    const command = parseChapterTitleRename(request?.command), storage = context.getStorage()
+    const path = storage.getStoragePath(), snapshot = await loadChapterTitlesReadonly(path, command.projectId)
+    assertCurrentStorage(context, storage)
+    if (request.expectedRevision !== snapshot.revision) throw new StorageRevisionConflictError()
+    return previewChapterTitleRename(snapshot.state, command, path, snapshot.revision, { kind: 'user' })
+  }))
+  ipcMain.handle(IPC_CHANNELS.DATA_RENAME_CHAPTER_TITLES, safeIpcHandler(async (_event, request: ChapterTitleCommit) => {
+    const command = parseChapterTitleRename(request?.command), storage = context.getStorage()
+    if (!request.expectedRevision || !request.expectedPreviewHash) throw new Error('请先预览正式章名。')
+    await maybeCreateAutomaticBackup(context, 'chapter title rename', storage)
+    assertCurrentStorage(context, storage)
+    return storage.renameChapterTitles({ command, expectedRevision: request.expectedRevision,
+      expectedPreviewHash: request.expectedPreviewHash }, { kind: 'user' })
+  }))
+  ipcMain.handle(IPC_CHANNELS.DATA_GET_PROJECT_USAGE, safeIpcHandler(async (_event, projectId: unknown) => {
+    if (typeof projectId !== 'string' || !projectId.trim()) throw new Error('请选择要查看用量的项目。')
+    return readProjectUsage(context.getStorage(), projectId)
+  }))
+  ipcMain.handle(
+    IPC_CHANNELS.DATA_REVIEW_CHARACTER_CARD,
+    safeIpcHandler(async (_event, request: CharacterCardReviewRequest): Promise<CharacterCardReviewWriteResult> => {
+      if (!request?.command || typeof request.expectedRevision !== 'string' || !request.expectedRevision) {
+        throw new Error('请重新加载数据后再核对角色卡。')
+      }
+      const storage = context.getStorage()
+      await maybeCreateAutomaticBackup(context, 'character card review', storage)
+      assertCurrentStorage(context, storage)
+      return storage.reviewCharacterCard(request.command, request.expectedRevision)
+    })
+  )
   ipcMain.handle(
     IPC_CHANNELS.DATA_EXECUTE_CANDIDATE_DECISION,
     safeIpcHandler(async (_event, request: ExecuteCandidateDecisionRequest): Promise<CandidateDecisionWriteResult> => {
@@ -98,9 +138,11 @@ export function registerDataIpcHandlers(context: StorageDataOperationContext): v
   ipcMain.handle(
     IPC_CHANNELS.DATA_SAVE_CHAPTER_COMMIT_BUNDLE,
     safeIpcHandler(async (_event, request: SaveChapterCommitBundleRequest): Promise<StorageWriteResult> => {
-      const storage = context.getStorage()
-      await maybeCreateAutomaticBackup(context, 'chapter commit bundle save', storage)
-      assertCurrentStorage(context, storage)
+      const target = context.getStorage()
+      await maybeCreateAutomaticBackup(context, 'chapter commit bundle save', target)
+      const assertCurrent = () => assertCurrentStorage(context, target)
+      assertCurrent()
+      const storage = observeFormalChapterWrites(target, assertCurrent)
       LogService.info(`Saving ChapterCommitBundle: commitId=${request.bundle.commitId}`)
       return storage.saveChapterCommitBundle(request.bundle, request.expectedRevision)
     })
@@ -109,9 +151,11 @@ export function registerDataIpcHandlers(context: StorageDataOperationContext): v
   ipcMain.handle(
     IPC_CHANNELS.DATA_SAVE_REVISION_COMMIT_BUNDLE,
     safeIpcHandler(async (_event, request: SaveRevisionCommitBundleRequest): Promise<StorageWriteResult> => {
-      const storage = context.getStorage()
-      await maybeCreateAutomaticBackup(context, 'revision commit bundle save', storage)
-      assertCurrentStorage(context, storage)
+      const target = context.getStorage()
+      await maybeCreateAutomaticBackup(context, 'revision commit bundle save', target)
+      const assertCurrent = () => assertCurrentStorage(context, target)
+      assertCurrent()
+      const storage = observeFormalChapterWrites(target, assertCurrent)
       LogService.info(`Saving RevisionCommitBundle: revisionCommitId=${request.bundle.revisionCommitId}`)
       return storage.saveRevisionCommitBundle(request.bundle, request.expectedRevision)
     })

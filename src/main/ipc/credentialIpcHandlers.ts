@@ -7,7 +7,7 @@ import type {
   CredentialSetApiKeyRequest,
   CredentialSetApiKeyResult
 } from '../../shared/ipc/ipcTypes'
-import { validateApiKey } from '../../shared/validation'
+import { validateApiKey, validateUrl } from '../../shared/validation'
 import type { SecureCredentialService } from '../SecureCredentialService'
 import { safeIpcHandler } from './safeIpcHandler'
 
@@ -16,17 +16,16 @@ export function registerCredentialIpcHandlers(credentialService: SecureCredentia
     IPC_CHANNELS.CREDENTIALS_SET_API_KEY,
     safeIpcHandler(async (_event, request: CredentialSetApiKeyRequest | string): Promise<CredentialSetApiKeyResult> => {
       const apiKey = validateApiKey(typeof request === 'string' ? request : request.apiKey)
-      await credentialService.setApiKey(apiKey)
+      const baseUrl = typeof request === 'object' && request.baseUrl ? validateUrl(request.baseUrl, 'AI Base URL') : ''
+      await credentialService.setApiKey(apiKey, baseUrl)
       return { ok: true, hasApiKey: true }
     })
   )
 
   ipcMain.handle(
     IPC_CHANNELS.CREDENTIALS_HAS_API_KEY,
-    safeIpcHandler(async (): Promise<CredentialHasApiKeyResult> => ({
-      ok: true,
-      hasApiKey: await credentialService.hasApiKey()
-    }))
+    safeIpcHandler(async (_event, baseUrl?: string): Promise<CredentialHasApiKeyResult> =>
+      credentialService.getState(typeof baseUrl === 'string' ? baseUrl : ''))
   )
 
   ipcMain.handle(

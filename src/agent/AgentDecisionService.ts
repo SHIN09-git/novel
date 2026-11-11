@@ -1,7 +1,13 @@
 import { randomUUID } from 'node:crypto'
 import { AgentRunService } from './AgentRunService'
+import { describePendingRunTarget, firstPendingRunTarget, isMultiChapterRun, type PendingRunTarget } from './agentBatchWriteback'
 import { AuthorDecisionPolicyService } from '../services/AuthorDecisionPolicyService'
 import { ChapterTaskContractService } from '../services/ChapterTaskContractService'
+import { currentHardCanonAudit, hardCanonNotice } from '../services/HardCanonPreflight'
+import { agentHardCanonEvidence } from './agentHardCanonEvidence'
+import { redactSensitiveText } from './agentReadableText'
+import { withCurrentHardCanonAudit } from '../services/qualityGate/hardCanonQuality'
+import { hasCurrentChapterFragment } from '../shared/chapterStepFragment'
 import type {
   AgentActionPreview,
   AgentDecision,
@@ -12,6 +18,7 @@ import type {
   ConsistencyReviewReport,
   EditorialVerdict,
   GeneratedChapterDraft,
+  HardCanonAuditResult,
   ID,
   QualityGateReport,
   RedundancyReport,
@@ -27,6 +34,7 @@ import {
 export type AgentAcceptanceRecommendationType = 'accept' | 'revise' | 'reject' | 'wait' | 'pause'
 
 export interface AgentAcceptanceRecommendation {
+  hardCanon?: ReturnType<typeof agentHardCanonEvidence>
   jobId: ID
   recommendation: AgentAcceptanceRecommendationType
   confidence: number
@@ -205,12 +213,45 @@ function recommendationFromEditorialVerdict(
 }
 
 export class AgentDecisionService {
-  static buildAcceptanceRecommendation(data: AppData, jobId: ID): AgentAcceptanceRecommendation {
+  static buildAcceptanceRecommendation(data: AppData, jobId: ID, draftId?: ID, detail?: 'summary' | 'compact' | 'full'): AgentAcceptanceRecommendation {
     const job: ChapterGenerationJob | null = data.chapterGenerationJobs.find((item) => item.id === jobId) ?? null
     if (!job) throw new Error(`Job not found: ${jobId}`)
 
-    const draft = latestDraftForJob(data, jobId)
-    const quality = latestQualityForJob(data, jobId, draft)
+    const draft = draftId
+      ? data.generatedChapterDrafts.find((item) => item.id === draftId && item.jobId === jobId && item.projectId === job.projectId) ?? null
+      : latestDraftForJob(data, jobId)
+    if (!draftId && hasCurrentChapterFragment(data.chapterGenerationSteps, jobId, draft)) {
+      return { jobId, recommendation: 'wait', confidence: 1, riskLevel: 'high', draftId: null, requiresHumanApproval: true,
+        reasons: ['本次生成只留下不完整片段，没有新的可采纳草稿。'],
+        nextActions: ['用 agent.getRunDiagnostics（detail=full）查看保留的片段；重试生成后再审阅新稿。'] }
+    }
+    const canon = draft ? currentHardCanonAudit(data, { projectId: job.projectId, chapterOrder: job.targetChapterOrder,
+      chapterId: draft.chapterId, body: draft.body }) : null
+    const blocker = hardCanonNotice(canon, 'block')
+    if (blocker && draft) return { jobId, draftId: draft.id, recommendation: 'revise', confidence: 1, riskLevel: 'high',
+      requiresHumanApproval: true, reasons: [redactSensitiveText(blocker)], hardCanon: agentHardCanonEvidence(canon, draft.body, detail === 'full'),
+      nextActions: ['按原句修订并重新核查；如规则填写有误，先在硬设定包中修正。'] }
+    const recommendation = this.assessDraft(data, job, draft, canon)
+    if (canon && draft) recommendation.hardCanon = agentHardCanonEvidence(canon, draft.body, detail === 'full')
+    const advisory = hardCanonNotice(canon, 'review')
+    if (advisory) recommendation.reasons = [`硬设定待核，不阻断采纳。${redactSensitiveText(advisory)}`, ...recommendation.reasons]
+    const notice = draft && ChapterTaskContractService.lengthOverflowNotice({ body: draft.body, chapterTask: job.chapterTaskSnapshot })
+    if (!notice) return recommendation
+    return {
+      ...recommendation,
+      recommendation: recommendation.recommendation === 'accept' ? 'revise' : recommendation.recommendation,
+      riskLevel: 'high',
+      requiresHumanApproval: true,
+      reasons: [notice, ...recommendation.reasons],
+      nextActions: ['先改短正文并重新审稿；如决定保留原文，请说明理由，按已有项目授权预览并提交。',
+        ...(recommendation.recommendation === 'accept' ? [] : recommendation.nextActions)]
+    }
+  }
+
+  private static assessDraft(data: AppData, job: ChapterGenerationJob, draft: GeneratedChapterDraft | null, canon: HardCanonAuditResult | null): AgentAcceptanceRecommendation {
+    const jobId = job.id
+    const storedQuality = latestQualityForJob(data, jobId, draft)
+    const quality = storedQuality && withCurrentHardCanonAudit(storedQuality, canon)
     const consistency = latestConsistencyForJob(data, jobId, draft)
     const redundancy = latestRedundancyForJob(data, jobId, draft)
     const summary = latestAuthorSummaryForJob(data, jobId, draft, quality, consistency, redundancy)
@@ -474,20 +515,14 @@ export class AgentDecisionService {
     pendingPreviewCount: number
     latestDecision: AgentDecision | null
     nextChapterOrder: number | null
+    nextTarget: PendingRunTarget | null
     summary: string
     warnings: string[]
   } {
     const run = data.agentRuns.find((item) => item.id === agentRunId)
     if (!run) throw new Error(`AgentRun not found: ${agentRunId}`)
     const latestDecision = [...run.decisions].sort((a, b) => b.createdAt.localeCompare(a.createdAt))[0] ?? null
-    const completedOrders = new Set(
-      run.createdJobIds
-        .map((jobId) => data.chapterGenerationJobs.find((job) => job.id === jobId))
-        .filter((job): job is ChapterGenerationJob => Boolean(job))
-        .filter((job) => job.status === 'completed')
-        .map((job) => job.targetChapterOrder)
-    )
-    const nextChapterOrder = run.targetChapterOrders.find((order) => !completedOrders.has(order)) ?? null
+    const nextTarget = firstPendingRunTarget(data, run)
     return {
       agentRunId: run.id,
       status: run.status,
@@ -496,8 +531,11 @@ export class AgentDecisionService {
       createdDraftIds: run.createdDraftIds,
       pendingPreviewCount: data.agentActionPreviews.filter((preview) => preview.agentRunId === run.id && preview.status === 'pending').length,
       latestDecision,
-      nextChapterOrder,
-      summary: run.summary,
+      nextChapterOrder: nextTarget?.chapterOrder ?? null,
+      nextTarget,
+      summary: isMultiChapterRun(run)
+        ? nextTarget ? describePendingRunTarget(nextTarget) : '本批所有目标章节均已确认正式写回。'
+        : run.summary,
       warnings: run.warnings
     }
   }

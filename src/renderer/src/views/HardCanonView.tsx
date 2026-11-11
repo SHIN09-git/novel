@@ -1,6 +1,9 @@
 import { useMemo, useState } from 'react'
 import type { HardCanonItem, HardCanonItemCategory, HardCanonPriority, HardCanonStatus } from '../../../shared/types'
 import { HardCanonPackService } from '../../../services/HardCanonPackService'
+import { compareHardCanonItems } from '../../../services/hardCanonDuplicates'
+import { decisionFingerprint } from '../../../services/candidateDecisionPrimitives'
+import { HardCanonCheckEditor, checkEditorDraft, checkFromEditor, describeHardCanonCheck } from './HardCanonCheckEditor'
 import { useConfirm } from '../components/ConfirmDialog'
 import { Field, TextArea, TextInput } from '../components/FormFields'
 import { Header } from '../components/Layout'
@@ -69,13 +72,35 @@ function emptyDraft(projectId: string): HardCanonItem {
   }
 }
 
-export function HardCanonView({ data, project, saveData }: ProjectProps) {
+export function HardCanonView(props: ProjectProps) {
+  return <HardCanonProjectEditor key={props.project.id} {...props} />
+}
+
+function HardCanonProjectEditor({ data, project, saveData }: ProjectProps) {
   const scoped = useProjectData(data, project.id)
   const pack = useMemo(() => HardCanonPackService.getHardCanonPackForProject(data, project.id), [data, project.id])
   const promptPreview = useMemo(() => HardCanonPackService.compressHardCanonPackForPrompt(pack), [pack])
   const [draft, setDraft] = useState<HardCanonItem>(() => emptyDraft(project.id))
+  const [condition, setCondition] = useState(() => checkEditorDraft())
+  const [editVersion, setEditVersion] = useState('')
   const [message, setMessage] = useState('')
   const confirmAction = useConfirm()
+  const prepared = useMemo(() => {
+    try {
+      const item = { ...draft, check: checkFromEditor(condition) }
+      const duplicates = item.title.trim() && item.content.trim() ? compareHardCanonItems(pack.items, item) : null
+      return { item, duplicates, error: '' }
+    } catch (error) {
+      return { item: null, duplicates: null, error: error instanceof Error ? error.message : String(error) }
+    }
+  }, [draft, condition, pack.items])
+
+  function edit(item = emptyDraft(project.id)) {
+    setDraft(item)
+    setCondition(checkEditorDraft(item.check))
+    setEditVersion(item.id ? decisionFingerprint(item) : '')
+    setMessage('')
+  }
 
   const sortedItems = useMemo(
     () =>
@@ -104,25 +129,32 @@ export function HardCanonView({ data, project, saveData }: ProjectProps) {
       setMessage('请填写标题和内容。')
       return
     }
-    const timestamp = now()
-    const saved = await saveData((current) =>
-      HardCanonPackService.upsertHardCanonItem(current, {
-        ...draft,
-        id: draft.id || `hard-canon-item-${timestamp}`,
-        projectId: project.id,
-        title: draft.title.trim(),
-        content: draft.content.trim(),
-        createdAt: draft.createdAt || timestamp,
-        updatedAt: timestamp
-      })
-    )
-    if (!saved.ok) return
-    setDraft(emptyDraft(project.id))
-    setMessage('硬设定条目已保存。')
+    const { item, duplicates, error } = prepared
+    if (!item) { setMessage(error); return }
+    const reused = (existing: HardCanonItem) => `已复用「${existing.title}」（${existing.id}），保留原条目和${statusLabels[existing.status]}状态。`
+    if (duplicates?.exact) {
+      if (draft.id) { setMessage(`与「${duplicates.exact.title}」重复，未修改任何条目。`); return }
+      edit()
+      setMessage(reused(duplicates.exact))
+      return
+    }
+    let resultMessage = '硬设定条目已保存。'
+    const saved = await saveData((current) => {
+      if (item.id && decisionFingerprint(HardCanonPackService.getHardCanonPackForProject(current, project.id)
+        .items.find((entry) => entry.id === item.id)) !== editVersion) {
+        throw new Error('该条目已更改或删除，请重新打开后再编辑。')
+      }
+      const result = HardCanonPackService.saveAuthoredItem(current, item)
+      if (result.reused) resultMessage = reused(result.item)
+      return result.data
+    })
+    if (!saved.ok) { setMessage(saved.errorMessage); return }
+    edit()
+    setMessage(resultMessage)
   }
 
   async function setStatus(item: HardCanonItem, status: HardCanonStatus) {
-    const saved = await saveData((current) => HardCanonPackService.setHardCanonItemStatus(current, item.id, status))
+    const saved = await saveData((current) => HardCanonPackService.setHardCanonItemStatus(current, item.id, status, project.id))
     if (!saved.ok) return
     setMessage(`已${statusLabels[status]}：${item.title}`)
   }
@@ -136,7 +168,7 @@ export function HardCanonView({ data, project, saveData }: ProjectProps) {
       tone: 'danger'
     })
     if (!ok) return
-    const saved = await saveData((current) => HardCanonPackService.removeHardCanonItem(current, item.id))
+    const saved = await saveData((current) => HardCanonPackService.removeHardCanonItem(current, item.id, project.id))
     if (!saved.ok) return
     setMessage('硬设定条目已删除。')
   }
@@ -181,11 +213,24 @@ export function HardCanonView({ data, project, saveData }: ProjectProps) {
             <Field label="内容">
               <textarea rows={6} value={draft.content} onChange={(event) => setDraft({ ...draft, content: event.target.value })} placeholder="一句可被检查的硬规则。" />
             </Field>
+            <HardCanonCheckEditor draft={condition} onChange={setCondition} characters={scoped.characters} />
+            {prepared.duplicates?.exact && <div className="hard-canon-comparison">
+              <strong>已有相同规则 · {statusLabels[prepared.duplicates.exact.status]}</strong>
+              <span>{prepared.duplicates.exact.title}（{prepared.duplicates.exact.id}）</span>
+              <small>{draft.id ? '当前条目不会改写到这个 ID 上。' : '复用不会更改原条目的内容、优先级或启停状态。'}</small>
+            </div>}
+            {prepared.duplicates && prepared.duplicates.possible.length > 0 && <div className="hard-canon-comparison">
+              <strong>可能重复 · 不自动合并</strong>
+              {prepared.duplicates.possible.map((item) => <div key={item.id}>
+                <span>{item.title} · {statusLabels[item.status]}（{item.id}）</span>
+                <p>{item.content}</p>
+              </div>)}
+            </div>}
             <div className="row-actions">
               <button className="primary-button" onClick={saveItem}>
-                {draft.id ? '保存修改' : '新增条目'}
+                {draft.id ? '保存修改' : prepared.duplicates?.exact ? '复用已有条目' : prepared.duplicates?.possible.length ? '另存为独立条目' : '新增条目'}
               </button>
-              {draft.id && <button className="ghost-button" onClick={() => setDraft(emptyDraft(project.id))}>取消编辑</button>}
+              {draft.id && <button className="ghost-button" onClick={() => edit()}>取消编辑</button>}
             </div>
             {message && <p className="notice hard-canon-message" role="status">{message}</p>}
           </section>
@@ -227,10 +272,11 @@ export function HardCanonView({ data, project, saveData }: ProjectProps) {
                         <StatusBadge tone={item.priority === 'must' ? 'danger' : item.priority === 'high' ? 'warning' : 'neutral'}>{priorityLabels[item.priority]}</StatusBadge>
                         <StatusBadge tone="info">{categoryLabels[item.category]}</StatusBadge>
                         <StatusBadge tone={item.status === 'active' ? 'success' : 'neutral'}>{statusLabels[item.status]}</StatusBadge>
+                        <StatusBadge tone={item.check ? 'info' : 'neutral'}>{item.check ? '可机械核查' : '只作写作提示'}</StatusBadge>
                       </div>
                     </div>
                     <div className="row-actions">
-                      <button className="ghost-button" onClick={() => setDraft(item)}>编辑</button>
+                      <button className="ghost-button" onClick={() => edit(item)}>编辑</button>
                       {item.status === 'active' ? (
                         <button className="ghost-button" onClick={() => setStatus(item, 'inactive')}>停用</button>
                       ) : (
@@ -240,6 +286,7 @@ export function HardCanonView({ data, project, saveData }: ProjectProps) {
                     </div>
                   </div>
                   <p>{item.content}</p>
+                  {item.check && <p className="hard-canon-condition">{describeHardCanonCheck(item.check)}</p>}
                   <small>来源：{item.sourceType ?? 'manual'} · 更新：{item.updatedAt}</small>
                 </article>
               ))}

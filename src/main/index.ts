@@ -1,4 +1,4 @@
-import { app, BrowserWindow, shell, session } from 'electron'
+import { app, BrowserWindow, net, shell, session } from 'electron'
 import { existsSync } from 'node:fs'
 import { join, resolve } from 'node:path'
 import { AppConfigService } from './AppConfigService'
@@ -7,6 +7,8 @@ import { LogService } from './LogService'
 import { SecureCredentialService } from './SecureCredentialService'
 import { TokenBucketRateLimiter } from './RateLimiter'
 import { AIService } from './services/AIService'
+import { AIHttpClient } from './services/AIHttpClient'
+import { appendProjectUsageAttempts } from '../storage/projectUsageJournal'
 import type { StorageService } from '../storage/StorageService'
 import { createStorageService } from '../storage/SqliteStorageService'
 import { registerIpcHandlers } from './ipc/registerIpcHandlers'
@@ -265,7 +267,10 @@ if (!hasSingleInstanceLock) {
     appConfig = new AppConfigService(app.getPath('userData'))
     credentialService = new SecureCredentialService(app.getPath('userData'))
     backupService = new BackupService(app.getPath('userData'))
-    const aiService = new AIService(credentialService, aiRateLimiters)
+    const aiService = new AIService(credentialService, aiRateLimiters, {
+      httpClient: new AIHttpClient({ fetch: (url, options) => net.fetch(url, options), transport: 'electron-net' }),
+      usageJournal: { getStoragePath: () => storage.getStoragePath(), append: appendProjectUsageAttempts }
+    })
     aiService.setLogger({
       info: (message) => LogService.info(message),
       warn: (message) => LogService.warn(message)

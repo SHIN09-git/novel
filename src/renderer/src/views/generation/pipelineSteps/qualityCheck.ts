@@ -10,6 +10,7 @@ import {
 } from '../../../../../services/DraftDiagnosticBindingService'
 import { deriveConsistencyReviewFromQualityGate } from '../../../../../services/CombinedSemanticReviewService'
 import { PipelineRecipeService } from '../../../../../services/PipelineRecipeService'
+import { characterStatesForProjectAtChapter } from '../../../../../services/characterState/stateAsOf'
 import { appendGenerationRunTraceAiCall, upsertGenerationRunTrace } from '../../../utils/runTrace'
 import { noveltyReferenceContext, serializeOutput } from '../pipelineUtils'
 import type { PipelineStepHandlerContext } from '../pipelineRunnerTypes'
@@ -18,9 +19,10 @@ import { finalizeEditorialVerdict } from '../pipelineEditorialVerdict'
 export async function runQualityGateStep(ctx: PipelineStepHandlerContext) {
   const { env, state, job, step } = ctx
   const { project, updateStepInData } = env
-  if (!state.draftResult) throw new Error('缺少章节正文草稿，无法执行质量门禁')
   const currentDraft = state.draftRecord
-  const currentBody = (currentDraft ?? state.draftResult).body
+  const chapterDraft = currentDraft ?? state.draftResult
+  if (!chapterDraft) throw new Error('缺少章节正文草稿，无法执行质量门禁')
+  const currentBody = chapterDraft.body
   const auditNovelty = env.diagnostics?.auditNovelty ?? auditNoveltyDiagnostic
   const evaluateQualityGate = env.diagnostics?.evaluateQualityGate ?? evaluateQualityGateDiagnostic
   state.noveltyAuditResult =
@@ -37,7 +39,7 @@ export async function runQualityGateStep(ctx: PipelineStepHandlerContext) {
       projectId: project.id,
       chapterId: null,
       jobId: job.id,
-      title: state.draftResult.title,
+      title: chapterDraft.title,
       body: currentBody,
       summary: '',
       status: 'draft',
@@ -51,20 +53,28 @@ export async function runQualityGateStep(ctx: PipelineStepHandlerContext) {
   const currentRedundancyReport = currentDraft
     ? latestRedundancyReportForDraft(state.working.redundancyReports.filter((item) => item.jobId === job.id), currentDraft)
     : null
+  const hasChecks = state.working.hardCanonPacks.some(pack => pack.projectId === project.id &&
+    pack.items.some(item => item.status === 'active' && item.check))
+  const hardCanonAudit = hasChecks
+    ? (await import('../../../../../services/HardCanonAuditService')).auditHardCanon(state.working, {
+        projectId: project.id, chapterOrder: job.targetChapterOrder, body: currentBody, chapterId: currentDraft?.chapterId
+      })
+    : undefined
   let report = await evaluateQualityGate({
     settings: env.getAiSettings('reviewer'),
     runId: env.runId,
     projectId: project.id,
     jobId: job.id,
-    chapterId: state.draftRecord?.chapterId ?? null,
-    draftId: state.draftRecord?.id ?? null,
-    chapterDraft: state.draftRecord ?? state.draftResult,
+    chapterId: currentDraft?.chapterId ?? null,
+    draftId: currentDraft?.id ?? null,
+    chapterDraft,
     context: state.context,
     chapterPlan: state.plan,
     consistencyReports: latestConsistencyReports,
     noveltyAuditResult: state.noveltyAuditResult,
     redundancyReport: currentRedundancyReport,
-    characterStateFacts: state.working.characterStateFacts.filter((fact) => fact.projectId === project.id),
+    hardCanonAudit: hardCanonAudit?.checkedRuleIds.length ? hardCanonAudit : undefined,
+    characterStateFacts: characterStatesForProjectAtChapter(state.working, project.id, job.targetChapterOrder),
     characters: env.scoped.characters,
     promptContextSnapshotId: job.promptContextSnapshotId ?? null,
     contextSource: job.contextSource,

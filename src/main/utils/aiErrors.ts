@@ -1,14 +1,14 @@
-import { getUserFriendlyError } from '../../shared/errorUtils'
+import { aiNetworkFailure, readQuotaCode } from './connectionDiagnosis'
 
 export class AiHttpError extends Error {
   readonly status: number
-  readonly responseText: string
+  readonly quotaCode?: string
 
   constructor(status: number, responseText: string) {
-    super(`HTTP ${status} ${responseText}`)
+    super(`HTTP ${status}`)
     this.name = 'AiHttpError'
     this.status = status
-    this.responseText = responseText
+    this.quotaCode = readQuotaCode(status, responseText)
   }
 }
 
@@ -24,22 +24,10 @@ export class AiRequestCancelledError extends Error {
 export class AiRequestTimeoutError extends Error {
   readonly code = 'AI_REQUEST_TIMEOUT'
 
-  constructor(readonly timeoutMs: number) {
+  constructor(readonly timeoutMs: number, readonly phase: 'reading' | 'total' = 'total') {
     super(`AI 请求超过 ${Math.ceil(timeoutMs / 1000)} 秒硬超时，已自动终止。可切换模型或从当前步骤重试。`)
     this.name = 'AiRequestTimeoutError'
   }
-}
-
-function errorCode(error: unknown): string {
-  if (!error || typeof error !== 'object') return ''
-  const record = error as Record<string, unknown>
-  if (typeof record.code === 'string') return record.code
-  const cause = record.cause
-  if (cause && typeof cause === 'object') {
-    const causeCode = (cause as Record<string, unknown>).code
-    if (typeof causeCode === 'string') return causeCode
-  }
-  return ''
 }
 
 function httpStatus(error: unknown): number | null {
@@ -55,22 +43,25 @@ export function isRetryableAiError(error: unknown): boolean {
   const status = httpStatus(error)
   if (status !== null) {
     if ([400, 401, 403, 413].includes(status)) return false
+    if (error instanceof AiHttpError && error.quotaCode) return false
     return status === 429 || status === 502 || status === 503 || status === 504
   }
 
-  const code = errorCode(error).toUpperCase()
-  if (['ECONNRESET', 'ETIMEDOUT', 'ENOTFOUND', 'EAI_AGAIN', 'ECONNREFUSED'].includes(code)) return true
-  if (['UND_ERR_CONNECT_TIMEOUT', 'UND_ERR_HEADERS_TIMEOUT', 'UND_ERR_SOCKET'].includes(code)) return true
-
-  const message = getUserFriendlyError(error).toLowerCase()
-  return /network|fetch failed|timeout|timed out|econnreset|etimedout|enotfound|eai_again|socket hang up|temporar/.test(message)
+  const failure = aiNetworkFailure(error)
+  if (!failure) return false
+  if (failure.kind === 'read_failure' && !failure.code) return false
+  if (failure.kind === 'connect_timeout' || failure.kind === 'read_timeout' || !failure.code) return true
+  return [
+    'ECONNRESET', 'ETIMEDOUT', 'ENOTFOUND', 'EAI_AGAIN', 'ECONNREFUSED', 'UND_ERR_SOCKET',
+    'ERR_CONNECTION_RESET', 'ERR_CONNECTION_CLOSED', 'ERR_CONNECTION_REFUSED', 'ERR_TIMED_OUT',
+    'ERR_NAME_NOT_RESOLVED', 'ERR_NAME_RESOLUTION_FAILED', 'ERR_DNS_TIMED_OUT'
+  ].includes(failure.code)
 }
 
 export function describeAiRetryError(error: unknown): string {
   if (error instanceof AiRequestCancelledError) return error.code
   if (error instanceof AiRequestTimeoutError) return `${error.code}:${error.timeoutMs}`
-  if (error instanceof AiHttpError) return `HTTP ${error.status}`
-  const code = errorCode(error)
-  if (code) return code
-  return getUserFriendlyError(error).slice(0, 120)
+  const status = httpStatus(error)
+  if (status !== null) return `HTTP ${status}`
+  return aiNetworkFailure(error)?.code ?? '网络请求失败'
 }

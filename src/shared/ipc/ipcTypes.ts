@@ -7,7 +7,9 @@ import type {
   AiCallProgress,
   AiCallTelemetry,
   ChapterCommitBundle,
+  ChapterTitleReceipt,
   Character,
+  CharacterCardReviewCommand,
   CharacterStateFact,
   DataMergePreview,
   ChapterNoveltyPolicy,
@@ -32,6 +34,7 @@ import type {
   AgentAuthorizationGrant
 } from '../types/agentAuthorization'
 import type { RuntimeInfo } from '../runtimeInfo'
+import type { ProjectUsageContext } from '../projectUsage'
 
 export type { AiCallProgress, AiCallProgressStage, AiCallTelemetry, AiCallTerminationCategory, AiTokenUsage } from '../types'
 
@@ -76,6 +79,20 @@ export interface CandidateDecisionWriteResult extends StorageWriteResult {
   changes: Partial<AppData>
   removedRecords?: CandidateDecisionRemovedRecords[]
   replayed: boolean
+}
+
+export interface CharacterCardReviewWriteResult extends StorageWriteResult {
+  character: Character
+}
+
+export interface ChapterTitleWriteResult extends StorageWriteResult {
+  receipt: ChapterTitleReceipt
+  replayed: boolean
+}
+
+export interface CharacterCardReviewRequest {
+  command: CharacterCardReviewCommand
+  expectedRevision: string
 }
 
 export interface ExecuteCandidateDecisionRequest {
@@ -269,6 +286,7 @@ export interface ClipboardWriteTextResult {
 
 export interface CredentialSetApiKeyRequest {
   apiKey: string
+  baseUrl?: string
 }
 
 export interface CredentialStateResult {
@@ -277,12 +295,20 @@ export interface CredentialStateResult {
 }
 
 export type CredentialSetApiKeyResult = CredentialStateResult
-export type CredentialHasApiKeyResult = CredentialStateResult
+export interface CredentialHasApiKeyResult extends CredentialStateResult {
+  anyAvailable?: boolean
+  keyEnv?: string
+  envAvailable?: boolean
+  backupKeyEnv?: string
+  backupAvailable?: boolean
+  storedForEndpoint?: boolean
+}
 export type CredentialDeleteApiKeyResult = CredentialStateResult
 export type CredentialMigrateLegacyApiKeyResult = CredentialStateResult
 
 export interface ChatCompletionRequest {
   settings: AppSettings
+  usageContext?: ProjectUsageContext
   messages: Array<{ role: 'system' | 'user'; content: string }>
   runId?: string
   clientCallId?: string
@@ -386,6 +412,8 @@ export interface DiagnosticsEvaluateQualityGateRequest {
   chapterPlan: ChapterPlan | null
   consistencyReports?: AppData['consistencyReviewReports']
   noveltyAuditResult?: NoveltyAuditResult | null
+  /** Local evidence only. Never part of the model prompt. */
+  hardCanonAudit?: QualityGateReport['hardCanonAudit']
   redundancyReport?: RedundancyReport | null
   characterStateFacts?: CharacterStateFact[]
   characters?: Character[]

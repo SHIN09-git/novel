@@ -5,6 +5,7 @@ import { useConfirm } from './components/ConfirmDialog'
 import { Shell, type View } from './components/Layout'
 import { useAppData } from './hooks/useAppData'
 import { QuickRewriteDraftProvider } from './components/QuickRewriteDraftProvider'
+import type { BookProgressLocation } from './views/bookProgress/navigation'
 
 const HomeView = lazy(() => import('./views/HomeView').then((module) => ({ default: module.HomeView })))
 const DashboardView = lazy(() => import('./views/DashboardView').then((module) => ({ default: module.DashboardView })))
@@ -26,7 +27,7 @@ const GenerationPipelineView = lazy(() =>
 const RevisionStudioView = lazy(() => import('./views/RevisionStudioView').then((module) => ({ default: module.RevisionStudioView })))
 const SettingsView = lazy(() => import('./views/SettingsView').then((module) => ({ default: module.SettingsView })))
 
-function StorageConflictNotice({ onReload }: { onReload: () => Promise<unknown> }) {
+function StorageConflictNotice({ onReload, writeback }: { onReload: () => Promise<unknown>; writeback?: boolean }) {
   const [isReloading, setIsReloading] = useState(false)
 
   async function reload() {
@@ -41,8 +42,8 @@ function StorageConflictNotice({ onReload }: { onReload: () => Promise<unknown> 
   return (
     <section className="storage-conflict-notice" role="alert" aria-live="assertive">
       <div>
-        <strong>本地数据已在其他窗口或 Agent 中更新</strong>
-        <span>当前保存已停止，以免覆盖较新的章节或提交记录。</span>
+        <strong>{writeback ? '本次正式写回未确认' : '本地数据已在其他窗口或 Agent 中更新'}</strong>
+        <span>{writeback ? '重新加载后，可在工作台的“全书进度与缺章”核对哪些稿件已经写入。' : '当前保存已停止，以免覆盖较新的章节或提交记录。'}</span>
       </div>
       <button className="primary-button" type="button" disabled={isReloading} onClick={reload}>
         {isReloading ? '正在重新加载...' : '重新加载最新数据'}
@@ -58,6 +59,7 @@ export default function App() {
     setStoragePath,
     status,
     hasStorageConflict,
+    needsWritebackCheck,
     setStatus,
     saveData,
     saveGenerationRunBundle,
@@ -76,6 +78,7 @@ export default function App() {
   const [view, setView] = useState<View>('dashboard')
   const [revisionPrefill, setRevisionPrefill] = useState<{ chapterId: ID | null; draftId: ID | null; requestId: ID } | null>(null)
   const [pipelineSnapshotId, setPipelineSnapshotId] = useState<ID | null>(null)
+  const [bookLocation, setBookLocation] = useState<BookProgressLocation | null>(null)
   const [readerInitialChapterId, setReaderInitialChapterId] = useState<ID | null>(null)
 
   async function reloadAfterStorageConflict(): Promise<{ ok: boolean; errorMessage?: string }> {
@@ -106,6 +109,13 @@ export default function App() {
         return (
           <DashboardView data={activeData} project={activeProject} saveData={saveData}
             onNavigate={setView}
+            onOpenSource={(location) => {
+              setBookLocation(location)
+              setPipelineSnapshotId(null)
+              const source = location.view === 'revision' ? location.source : null
+              setRevisionPrefill(source?.requestId ? { chapterId: source.chapterId, draftId: source.draftId, requestId: source.requestId } : null)
+              setView(location.view)
+            }}
             onOpenChapter={(chapterId) => {
               setReaderInitialChapterId(chapterId)
               setView('chapters')
@@ -122,6 +132,8 @@ export default function App() {
             data={activeData}
             project={activeProject}
             saveData={saveData}
+            runPersistedStorageOperation={runPersistedStorageOperation}
+            storageBlocked={hasStorageConflict || needsWritebackCheck}
             saveRevisionCommitBundle={saveRevisionCommitBundle}
             initialChapterId={readerInitialChapterId}
             onInitialChapterConsumed={() => setReaderInitialChapterId(null)}
@@ -146,7 +158,9 @@ export default function App() {
           />
         )
       case 'characters':
-        return <CharactersView data={activeData} project={activeProject} saveData={saveData} />
+        return <CharactersView data={activeData} project={activeProject} saveData={saveData}
+          runPersistedStorageOperation={runPersistedStorageOperation}
+          onOpenChapter={id => { setReaderInitialChapterId(id); setView('chapters') }} />
       case 'foreshadowings':
         return <ForeshadowingView data={activeData} project={activeProject} saveData={saveData} />
       case 'timeline':
@@ -179,6 +193,8 @@ export default function App() {
             executeCandidateDecision={executeCandidateDecision}
             saveChapterCommitBundle={saveChapterCommitBundle}
             initialSnapshotId={pipelineSnapshotId}
+            initialJobId={bookLocation?.view === 'pipeline' ? bookLocation.jobId : null}
+            onInitialJobConsumed={() => setBookLocation(null)}
             onInitialSnapshotConsumed={() => setPipelineSnapshotId(null)}
             onOpenRevision={(prefill) => {
               setRevisionPrefill(prefill)
@@ -194,6 +210,8 @@ export default function App() {
             saveData={saveData}
             saveRevisionCommitBundle={saveRevisionCommitBundle}
             prefill={revisionPrefill}
+            initialSource={bookLocation?.view === 'revision' ? bookLocation.source : null}
+            onInitialSourceConsumed={() => setBookLocation(null)}
             onPrefillConsumed={() => setRevisionPrefill(null)}
           />
         )
@@ -244,7 +262,8 @@ export default function App() {
       </Shell> : <Suspense fallback={<div className="view-loading">正在加载项目列表...</div>}>
         <HomeView data={data} saveData={saveData} importData={importStoredData} setProjectId={setCurrentProjectId} setView={setView} />
       </Suspense>}
-      {hasStorageConflict ? <StorageConflictNotice onReload={reloadAfterStorageConflict} /> : null}
+      {hasStorageConflict || needsWritebackCheck
+        ? <StorageConflictNotice onReload={reloadAfterStorageConflict} writeback={needsWritebackCheck && !hasStorageConflict} /> : null}
     </QuickRewriteDraftProvider>
   )
 }

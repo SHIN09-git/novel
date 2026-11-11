@@ -1,6 +1,9 @@
 import type { CharacterStateFact, ContextNeedPlan, ID } from '../../shared/types'
 
 function matchesNeed(fact: CharacterStateFact, plan: ContextNeedPlan | null, targetChapterOrder: number): boolean {
+  const order = fact.sourceChapterOrder
+  if (order == null ? (fact.sourceChapterId || fact.currentAsOfChapter !== targetChapterOrder) :
+    (!Number.isSafeInteger(order) || order < 1 || !(order <= targetChapterOrder))) return false
   if (fact.status !== 'active' || fact.promptPolicy === 'manual_only') return false
   if (fact.promptPolicy === 'always') return true
   if (!plan) return fact.trackingLevel === 'hard'
@@ -13,7 +16,7 @@ function matchesNeed(fact: CharacterStateFact, plan: ContextNeedPlan | null, tar
   if ((fact.category === 'knowledge' || fact.category === 'secret') && plan.mustCheckContinuity.includes('knowledge')) return true
   if (fact.category === 'promise' && plan.mustCheckContinuity.includes('promise')) return true
   if (fact.category === 'ability' && plan.mustCheckContinuity.includes('ability')) return true
-  return fact.trackingLevel === 'hard' && (fact.sourceChapterOrder ?? 0) <= targetChapterOrder
+  return fact.trackingLevel === 'hard'
 }
 
 function score(fact: CharacterStateFact, plan: ContextNeedPlan | null): number {

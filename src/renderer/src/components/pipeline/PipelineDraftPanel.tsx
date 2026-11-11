@@ -1,8 +1,11 @@
 import type { ChapterAcceptanceReview, ChapterGenerationJob, GeneratedChapterDraft } from '../../../../shared/types'
+import { visibleCharacterCount } from '../../../../services/chapterTaskContractText'
 
 export function PipelineDraftPanel({
   draft,
   job,
+  lengthOverflowNotice,
+  hardCanonBlock,
   isRunning,
   onAccept,
   onAcceptUnreviewed,
@@ -14,6 +17,8 @@ export function PipelineDraftPanel({
 }: {
   draft: GeneratedChapterDraft | null
   job: ChapterGenerationJob | null
+  lengthOverflowNotice?: string | null
+  hardCanonBlock?: string | null
   isRunning: boolean
   onAccept: (draft: GeneratedChapterDraft) => void
   onAcceptUnreviewed?: (draft: GeneratedChapterDraft) => void
@@ -53,13 +58,18 @@ export function PipelineDraftPanel({
           ) : null}
         </div>
       </div>
+      <p className={lengthOverflowNotice ? 'notice' : 'muted'}>
+        {lengthOverflowNotice ?? `目标：${job?.chapterTaskSnapshot?.targetWordCount?.trim() || '未指定'} · 实际 ${visibleCharacterCount(draft.body)} 个可见字符`}
+        {lengthOverflowNotice && draft.status === 'draft' ? ' 请先改短正文；要保留原文，需在采纳时明确确认。' : null}
+      </p>
+      {hardCanonBlock && draft.status === 'draft' ? <p className="notice">请先修订硬设定冲突。{hardCanonBlock}</p> : null}
       <textarea className="prompt-editor pipeline-draft-body" aria-label="章节草稿正文" value={draft.body} readOnly />
       <div className="row-actions pipeline-draft-actions">
-        <button className="primary-button" disabled={isRunning || draft.status !== 'draft'} onClick={() => onAccept(draft)}>
+        <button className="primary-button" disabled={isRunning || draft.status !== 'draft' || Boolean(hardCanonBlock)} onClick={() => onAccept(draft)}>
           接受章节草稿
         </button>
         {onAcceptUnreviewed && draft.status === 'draft' ? (
-          <button className="ghost-button" disabled={isRunning} onClick={() => onAcceptUnreviewed(draft)}>
+          <button className="ghost-button" disabled={isRunning || Boolean(hardCanonBlock)} onClick={() => onAcceptUnreviewed(draft)}>
             未完成审稿，直接采纳
           </button>
         ) : null}

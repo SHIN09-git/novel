@@ -345,6 +345,10 @@ export interface GenerationRunBundle {
 
 export interface ChapterAcceptanceReview {
   mode: 'reviewed' | 'unreviewed'
+  /** Only present when the decision included this draft's explicit author-limit warning. */
+  lengthOverflowNotice?: string
+  /** Local check at the moment of acceptance; absent for legacy or prompt-only projects. */
+  hardCanonCheck?: { rulesFingerprint: string; resultFingerprint: string; checkedRuleCount: number; reviewCount: number }
   draftContentHash: string
   editorialRequired: boolean
   qualityGateReportId: ID | null

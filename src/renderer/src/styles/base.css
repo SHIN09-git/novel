@@ -29,16 +29,27 @@
   --color-danger-soft: #f9e4e0;
   --color-info: #6f6591;
   --color-info-soft: #eeecf4;
-  --sidebar: #131925;
-  --sidebar-soft: #1c2433;
-  --rail-text: #c9cfda;
-  --rail-muted: #8d96a8;
-  --rail-strong: #f4f6fa;
-  --rail-border: rgba(255, 255, 255, 0.07);
-  --rail-hover: rgba(255, 255, 255, 0.06);
-  --rail-active: rgba(169, 191, 211, 0.14);
-  --rail-accent: #a9bfd3;
-  --slate: #131925;
+  --sidebar: #f5f6f8;
+  --sidebar-soft: #e9ecf0;
+  --rail-text: #3b4456;
+  --rail-muted: #5c6578;
+  --rail-strong: #161b26;
+  --rail-border: rgba(22, 27, 38, 0.08);
+  --rail-hover: rgba(22, 27, 38, 0.05);
+  --rail-active: rgba(86, 115, 140, 0.15);
+  --rail-accent: #56738c;
+  --slate: #e8edf2;
+  /* Materials. Glass is only for the functional layer (sidebar, toolbar, popovers, dialogs). */
+  --glass-regular: rgba(248, 249, 251, 0.68);
+  --glass-thick: rgba(252, 252, 253, 0.86);
+  --glass-stroke: rgba(255, 255, 255, 0.8);
+  --glass-hairline: rgba(22, 27, 38, 0.09);
+  --glass-specular: inset 0 1px 0 rgba(255, 255, 255, 0.95), inset 0 0 0 1px rgba(255, 255, 255, 0.4);
+  --glass-shadow: 0 1px 2px rgba(22, 27, 38, 0.06), 0 14px 36px -16px rgba(22, 27, 38, 0.24);
+  --glass-filter: blur(22px) saturate(1.7);
+  --canvas-wash:
+    radial-gradient(70% 55% at 0% 0%, rgba(86, 115, 140, 0.12), transparent 62%),
+    radial-gradient(55% 45% at 100% 100%, rgba(236, 229, 213, 0.5), transparent 70%);
   /* 宣纸: manuscript surfaces are the only warm tone, so writing reads apart from tooling. */
   --paper: #fbf8f1;
   --paper-line: #ece5d5;
@@ -79,10 +90,11 @@
   --space-12: 48px;
 
   --radius-xs: 4px;
-  --radius-sm: 6px;
-  --radius-md: 8px;
-  --radius-lg: 12px;
-  --radius-xl: 16px;
+  --radius-sm: 8px;
+  --radius-md: 10px;
+  --radius-lg: 14px;
+  --radius-xl: 20px;
+  --radius-panel: 18px;
   --radius-pill: 999px;
 
   /* Motion: decelerate for entrances, standard for moves, a light spring only for things that travel. */
@@ -96,7 +108,7 @@
   --duration-base: 180ms;
   --duration-slow: 280ms;
   --duration-slower: 380ms;
-  --stagger-step: 45ms;
+  --stagger-step: 24ms;
 
   --rail-width: 248px;
   --topbar-height: 56px;
@@ -145,11 +157,26 @@
   --color-info: #b7aed6;
   --color-info-soft: #25222f;
   /* In dark mode the rail sits a step above the page instead of below it. */
-  --sidebar: #121722;
-  --sidebar-soft: #1a2030;
-  --rail-muted: #8891a3;
+  --sidebar: #171c26;
+  --sidebar-soft: #1f2532;
+  --rail-text: #b9c0cd;
+  --rail-muted: #929aab;
+  --rail-strong: #edf0f5;
   --rail-border: rgba(255, 255, 255, 0.08);
-  --slate: #161e2a;
+  --rail-hover: rgba(255, 255, 255, 0.05);
+  --rail-active: rgba(168, 188, 207, 0.16);
+  --rail-accent: #a8bccf;
+  --slate: #1d2632;
+  --glass-regular: rgba(28, 34, 45, 0.64);
+  --glass-thick: rgba(31, 37, 49, 0.88);
+  --glass-stroke: rgba(255, 255, 255, 0.09);
+  --glass-hairline: rgba(0, 0, 0, 0.45);
+  --glass-specular: inset 0 1px 0 rgba(255, 255, 255, 0.07);
+  --glass-shadow: 0 1px 2px rgba(0, 0, 0, 0.4), 0 16px 38px -16px rgba(0, 0, 0, 0.8);
+  --glass-filter: blur(22px) saturate(1.5);
+  --canvas-wash:
+    radial-gradient(70% 55% at 0% 0%, rgba(168, 188, 207, 0.08), transparent 62%),
+    radial-gradient(55% 45% at 100% 100%, rgba(120, 104, 80, 0.08), transparent 70%);
   --paper: #1d1c1a;
   --paper-line: #2d2b27;
   --paper-ink: #ebe5d8;
@@ -189,11 +216,26 @@
     --color-info: #b7aed6;
     --color-info-soft: #25222f;
     /* In dark mode the rail sits a step above the page instead of below it. */
-    --sidebar: #121722;
-    --sidebar-soft: #1a2030;
-    --rail-muted: #8891a3;
+    --sidebar: #171c26;
+    --sidebar-soft: #1f2532;
+    --rail-text: #b9c0cd;
+    --rail-muted: #929aab;
+    --rail-strong: #edf0f5;
     --rail-border: rgba(255, 255, 255, 0.08);
-    --slate: #161e2a;
+    --rail-hover: rgba(255, 255, 255, 0.05);
+    --rail-active: rgba(168, 188, 207, 0.16);
+    --rail-accent: #a8bccf;
+    --slate: #1d2632;
+    --glass-regular: rgba(28, 34, 45, 0.64);
+    --glass-thick: rgba(31, 37, 49, 0.88);
+    --glass-stroke: rgba(255, 255, 255, 0.09);
+    --glass-hairline: rgba(0, 0, 0, 0.45);
+    --glass-specular: inset 0 1px 0 rgba(255, 255, 255, 0.07);
+    --glass-shadow: 0 1px 2px rgba(0, 0, 0, 0.4), 0 16px 38px -16px rgba(0, 0, 0, 0.8);
+    --glass-filter: blur(22px) saturate(1.5);
+    --canvas-wash:
+      radial-gradient(70% 55% at 0% 0%, rgba(168, 188, 207, 0.08), transparent 62%),
+      radial-gradient(55% 45% at 100% 100%, rgba(120, 104, 80, 0.08), transparent 70%);
     --paper: #1d1c1a;
     --paper-line: #2d2b27;
     --paper-ink: #ebe5d8;
@@ -205,6 +247,34 @@
     --shadow-popover: 0 16px 36px -8px rgba(0, 0, 0, 0.62), 0 2px 6px rgba(0, 0, 0, 0.3);
     --shadow-overlay: 0 28px 80px -12px rgba(0, 0, 0, 0.72);
     --scrim: rgba(0, 0, 0, 0.58);
+  }
+}
+
+/* Increase Contrast: stronger separators and secondary text (HIG: supply a high-contrast variant). */
+@media (prefers-contrast: more) {
+  :root {
+    --color-border: #9aa3b1;
+    --color-text-muted: #3f4757;
+    --color-text-secondary: #2c3343;
+    --glass-regular: var(--sidebar);
+    --glass-thick: var(--color-surface-elevated);
+    --rail-border: rgba(22, 27, 38, 0.3);
+  }
+
+  :root[data-theme="dark"] {
+    --color-border: #5a6478;
+    --color-text-muted: #c3c9d4;
+    --color-text-secondary: #d6dbe3;
+    --rail-border: rgba(255, 255, 255, 0.3);
+  }
+}
+
+/* Reduce Transparency: glass falls back to solid surfaces. */
+@media (prefers-reduced-transparency: reduce) {
+  :root {
+    --glass-regular: var(--sidebar);
+    --glass-thick: var(--color-surface-elevated);
+    --glass-filter: none;
   }
 }
 
@@ -220,7 +290,7 @@ body,
 
 body {
   margin: 0;
-  background: var(--bg);
+  background: var(--canvas-wash) fixed, var(--bg);
   color: var(--ink);
   min-width: min(1024px, 100%);
   font-size: var(--text-md);
@@ -493,13 +563,37 @@ tbody tr:hover,
   animation-timing-function: var(--ease-in-out);
 }
 
+/* Reduce Motion (HIG): keep brief fades, drop travel, scaling and repeating pulses. */
 @media (prefers-reduced-motion: reduce) {
+  :root {
+    --ease-spring: var(--ease-standard);
+    --ease-emphasized: var(--ease-standard);
+  }
+
+  @keyframes nd-rise-in { from { opacity: 0; } }
+  @keyframes nd-pop-in { from { opacity: 0; } }
+  @keyframes nd-slide-up { from { opacity: 0; } }
+  @keyframes nd-pop-out { to { opacity: 0; } }
+  @keyframes nd-pulse-ring { from, to { box-shadow: none; } }
+
   *,
   *::before,
   *::after {
     scroll-behavior: auto !important;
-    transition-duration: 0.01ms !important;
-    animation-duration: 0.01ms !important;
-    animation-iteration-count: 1 !important;
+    transition-property: opacity, color, background-color, border-color, box-shadow !important;
+    transition-duration: 120ms !important;
+    animation-delay: 0ms !important;
+    animation-duration: 160ms !important;
+  }
+
+  .spin,
+  .loading-screen::before,
+  .view-loading::before {
+    animation-duration: 1.6s !important;
+  }
+
+  ::view-transition-old(root),
+  ::view-transition-new(root) {
+    animation: none;
   }
 }

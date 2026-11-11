@@ -1,4 +1,6 @@
 import type { AiCallTelemetry, AiTokenUsage, ID } from '../shared/types/base'
+import { tokenCount } from '../shared/tokenUsage'
+import { chapterTitleForVersion } from '../shared/chapterTitleHistory'
 import type { AppData } from '../shared/types/appData'
 import type { ChapterGenerationJob, PipelineAIRole } from '../shared/types/generation'
 import type { ChapterCommitBundle, GenerationRunTrace } from '../shared/types/trace'
@@ -193,13 +195,13 @@ function telemetrySignature(observation: TelemetryObservation): string {
 }
 
 function resolveUsage(
-  telemetry: AiCallTelemetry,
+  telemetry: Pick<AiCallTelemetry, 'usage'>,
   callId: string,
   warnings: AcceptedChapterCostWarning[]
 ): ResolvedUsage {
   const raw = telemetry.usage
   const invalidFields = raw
-    ? Object.entries(raw).filter(([, value]) => value !== undefined && finiteNonNegative(value) === undefined).map(([field]) => field)
+    ? Object.entries(raw).filter(([, value]) => value !== undefined && tokenCount(value) === undefined).map(([field]) => field)
     : []
   if (invalidFields.length) {
     warnings.push({
@@ -208,11 +210,11 @@ function resolveUsage(
       relatedIds: [callId]
     })
   }
-  let promptTokens = finiteNonNegative(raw?.promptTokens)
-  let completionTokens = finiteNonNegative(raw?.completionTokens)
-  let totalTokens = finiteNonNegative(raw?.totalTokens)
-  const reasoningTokens = finiteNonNegative(raw?.reasoningTokens)
-  let cachedPromptTokens = finiteNonNegative(raw?.cachedPromptTokens)
+  let promptTokens = tokenCount(raw?.promptTokens)
+  let completionTokens = tokenCount(raw?.completionTokens)
+  let totalTokens = tokenCount(raw?.totalTokens)
+  const reasoningTokens = tokenCount(raw?.reasoningTokens)
+  let cachedPromptTokens = tokenCount(raw?.cachedPromptTokens)
   if (promptTokens === undefined && totalTokens !== undefined && completionTokens !== undefined && totalTokens >= completionTokens) {
     promptTokens = totalTokens - completionTokens
   }
@@ -244,8 +246,17 @@ function resolveUsage(
   return { status: priceable ? 'complete' : hasAny ? 'partial' : 'unknown', usage, hasAny, priceable }
 }
 
+/** Project and chapter reports use the same token arithmetic. No estimates fill missing counts. */
+export function resolveReportedUsage(raw: AiTokenUsage | undefined) {
+  const warnings: AcceptedChapterCostWarning[] = []
+  const result = resolveUsage({ usage: raw }, '', warnings)
+  return { ...result, invalid: warnings.length > 0 }
+}
+
 function monetaryCost(usage: AiTokenUsage, rate: AcceptedChapterFixedRate | undefined): number | null {
   if (!rate || usage.promptTokens === undefined || usage.completionTokens === undefined) return null
+  if (rate.cachedInputPerMillionTokens !== undefined && rate.cachedInputPerMillionTokens !== rate.inputPerMillionTokens &&
+    usage.promptTokens > 0 && usage.cachedPromptTokens === undefined) return null
   const cached = rate.cachedInputPerMillionTokens === undefined ? 0 : Math.min(usage.promptTokens, usage.cachedPromptTokens ?? 0)
   const ordinaryInput = usage.promptTokens - cached
   const amount = (
@@ -325,8 +336,9 @@ function collectLineage(
   ]
   const versionById = new Map<string, (typeof versions)[number]>()
   for (const version of versions) if (!versionById.has(version.id)) versionById.set(version.id, version)
+  const titleFor = chapterTitleForVersion(data, chapter)
   const currentMatches = [...versionById.values()]
-    .filter((version) => version.title === chapter.title && version.body === chapter.body)
+    .filter((version) => version.body === chapter.body && version.title === titleFor(version.id))
     .sort(compareTime)
   if (currentMatches.length > 1) {
     warnings.push({

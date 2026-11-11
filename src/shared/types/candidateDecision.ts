@@ -1,4 +1,4 @@
-import type { ID, StageSummary, TimelineEvent } from './base'
+import type { ID, StageSummary, TimelineEvent, TimelineTimeFields } from './base'
 import type { CharacterCardField, CharacterStateFactValue, StateFactCategory } from './character'
 import type { ForeshadowingCandidate, ForeshadowingStatus, ForeshadowingTreatmentMode } from './foreshadowing'
 import type { ChapterContinuityBridgeSuggestion, ChapterReviewMemoryPatch, MemoryUpdatePatch } from './memory'
@@ -48,7 +48,7 @@ export type CandidateMemoryPatchAmendment =
   | {
       kind: 'timeline_event_create'
       summary?: string
-      event?: Partial<Pick<TimelineEvent,
+      event?: TimelineTimeFields & Partial<Pick<TimelineEvent,
         'title' | 'storyTime' | 'participantCharacterIds' | 'result' | 'downstreamImpact'>>
     }
 export type CandidateDecisionAmendment =

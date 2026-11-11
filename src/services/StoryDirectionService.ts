@@ -6,6 +6,7 @@ import type {
   StoryDirectionGuide
 } from '../shared/types'
 import { StageSummaryService } from './StageSummaryService'
+import { coversStoryDirectionChapter } from '../shared/storyDirectionRange'
 
 function clean(value: string | null | undefined): string {
   return (value ?? '').trim()
@@ -34,20 +35,22 @@ export class StoryDirectionService {
       guides
         .filter((guide) => guide.projectId === projectId)
         .filter((guide) => guide.status === 'active')
-        .filter((guide) => targetChapterOrder >= guide.startChapterOrder && targetChapterOrder <= guide.endChapterOrder)
+        .filter((guide) => coversStoryDirectionChapter(guide, targetChapterOrder))
         .sort(timestampSort)[0] ?? null
     )
   }
 
   static getBeatForChapter(guide: StoryDirectionGuide, targetChapterOrder: number): StoryDirectionChapterBeat | null {
-    return guide.chapterBeats.find((beat) => beat.chapterOrder === targetChapterOrder) ?? null
+    if (!coversStoryDirectionChapter(guide, targetChapterOrder)) return null
+    return guide.chapterBeats.find((beat) => beat.chapterOrder === targetChapterOrder &&
+      beat.chapterOffset === targetChapterOrder - guide.startChapterOrder + 1) ?? null
   }
 
   static deriveChapterTaskPatch(
     guide: StoryDirectionGuide | null,
     targetChapterOrder: number
   ): Partial<ChapterTask> {
-    if (!guide) return {}
+    if (!guide || !coversStoryDirectionChapter(guide, targetChapterOrder)) return {}
     const beat = StoryDirectionService.getBeatForChapter(guide, targetChapterOrder)
     if (beat) {
       return {
@@ -61,7 +64,6 @@ export class StoryDirectionService {
       }
     }
 
-    if (targetChapterOrder < guide.startChapterOrder || targetChapterOrder > guide.endChapterOrder) return {}
     return {
       goal: joinNonEmpty([guide.coreDramaticPromise, guide.strategicTheme], '；'),
       conflict: clean(guide.aiGuidance),
@@ -72,7 +74,7 @@ export class StoryDirectionService {
   }
 
   static formatForPrompt(guide: StoryDirectionGuide | null, targetChapterOrder: number): string {
-    if (!guide) return ''
+    if (!guide || !coversStoryDirectionChapter(guide, targetChapterOrder)) return ''
     const beat = StoryDirectionService.getBeatForChapter(guide, targetChapterOrder)
     const beatText = beat
       ? [

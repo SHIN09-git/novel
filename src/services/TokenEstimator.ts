@@ -8,9 +8,10 @@ export class TokenEstimator {
     let other = 0
 
     for (const char of safeText) {
-      if (/[\u4e00-\u9fff]/.test(char)) {
+      const code = char.charCodeAt(0)
+      if (code >= 0x4e00 && code <= 0x9fff) {
         cjk += 1
-      } else if (/[\x00-\x7F]/.test(char)) {
+      } else if (code <= 0x7f) {
         ascii += 1
       } else {
         other += 1

@@ -44,8 +44,8 @@ export class AIService {
   private readonly revisionAI: RevisionAI
   private readonly storyDirectionAI: StoryDirectionAI
 
-  constructor(settings?: AppSettings, options: { runId?: string; transport?: AIChatCompletionTransport } = {}) {
-    const client = new AIClient(settings, options.transport, options.runId)
+  constructor(settings?: AppSettings, options: { projectId?: string; runId?: string; transport?: AIChatCompletionTransport } = {}) {
+    const client = new AIClient(settings, options.transport, options.runId, options.projectId)
     this.client = client
     this.chapterReviewAI = new ChapterReviewAI(client)
     this.generationPipelineAI = new GenerationPipelineAI(client)

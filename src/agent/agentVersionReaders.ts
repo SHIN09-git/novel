@@ -4,6 +4,8 @@ import {
   isChapterArchived
 } from '../services/ChapterLifecycleService'
 import { getChapterVersionChain as buildChapterVersionChain } from '../services/ChapterVersionChainService'
+import { currentHardCanonAudit } from '../services/HardCanonPreflight'
+import { agentHardCanonEvidence } from './agentHardCanonEvidence'
 import {
   commonPrefixLength,
   commonSuffixLength,
@@ -75,6 +77,9 @@ export function getVersionDetail(
   const chapter = requireReadableChapter(data, projectId, chapterOrder)
   const entry = buildChapterVersionChain(data, chapter.id).find((item) => item.id === versionId) ?? null
   if (!entry) throw new Error(`Version not found: ${versionId}`)
+  const canon = options.detail === 'full' || options.includeDiagnostics ? currentHardCanonAudit(data, {
+    projectId, chapterId: chapter.id, chapterOrder, body: entry.body
+  }) : null
   return textPayload(entry.id, 'version', entry.title, entry.body, options, {
     projectId,
     chapterId: chapter.id,
@@ -82,6 +87,7 @@ export function getVersionDetail(
     chapterArchived: isChapterArchived(chapter),
     source: entry.source,
     sourceKind: entry.sourceKind,
+    ...(canon ? { currentHardCanon: agentHardCanonEvidence(canon, entry.body, true) } : {}),
     createdAt: entry.createdAt,
     linkedChapterCommitId: entry.linkedChapterCommitId,
     linkedRevisionCommitId: entry.linkedRevisionCommitId,

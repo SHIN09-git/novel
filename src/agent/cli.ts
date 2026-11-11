@@ -118,6 +118,9 @@ Commands:
   list-projects
   project-digest --project-id <id> | --project <name-or-id>
   next-chapter-target --project-id <id> | --project <name-or-id>
+  book-progress --project-id <id> | --project <name-or-id> [--from <chapter>] [--to <chapter>] [--issues-only] [--offset <n>] [--limit <n>]
+  project-usage --project-id <id> | --project <name-or-id>
+  book-continuity --project-id <id> | --project <name-or-id> [--from <chapter>] [--to <chapter>] [--kind <category>] [--status conflict|needs_evidence|open] [--offset <n>] [--limit <n>]
   chapter-state --project-id <id> | --project <name-or-id> --chapter <order>
   chapter-text --project-id <id> | --project <name-or-id> --chapter <order> [--detail full] [--include-prose] [--max-chars <n>]
   draft-text --draft-id <id> [--detail full] [--include-prose] [--max-chars <n>]
@@ -126,8 +129,8 @@ Commands:
   version-detail --project-id <id> | --project <name-or-id> --chapter <order> --version-id <id> [--detail full]
   version-diff --project-id <id> | --project <name-or-id> --chapter <order> --from-version-id <id> --to-version-id <id>
   generation-prompt --job-id <id> [--detail full] [--include-prompt] [--max-chars <n>]
-  run-diagnostics --job-id <id>
-  inspect-job --job-id <id>
+  run-diagnostics --job-id <id> [--detail full] [--max-chars <n>]
+  inspect-job --job-id <id> [--detail full] [--max-chars <n>]
   watch-job --job-id <id> [--timeout-ms <n>] [--interval-ms <n>]
   full-run-trace --trace-id <id> | --job-id <id> [--detail full] [--include-diagnostics]
   candidate-detail --candidate-id <id> [--detail full] [--include-diagnostics]
@@ -165,6 +168,19 @@ function buildToolCall(parsed: ParsedArgs): AgentToolCallInput {
       return { name: 'agent.getProjectDigest', arguments: { ...storage, ...projectArgs(flags) } }
     case 'next-chapter-target':
       return { name: 'agent.getNextChapterTarget', arguments: { ...storage, ...projectArgs(flags) } }
+    case 'book-progress':
+      return { name: 'agent.getBookProgress', arguments: { ...storage, ...projectArgs(flags), fromChapter: numberFlag(flags, 'from'),
+        toChapter: numberFlag(flags, 'to'), issuesOnly: flags['issues-only'] === true, offset: numberFlag(flags, 'offset'), limit: numberFlag(flags, 'limit') } }
+    case 'project-usage':
+      return { name:'agent.getProjectUsage', arguments:{ ...storage, ...projectArgs(flags) } }
+    case 'book-continuity': {
+      const options = ['storage', 'user-data', 'project-id', 'project', 'from', 'to', 'kind', 'status', 'offset', 'limit']
+      for (const [key, value] of Object.entries(flags)) {
+        if (!options.includes(key) || typeof value !== 'string' || !value.trim()) throw new Error(`Invalid --${key}.`)
+      }
+      return { name: 'agent.getBookContinuityReport', arguments: { ...storage, ...projectArgs(flags), from: numberFlag(flags, 'from'),
+        to: numberFlag(flags, 'to'), kind: flag(flags, 'kind'), status: flag(flags, 'status'), offset: numberFlag(flags, 'offset'), limit: numberFlag(flags, 'limit') } }
+    }
     case 'chapter-state':
       return { name: 'agent.getChapterProductionState', arguments: { ...storage, ...projectArgs(flags), chapterOrder: intFlag(flags, 'chapter') } }
     case 'chapter-text':
@@ -192,15 +208,17 @@ function buildToolCall(parsed: ParsedArgs): AgentToolCallInput {
     case 'generation-prompt':
       return { name: 'agent.getGenerationPrompt', arguments: { ...storage, jobId: flag(flags, 'job-id'), ...readArgs(flags) } }
     case 'run-diagnostics':
-      return { name: 'agent.getRunDiagnostics', arguments: { ...storage, jobId: flag(flags, 'job-id') } }
-    case 'inspect-job':
-      return { name: 'agent.inspectPipelineJob', arguments: { ...storage, jobId: flag(flags, 'job-id') } }
+    case 'inspect-job': {
+      const { detail, maxChars } = readArgs(flags)
+      return { name: parsed.command === 'inspect-job' ? 'agent.inspectPipelineJob' : 'agent.getRunDiagnostics',
+        arguments: { ...storage, jobId: flag(flags, 'job-id'), detail, maxChars } }
+    }
     case 'full-run-trace':
       return { name: 'agent.getFullRunTrace', arguments: { ...storage, traceId: flag(flags, 'trace-id'), jobId: flag(flags, 'job-id'), ...readArgs(flags) } }
     case 'candidate-detail':
       return { name: 'agent.getCandidateDetail', arguments: { ...storage, candidateId: flag(flags, 'candidate-id'), ...readArgs(flags) } }
     case 'acceptance-recommendation':
-      return { name: 'agent.getAcceptanceRecommendation', arguments: { ...storage, jobId: flag(flags, 'job-id') } }
+      return { name: 'agent.getAcceptanceRecommendation', arguments: { ...storage, jobId: flag(flags, 'job-id'), detail: flag(flags, 'detail') } }
     case 'record-acceptance-decision':
       return { name: 'agent.recordAcceptanceDecision', arguments: { ...storage, agentRunId: flag(flags, 'agent-run-id'), jobId: flag(flags, 'job-id') } }
     case 'action-previews':

@@ -1,4 +1,6 @@
 import type { AppData, ID } from '../shared/types'
+import { visibleCharacterCount } from '../services/chapterTaskContractText'
+import { hasCurrentChapterFragment, readChapterStepFragment } from '../shared/chapterStepFragment'
 import { findActiveChapterByOrder } from '../services/ChapterLifecycleService'
 import {
   latestConsistencyReportsForDraft,
@@ -18,7 +20,7 @@ import {
   redundancySummary,
   summarizeJob
 } from './agentSummaryHelpers'
-import { compact } from './agentReadableText'
+import { compact, redactSensitiveText, type AgentReadOptions } from './agentReadableText'
 import type { AgentChapterState, AgentRunDiagnostics } from './agentReadableSummaryTypes'
 
 interface ScopedRecord {
@@ -55,15 +57,16 @@ export function getChapterProductionState(
       return Boolean(chapter && draft.chapterId === chapter.id)
     })
     .sort(byUpdatedAtDesc)
-  const latestDraft = drafts[0] ?? null
+  const fragmentOnly = latestJob && hasCurrentChapterFragment(data.chapterGenerationSteps, latestJob.id, drafts[0])
+  const latestDraft = fragmentOnly ? null : drafts[0] ?? null
   const quality = latestDraft
     ? latestQualityReportForDraft(
         data.qualityGateReports.filter((report) => report.projectId === projectId && report.jobId === latestDraft.jobId),
         latestDraft
       )
-    : latestReport(
+    : latestJob ? null : latestReport(
         data.qualityGateReports.filter((report) =>
-          belongsToRunOrChapter(report, projectId, latestJob?.id ?? null, chapter?.id ?? null)
+          belongsToRunOrChapter(report, projectId, null, chapter?.id ?? null)
         )
       )
   const consistency = latestDraft
@@ -71,9 +74,9 @@ export function getChapterProductionState(
         data.consistencyReviewReports.filter((report) => report.projectId === projectId && report.jobId === latestDraft.jobId),
         latestDraft
       )[0] ?? null
-    : latestReport(
+    : latestJob ? null : latestReport(
         data.consistencyReviewReports.filter((report) =>
-          belongsToRunOrChapter(report, projectId, latestJob?.id ?? null, chapter?.id ?? null)
+          belongsToRunOrChapter(report, projectId, null, chapter?.id ?? null)
         )
       )
   const redundancy = latestDraft
@@ -81,15 +84,15 @@ export function getChapterProductionState(
         data.redundancyReports.filter((report) => report.projectId === projectId && report.jobId === latestDraft.jobId),
         latestDraft
       )
-    : latestReport(
+    : latestJob ? null : latestReport(
         data.redundancyReports.filter((report) =>
-          belongsToRunOrChapter(report, projectId, latestJob?.id ?? null, chapter?.id ?? null)
+          belongsToRunOrChapter(report, projectId, null, chapter?.id ?? null)
         )
       )
   const summary = latestReport(
     data.runTraceAuthorSummaries.filter((item) => {
       if (!belongsToRunOrChapter(item, projectId, latestJob?.id ?? null, chapter?.id ?? null)) return false
-      if (!latestDraft) return true
+      if (!latestDraft) return !latestJob
       if (item.generatedDraftId !== latestDraft.id || item.createdAt < latestDraft.updatedAt) return false
       if (item.sourceRefs.qualityGateReportId && item.sourceRefs.qualityGateReportId !== quality?.id) return false
       if (item.sourceRefs.consistencyReviewReportId && item.sourceRefs.consistencyReviewReportId !== consistency?.id) return false
@@ -111,17 +114,20 @@ export function getChapterProductionState(
           title: chapter.title,
           updatedAt: chapter.updatedAt,
           bodyCharCount: chapter.body.length,
+          wordCount: visibleCharacterCount(chapter.body),
           summary: compact(chapter.summary),
           endingHook: compact(chapter.endingHook)
         }
       : null,
     latestJob: summarizeJob(latestJob),
+    ...(fragmentOnly ? { latestAttemptHasOnlyFragment: true as const } : {}),
     drafts: drafts.slice(0, 5).map((draft) => ({
       id: draft.id,
       jobId: draft.jobId,
       title: draft.title,
       status: draft.status,
       bodyCharCount: draft.body.length,
+      wordCount: visibleCharacterCount(draft.body),
       tokenEstimate: draft.tokenEstimate,
       updatedAt: draft.updatedAt
     })),
@@ -147,12 +153,13 @@ export function getChapterProductionState(
   }
 }
 
-export function getRunDiagnostics(data: AppData, jobId: ID): AgentRunDiagnostics {
+export function getRunDiagnostics(data: AppData, jobId: ID, options: AgentReadOptions = {}): AgentRunDiagnostics {
   const job = data.chapterGenerationJobs.find((item) => item.id === jobId) ?? null
   const trace = data.generationRunTraces.find((item) => item.jobId === jobId) ?? null
-  const draft = [...data.generatedChapterDrafts]
+  const latestDraft = [...data.generatedChapterDrafts]
     .filter((item) => item.jobId === jobId)
     .sort(byUpdatedAtDesc)[0] ?? null
+  const draft = hasCurrentChapterFragment(data.chapterGenerationSteps, jobId, latestDraft) ? null : latestDraft
   const quality = draft
     ? latestQualityReportForDraft(data.qualityGateReports.filter((report) => report.jobId === jobId), draft)
     : null
@@ -162,7 +169,7 @@ export function getRunDiagnostics(data: AppData, jobId: ID): AgentRunDiagnostics
   const summary = latestReport(
     data.runTraceAuthorSummaries.filter((item) => {
       if (item.jobId !== jobId && item.traceId !== trace?.id) return false
-      if (!draft) return true
+      if (!draft) return false
       if (item.generatedDraftId !== draft.id || item.createdAt < draft.updatedAt) return false
       if (item.sourceRefs.qualityGateReportId && item.sourceRefs.qualityGateReportId !== quality?.id) return false
       if (item.sourceRefs.consistencyReviewReportId && item.sourceRefs.consistencyReviewReportId !== consistency?.id) return false
@@ -174,14 +181,24 @@ export function getRunDiagnostics(data: AppData, jobId: ID): AgentRunDiagnostics
     steps: data.chapterGenerationSteps
       .filter((step) => step.jobId === jobId)
       .sort((a, b) => a.createdAt.localeCompare(b.createdAt))
-      .map((step) => ({
-        id: step.id,
-        type: step.type,
-        status: step.status,
-        errorMessage: compact(step.errorMessage, 300),
-        outputCharCount: step.output.length,
-        updatedAt: step.updatedAt
-      })),
+      .map((step) => {
+        const fragment = readChapterStepFragment(step)
+        return {
+          id: step.id,
+          type: step.type,
+          status: step.status,
+          errorMessage: compact(step.errorMessage, 300),
+          outputCharCount: step.output.length,
+          ...(fragment ? { fragment: {
+            kind: fragment.kind,
+            title: compact(redactSensitiveText(fragment.title), 160),
+            finishReason: fragment.finishReason ? compact(redactSensitiveText(fragment.finishReason), 120) : null,
+            bodyCharCount: fragment.body.length,
+            ...(options.detail === 'full' ? { body: redactSensitiveText(fragment.body).slice(0, options.maxChars) } : {})
+          } } : {}),
+          updatedAt: step.updatedAt
+        }
+      }),
     trace: trace
       ? {
           id: trace.id,

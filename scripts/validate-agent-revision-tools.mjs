@@ -1,8 +1,10 @@
 #!/usr/bin/env node
 import assert from 'node:assert/strict'
-import { mkdir, mkdtemp, readFile, rm } from 'node:fs/promises'
+import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { createRequire } from 'node:module'
+import { Socket } from 'node:net'
 import { isAbsolute, join, relative } from 'node:path'
+import { mock } from 'node:test'
 import { pathToFileURL } from 'node:url'
 import { build } from 'esbuild'
 import { repoRoot } from './utils/repo-root.mjs'
@@ -10,13 +12,18 @@ import { repoRoot } from './utils/repo-root.mjs'
 const tempRoot = join(repoRoot, 'tmp')
 await mkdir(tempRoot, { recursive: true })
 const outDir = await mkdtemp(join(tempRoot, 'agent-revision-tools-'))
+const emptyRegistry = join(outDir, 'empty-api-registry.json')
+const routedRegistry = join(outDir, 'routed-api-registry.json')
+const revisionRoute = { baseUrl: 'https://revision.invalid/v1', keyEnv: 'NOVEL_REVISION_TEST_API_KEY',
+  backupKeyEnv: 'NOVEL_REVISION_TEST_BACKUP_API_KEY' }
 const databases = new Map()
 const nativePaths = new Set()
 const nativeHandles = new Set()
 globalThis.__agentRevisionDatabases = databases
 globalThis.__agentRevisionNativePaths = nativePaths
 globalThis.__agentRevisionNativeHandles = nativeHandles
-globalThis.fetch = async () => { throw new Error('Network is forbidden in Agent revision fixtures.') }
+let networkAttempts = 0
+function forbidNetwork() { networkAttempts++; throw new Error('Network is forbidden in Agent revision fixtures.') }
 let checks = 0
 let fixtureId = 0
 let NativeDatabase
@@ -31,6 +38,15 @@ async function test(label, run) { await run(); checks++; console.log(`PASS ${lab
 
 try {
   if (process.versions.electron) throw new Error('Run Agent revision fixtures with Node, not Electron.')
+  // This validator owns its Node process. Drop registry-compatible key names without reading their values.
+  process.env.NOVEL_DIRECTOR_API_REGISTRY = emptyRegistry
+  for (const name of Object.keys(process.env)) {
+    if (/_API_KEY$/i.test(name)) delete process.env[name]
+  }
+  await writeFile(emptyRegistry, JSON.stringify({ version: 1, apis: {} }))
+  await writeFile(routedRegistry, JSON.stringify({ version: 1, apis: { 'revision-fixture': revisionRoute } }))
+  mock.method(globalThis, 'fetch', async () => forbidNetwork())
+  mock.method(Socket.prototype, 'connect', forbidNetwork)
   try {
     const Database = createRequire(import.meta.url)('better-sqlite3')
     const probe = new Database(':memory:')
@@ -59,6 +75,9 @@ try {
     outfile, bundle: true, platform: 'node', format: 'esm', target: 'node22',
     external: ['better-sqlite3', 'electron'], logLevel: 'silent',
     plugins: [{ name: 'isolated-agent-revision-boundaries', setup(builder) {
+      builder.onResolve({ filter: /^(node:)?(http|https|http2|net|tls|dgram|dns(\/promises)?|child_process|electron)$/ }, ({ path }) => {
+        throw new Error(`Network and process transports are forbidden in the revision fixture bundle: ${path}`)
+      })
       builder.onResolve({ filter: /AgentPipelineExecutor$/ }, () => ({ path: 'ai', namespace: 'revision-fixture' }))
       builder.onResolve({ filter: /SqliteStorageService$/ }, () => ({ path: 'sqlite', namespace: 'revision-fixture' }))
       builder.onResolve({ filter: /^real-revision-sqlite$/ }, () => ({ path: join(repoRoot, 'src/storage/SqliteStorageService.ts') }))
@@ -69,6 +88,8 @@ try {
         import { SqliteStorageService, loadSqliteSnapshotReadonly as readNative,
           loadSqliteCollectionsReadonly as readNativeCollections } from 'real-revision-sqlite';
         export { SqliteStorageService };
+        export const loadChapterTitlesReadonly = () => { throw new Error('Unexpected title query in revision test'); };
+        export const loadSqliteUsageHistoryReadonly = () => { throw new Error('Unexpected usage query in revision test'); };
         export const createStorageService = (path) => {
           if (globalThis.__agentRevisionNativePaths.has(path)) {
             // No JSON fallback: this branch must construct and use the real native service.
@@ -184,7 +205,6 @@ try {
       boundary = sqliteBoundary(initial, storagePath)
       storage = boundary.storage
       databases.set(storagePath, storage)
-      const { writeFile } = await import('node:fs/promises')
       await writeFile(storagePath, 'isolated simulated SQLite boundary; not a database')
     }
     const paths = { storagePath, userDataPath: dir }
@@ -346,8 +366,8 @@ try {
     assert.deepEqual(await h.snapshot(), before)
   })
 
-  await test('seven strict descriptors are registered', () => {
-    const names = ['getRevisionSessions', 'getRevisionVersion', 'createRevisionRequest', 'generateRevisionVersion', 'editRevisionVersion', 'previewRevisionCommit', 'applyApprovedRevisionCommit']
+  await test('eight strict descriptors are registered', () => {
+    const names = ['getRevisionSessions', 'getRevisionVersion', 'createRevisionRequest', 'generateRevisionVersion', 'createManualRevisionVersion', 'editRevisionVersion', 'previewRevisionCommit', 'applyApprovedRevisionCommit']
     for (const name of names) {
       const definition = api.AgentToolService.listTools().find((tool) => tool.name === `agent.${name}`)
       assert.ok(definition); assert.equal(definition.inputSchema.additionalProperties, false)
@@ -483,6 +503,28 @@ try {
       await h.apply(await h.preview(edited, { operationId: 'edited-preview' }))
       assert.equal((await h.snapshot()).data.chapters[0].body, '  Explicit Agent edit.\n')
     })
+    await test(`${kind}: manual candidates skip the model and still go through preview and commit`, async () => {
+      const h = await harness(kind)
+      const req = await h.request()
+      const manual = (extra = {}) => h.call('createManualRevisionVersion', { ...h.write, operationId: 'manual', requestId: req.requestId,
+        expectedRequestHash: req.requestHash, ...h.sourceArgs(req.source), body: '  Written by hand.\n', ...extra })
+      const before = await h.snapshot()
+      await assert.rejects(manual({ expectedRequestHash: 'stale' }), /request changed/)
+      await assert.rejects(manual({ expectedSourceHash: 'stale' }), /[Ss]ource/)
+      await assert.rejects(manual({ body: before.data.chapters[0].body }), /matches the source/)
+      assert.deepEqual(await h.snapshot(), before)
+      const v = await manual({ changedSummary: 'Hand fix.' })
+      assert.equal(v.version.status, 'draft')
+      assert.equal(h.calls.length, 0)
+      assert.equal((await h.snapshot()).data.chapters[0].body, before.data.chapters[0].body)
+      assert.equal((await manual({ changedSummary: 'Hand fix.' })).replayed, true)
+      await h.apply(await h.preview(v))
+      assert.equal((await h.snapshot()).data.chapters[0].body, '  Written by hand.\n')
+      const local = await harness(kind)
+      const localReq = await local.request({ targetRange: target })
+      await assert.rejects(local.call('createManualRevisionVersion', { ...local.write, operationId: 'manual-local', requestId: localReq.requestId,
+        expectedRequestHash: localReq.requestHash, ...local.sourceArgs(localReq.source), body: 'Whole text.' }), /full text/)
+    })
     await test(`${kind}: failed AI returns no fabricated version; local broader response requires acknowledgement`, async () => {
       const h = await harness(kind)
       const req = await h.request({ targetRange: target })
@@ -595,17 +637,53 @@ try {
     assert.equal(data.agentActionPreviews[0].status, 'applied')
     assert.equal(data.revisionCommitBundles.length, 1)
   })
-  await test('json: no API configuration cannot save the local fallback as generated prose', async () => {
-    const data = fixture(); data.settings.apiProvider = 'openai'; data.settings.hasApiKey = false
-    const previous = process.env.NOVEL_DIRECTOR_API_KEY
-    delete process.env.NOVEL_DIRECTOR_API_KEY
-    try {
+  for (const { label, registry, keyEnv, error } of [
+    { label: 'no route or key rejects fallback prose', registry: emptyRegistry,
+      error: 'AI did not generate a revision; no fallback prose was saved.' },
+    { label: 'registered route without either key names the missing credential', registry: routedRegistry,
+      error: `修订使用的服务 revision-fixture 缺少 ${revisionRoute.keyEnv}。` },
+    { label: 'fake primary key alone generates one pending candidate', registry: routedRegistry, keyEnv: revisionRoute.keyEnv },
+    { label: 'fake backup key alone generates one pending candidate', registry: routedRegistry, keyEnv: revisionRoute.backupKeyEnv }
+  ]) {
+    await test(`json: revision API configuration: ${label}`, async () => {
+      const data = fixture()
+      Object.assign(data.settings, { apiProvider: 'openai', baseUrl: revisionRoute.baseUrl, hasApiKey: false })
       const h = await harness('json', data)
-      await assert.rejects(h.generate(await h.request()), /fallback|did not generate/)
-      assert.equal(h.calls.length, 0)
-      assert.equal((await h.snapshot()).data.revisionVersions.length, 0)
-    } finally { if (previous === undefined) delete process.env.NOVEL_DIRECTOR_API_KEY; else process.env.NOVEL_DIRECTOR_API_KEY = previous }
-  })
+      const req = await h.request()
+      const before = await h.snapshot()
+      const save = mock.method(api.JsonStorageService.prototype, 'saveIfCurrent')
+      process.env.NOVEL_DIRECTOR_API_REGISTRY = registry
+      if (keyEnv) process.env[keyEnv] = 'revision-fixture-only'
+      try {
+        if (error) {
+          await assert.rejects(h.generate(req), { name: 'Error', message: error })
+          assert.equal(h.calls.length, 0)
+          assert.equal(save.mock.callCount(), 0, 'Rejected generation must not attempt a save')
+          const after = await h.snapshot()
+          assert.equal(after.data.revisionVersions.length, 0)
+          assert.deepEqual(after, before, 'Rejected generation must preserve all data and the storage revision')
+        } else {
+          const result = await h.generate(req)
+          assert.equal(h.calls.length, 1)
+          assert.equal(h.calls[0].settings.baseUrl, revisionRoute.baseUrl)
+          assert.equal(h.calls[0].settings.hasApiKey, true)
+          assert.equal(save.mock.callCount(), 1)
+          const after = await h.snapshot()
+          assert.equal(after.data.revisionVersions.length, 1)
+          const [version] = after.data.revisionVersions
+          assert.equal(version.id, result.version.id)
+          assert.equal(version.requestId, req.requestId)
+          assert.equal(version.status, 'pending')
+          assert.equal(version.body, body.replace(target, replacement))
+          assert.deepEqual(after.data.chapters, before.data.chapters)
+        }
+      } finally {
+        save.mock.restore()
+        if (keyEnv) delete process.env[keyEnv]
+        process.env.NOVEL_DIRECTOR_API_REGISTRY = emptyRegistry
+      }
+    })
+  }
 
   await test('sqlite-boundary: injected entity failure rolls back manuscript, versions, metadata and revision', async () => {
     const h = await harness('sqlite-boundary')
@@ -650,9 +728,11 @@ try {
       assert.equal((await h.snapshot()).data.revisionCommitBundles.length, 1)
     })
   }
-  console.log(`Agent revision tools passed (${checks} focused checks; ${nativeChecks} real native SQLite check). JSON: real isolated files. SQLite fault injection: simulated I/O/rollback, separate from native. AI: real AIService with stub transport. No UI QA.`)
+  assert.equal(networkAttempts, 0, 'Even caught network attempts must fail the suite')
+  console.log(`Agent revision tools passed (${checks} focused checks; ${nativeChecks} real native SQLite check). JSON: real isolated files. SQLite fault injection: simulated I/O/rollback, separate from native. AI: real AIService with stub transport; ${networkAttempts} network attempts. No UI QA.`)
   console.log(nativeChecks ? `Native SQLite: Node ${process.version} ABI ${process.versions.modules}; real isolated file, reopened reads, direct SQL integrity check; all handles closed.` : `Native SQLite: SKIP (${nativeSkipReason}).`)
 } finally {
+  mock.restoreAll()
   for (const handle of nativeHandles) { try { handle.close() } finally { nativeHandles.delete(handle) } }
   delete globalThis.__agentRevisionDatabases
   delete globalThis.__agentRevisionNativePaths

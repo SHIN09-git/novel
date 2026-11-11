@@ -1,4 +1,6 @@
 import type { ID } from './base'
+import type { HardCanonCheck } from './hardCanonCheck'
+import type { ProjectModelRate } from '../projectUsage'
 
 export type HardCanonItemCategory =
   | 'world_rule'
@@ -34,6 +36,8 @@ export interface Project {
   targetReaders: string
   coreAppeal: string
   style: string
+  bookWordTarget?: { min?: number; max?: number }
+  modelRates?: ProjectModelRate[]
   createdAt: string
   updatedAt: string
   lastOpenedAt?: string | null
@@ -62,6 +66,7 @@ export interface HardCanonItem {
   content: string
   priority: HardCanonPriority
   status: HardCanonStatus
+  check?: HardCanonCheck
   sourceType?: HardCanonSourceType
   sourceId?: ID | null
   relatedCharacterIds?: ID[]

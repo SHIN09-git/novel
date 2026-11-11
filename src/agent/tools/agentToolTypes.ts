@@ -5,6 +5,7 @@ export interface AgentToolDefinition {
   description: string
   inputSchema: JsonSchema
   riskLevel: 'read' | 'write_preview' | 'write_commit'
+  annotations?: { readOnlyHint: true }
 }
 
 export interface AgentToolCallInput {

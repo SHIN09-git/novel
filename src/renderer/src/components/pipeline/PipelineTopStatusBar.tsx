@@ -25,6 +25,7 @@ export function PipelineTopStatusBar({
   contextSource,
   snapshot,
   qualityReport,
+  lengthOverflowNotice,
   draft,
   isRunning,
   primaryActionLabel,
@@ -36,6 +37,7 @@ export function PipelineTopStatusBar({
   contextSource: PipelineContextSource
   snapshot: PromptContextSnapshot | null
   qualityReport: QualityGateReport | null
+  lengthOverflowNotice?: string | null
   draft: GeneratedChapterDraft | null
   isRunning: boolean
   primaryActionLabel: string
@@ -64,8 +66,8 @@ export function PipelineTopStatusBar({
           {snapshot ? <small>第 {snapshot.targetChapterOrder} 章 · {snapshot.estimatedTokens} token</small> : null}
         </div>
         <div>
-          <span>质量门禁</span>
-          <StatusBadge tone={quality.tone}>{quality.label}</StatusBadge>
+          <span>{lengthOverflowNotice ? '正文篇幅' : '质量门禁'}</span>
+          {lengthOverflowNotice ? <StatusBadge tone="warning">超出上限</StatusBadge> : <StatusBadge tone={quality.tone}>{quality.label}</StatusBadge>}
         </div>
         <div data-status={draftStatus}>
           <span>正文状态</span>

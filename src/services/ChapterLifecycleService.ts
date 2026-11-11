@@ -1,4 +1,5 @@
 import type { AppData, Chapter, ID } from '../shared/types'
+import { relocateTimelineChapters } from '../shared/normalizers/timeline'
 
 export interface RestoreArchivedChapterResult {
   data: AppData
@@ -79,7 +80,10 @@ export function restoreArchivedChapterInAppData(
       projects: appData.projects.map((project) =>
         project.id === chapter.projectId ? { ...project, updatedAt: restoredAt } : project
       ),
-      chapters: appData.chapters.map((item) => (item.id === chapterId ? restoredChapter : item))
+      chapters: appData.chapters.map((item) => (item.id === chapterId ? restoredChapter : item)),
+      ...(orderOccupied && appData.timelineEvents?.length && {
+        timelineEvents: relocateTimelineChapters(appData.timelineEvents, appData.chapters, chapter.projectId, new Map([[chapter.id, restoredChapter.order]]))
+      })
     },
     chapter: restoredChapter,
     orderChanged: orderOccupied
@@ -118,6 +122,9 @@ export function reorderChapterInAppData(
       item.id === chapter.projectId ? { ...item, updatedAt } : item
     ),
     chapters,
+    ...(appData.timelineEvents?.length && {
+      timelineEvents: relocateTimelineChapters(appData.timelineEvents, appData.chapters, chapter.projectId, changedOrders)
+    }),
     chapterContinuityBridges: appData.chapterContinuityBridges.map((bridge) => {
       const fromOrder = changedOrders.get(bridge.fromChapterId)
       return fromOrder === undefined ? bridge : { ...bridge, toChapterOrder: fromOrder + 1, updatedAt }

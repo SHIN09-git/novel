@@ -1,7 +1,6 @@
 import type {
   Chapter,
   ChapterTask,
-  CharacterCardField,
   Character,
   ContextBudgetProfile,
   ContextNeedItem,
@@ -27,6 +26,8 @@ import { effectiveTreatmentMode, TREATMENT_PRIORITY, treatmentOmitReason } from 
 import { detailedChapterRecapText } from '../ContextCompressionService'
 import { StageSummaryService } from '../StageSummaryService'
 import { TokenEstimator } from '../TokenEstimator'
+import { CARD_FIELDS, characterFieldValue } from '../characterState/cardFields'
+export { characterFieldValue } from '../characterState/cardFields'
 import type { ScoringContext } from './types'
 
 export const WEIGHT_PRIORITY: Record<ForeshadowingWeight, number> = {
@@ -155,31 +156,9 @@ export function stringifyStageSummary(summary: StageSummary): string {
 }
 
 export function stringifyCharacter(character: Character): string {
-  return [
-    character.name,
-    character.role,
-    character.surfaceGoal,
-    character.deepDesire,
-    character.coreFear,
-    character.knownInformation,
-    character.unknownInformation,
-    character.protagonistRelationship,
-    character.emotionalState,
-    character.nextActionTendency,
-    character.forbiddenWriting
-  ].join('\n')
-}
-
-export function characterFieldValue(character: Character, field: CharacterCardField): string {
-  if (field === 'roleFunction') return character.role
-  if (field === 'surfaceGoal') return character.surfaceGoal
-  if (field === 'deepNeed') return character.deepDesire
-  if (field === 'coreFear') return character.coreFear
-  if (field === 'decisionLogic') return [character.nextActionTendency, character.selfDeception].filter(Boolean).join('；')
-  if (field === 'abilitiesAndResources') return character.knownInformation
-  if (field === 'weaknessAndCost') return [character.coreFear, character.forbiddenWriting].filter(Boolean).join('；')
-  if (field === 'relationshipTension') return character.protagonistRelationship
-  return character.nextActionTendency
+  return [...new Set([character.name, ...CARD_FIELDS.map(field => characterFieldValue(character, field)),
+    character.knownInformation, character.unknownInformation, character.emotionalState, character.forbiddenWriting
+  ].filter(Boolean))].join('\n')
 }
 
 export function stringifyCharacterForPlan(character: Character, plan?: ContextNeedPlan | null): string {

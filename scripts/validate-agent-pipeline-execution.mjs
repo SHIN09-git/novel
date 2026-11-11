@@ -41,6 +41,7 @@ async function loadHarness() {
       "export { AgentRunService, AGENT_PIPELINE_STEP_ORDER } from '../../src/agent/AgentRunService'",
       "export { AgentExecutionControlService } from '../../src/agent/AgentExecutionControlService'",
       "export { loadAgentRuntimeData } from '../../src/agent/AgentRuntime'",
+      "export { SqliteStorageService } from '../../src/storage/SqliteStorageService'",
       "export { normalizeAppData } from '../../src/shared/normalizers/appData'",
       "export { assertChapterTaskPresentInPrompt } from '../../src/renderer/src/views/generation/pipelineUtils'",
       "export { GenerationPipelineAI } from '../../src/services/ai/GenerationPipelineAI'",
@@ -518,7 +519,7 @@ function phrasePositionRetryWorkflowAI() {
 
 function structurallyInvalidRetryWorkflowAI() {
   const stable = fakeWorkflowAI()
-  const earlierBody = `我${'继续写正文'.repeat(220)}`
+  const earlierBody = '{"title":"损坏返回","body":"我' + '继续写正文'.repeat(220)
   const captures = { draftCalls: 0, previousDrafts: [] }
   return {
     captures,
@@ -1209,6 +1210,123 @@ async function main() {
   })
 
   const reloaded = await h.loadAgentRuntimeData({ storagePath, userDataPath: outDir })
+  // Prose is already paid for when local diagnostics begin. Reopen the actual isolated file inside the fault.
+  const recoveryRun = h.AgentRunService.prepareSingleChapterRun({ appData: fixture(h), projectId: prepared.job.projectId,
+    targetChapterOrder: 2, goal: '验证超限草稿在审稿失败时仍可找回。', chapterTaskSnapshot: { ...primaryTask, targetWordCount: '1200-1300' } })
+  const sqliteRetention = process.argv.includes('--sqlite-retention')
+  const recoveryPath = join(outDir, sqliteRetention ? 'retained-overflow.sqlite' : 'retained-overflow.json')
+  if (sqliteRetention) {
+    const storage = new h.SqliteStorageService(recoveryPath, { legacyJsonPath: join(outDir, 'absent-retention-legacy.json') })
+    try { await storage.save(recoveryRun.appData) } finally { storage.close() }
+  } else await writeFile(recoveryPath, JSON.stringify(recoveryRun.appData), 'utf8')
+  const reloadRecovery = () => h.loadAgentRuntimeData({ storagePath: recoveryPath, userDataPath: outDir })
+  let recoveryRuntime = await reloadRecovery()
+  const runRecovery = (workflowAI, diagnostics, overrides = {}) => h.executeAgentChapterPipeline({
+    appData: recoveryRuntime.data, runtime: recoveryRuntime, agentRunId: recoveryRun.agentRun.id, jobId: recoveryRun.job.id, ...overrides
+  }, { workflowAI, diagnostics })
+  const retainedBody = '钟楼落雨，灯未熄。'.repeat(220) + '他停在开口前……'
+  let paidDraftCalls = 0
+  const retainedAI = { ...fakeWorkflowAI().service, async generateChapterDraft() {
+    paidDraftCalls++
+    return { ok: true, usedAI: true, finishReason: 'stop', data: { title: '雨夜', body: retainedBody } }
+  } }
+  const retentionAudits = { noveltyBodies: [], qualityModels: [] }
+  const retainedDiagnostics = fakeDiagnostics(h, retentionAudits)
+  let beforeAuditDraftId
+  const auditFault = await runRecovery(retainedAI, { ...retainedDiagnostics, async auditNovelty() {
+    const onDisk = (await reloadRecovery()).data
+    beforeAuditDraftId = onDisk.generatedChapterDrafts.find((item) => item.jobId === recoveryRun.job.id && item.body === retainedBody)?.id
+    throw new Error('ISOLATED_AUDIT_FAILURE')
+  } }, { estimatedWordCount: '1200-1300' })
+  assert(beforeAuditDraftId && auditFault.failedStep?.errorMessage === 'ISOLATED_AUDIT_FAILURE',
+    'The original candidate and its ID must be durable before the diagnostic fault.')
+  recoveryRuntime = await reloadRecovery()
+  const interruptedSnapshot = structuredClone(recoveryRuntime.data)
+  if (sqliteRetention) {
+    const Database = (await import('better-sqlite3')).default
+    const db = new Database(recoveryPath)
+    try {
+      db.exec(`CREATE TRIGGER fail_draft_completion BEFORE INSERT ON entities
+        WHEN NEW.collection = 'chapterGenerationSteps' AND json_extract(NEW.json, '$.type') = 'generate_chapter_draft'
+          AND json_extract(NEW.json, '$.status') = 'completed'
+        BEGIN SELECT RAISE(ABORT, 'FIXTURE_DRAFT_COMPLETION_SAVE'); END`)
+      const failedSave = await runRecovery(retainedAI, retainedDiagnostics)
+      const saved = (await reloadRecovery()).data.chapterGenerationSteps.find((item) => item.id === failedSave.failedStep?.id)
+      assert(saved?.status === 'failed' && saved.errorMessage.includes('FIXTURE_DRAFT_COMPLETION_SAVE') &&
+        JSON.parse(saved.output).checkpoint.draftId === beforeAuditDraftId, 'A failed completion save must retain a resumable draft reference.')
+      db.exec('DROP TRIGGER fail_draft_completion')
+    } finally { db.close() }
+    recoveryRuntime = await reloadRecovery()
+  }
+  const resumedAudit = await runRecovery(retainedAI, retainedDiagnostics)
+  const retainedRows = (await reloadRecovery()).data.generatedChapterDrafts.filter((item) => item.jobId === recoveryRun.job.id)
+  const completedDraftStep = resumedAudit.appData.chapterGenerationSteps.find((item) => item.jobId === recoveryRun.job.id && item.type === 'generate_chapter_draft')
+  assert(!resumedAudit.failedStep && paidDraftCalls === 1 && retentionAudits.noveltyBodies.length === 1 &&
+    resumedAudit.appData.redundancyReports.filter((row) => row.draftId === beforeAuditDraftId).length === 1 &&
+    retainedRows.length === 1 && retainedRows[0].id === beforeAuditDraftId &&
+    retainedRows[0].body === retainedBody && JSON.parse(completedDraftStep.output).lengthNotice.includes('1300'),
+    'Retry must finish diagnostics on the saved draft without rewriting, duplicating or losing the overlength warning.', resumedAudit.failedStep)
+
+  const editedPath = join(outDir, 'retained-author-edit.json')
+  const editedBody = '钟楼的门已经关上。'.repeat(138) + '他停在开口前'
+  interruptedSnapshot.generatedChapterDrafts.find((row) => row.id === beforeAuditDraftId).body = editedBody
+  await writeFile(editedPath, JSON.stringify(interruptedSnapshot), 'utf8')
+  const editedRuntime = await h.loadAgentRuntimeData({ storagePath: editedPath, userDataPath: outDir })
+  const editedCaptures = { noveltyBodies: [], qualityModels: [] }
+  const editedRun = await h.executeAgentChapterPipeline({ appData: editedRuntime.data, runtime: editedRuntime,
+    agentRunId: recoveryRun.agentRun.id, jobId: recoveryRun.job.id }, { workflowAI: retainedAI, diagnostics: fakeDiagnostics(h, editedCaptures) })
+  const editedStep = editedRun.appData.chapterGenerationSteps.find((step) => step.jobId === recoveryRun.job.id && step.type === 'generate_chapter_draft')
+  assert(!editedRun.failedStep && paidDraftCalls === 1 && editedCaptures.noveltyBodies.includes(editedBody) &&
+    !editedCaptures.noveltyBodies.includes(retainedBody) && JSON.parse(editedStep.output).body === editedBody &&
+    !JSON.parse(editedStep.output).lengthNotice, 'Resumed diagnostics and length notice must use the author edit, not the model checkpoint.')
+
+  for (const [kind, change, reason] of [
+    ['too-short-edit', (data) => { data.generatedChapterDrafts.find((row) => row.id === beforeAuditDraftId).body = '他走了。' }, /已保留手改草稿/],
+    ['broken-checkpoint', (data) => { data.chapterGenerationSteps.find((step) => step.id === auditFault.failedStep.id).output = '{"kind":"chapter_draft_check' }, /恢复记录不完整/]
+  ]) {
+    const damaged = structuredClone(interruptedSnapshot), path = join(outDir, kind + '.json')
+    change(damaged)
+    await writeFile(path, JSON.stringify(damaged), 'utf8')
+    const runtime = await h.loadAgentRuntimeData({ storagePath: path, userDataPath: outDir })
+    const captures = { noveltyBodies: [], qualityModels: [] }
+    const stopped = await h.executeAgentChapterPipeline({ appData: runtime.data, runtime,
+      agentRunId: recoveryRun.agentRun.id, jobId: recoveryRun.job.id }, { workflowAI: retainedAI, diagnostics: fakeDiagnostics(h, captures) })
+    assert(stopped.failedStep?.type === 'generate_chapter_draft' && reason.test(stopped.failedStep.errorMessage) &&
+      paidDraftCalls === 1 && !captures.noveltyBodies.length && stopped.appData.generatedChapterDrafts.filter(row => row.jobId === recoveryRun.job.id).length === 1,
+      'Invalid author edits or broken recovery markers must stop locally, before a paid rewrite or review.', stopped.failedStep)
+  }
+
+  const partialRun = h.AgentRunService.prepareSingleChapterRun({ appData: fixture(h), projectId: prepared.job.projectId,
+    targetChapterOrder: 2, goal: '验证服务商确报截断只保留片段。', chapterTaskSnapshot: primaryTask })
+  const partialPath = join(outDir, 'unfinished-fragment.json')
+  await writeFile(partialPath, JSON.stringify(partialRun.appData), 'utf8')
+  const partialRuntime = await h.loadAgentRuntimeData({ storagePath: partialPath, userDataPath: outDir })
+  const interrupted = await h.executeAgentChapterPipeline({ appData: partialRuntime.data, runtime: partialRuntime,
+    agentRunId: partialRun.agentRun.id, jobId: partialRun.job.id }, { diagnostics: retainedDiagnostics,
+    workflowAI: { ...retainedAI, async generateChapterDraft() {
+      return { ok: false, usedAI: true, data: null, finishReason: 'length', rawText: retainedBody + '。' }
+    } } })
+  const afterInterrupt = (await h.loadAgentRuntimeData({ storagePath: partialPath, userDataPath: outDir })).data
+  const fragment = JSON.parse(afterInterrupt.chapterGenerationSteps.find((step) => step.id === interrupted.failedStep?.id).output)
+  assert(fragment.kind === 'incomplete_chapter_fragment' && fragment.body === retainedBody + '。' &&
+    !afterInterrupt.generatedChapterDrafts.some((row) => row.jobId === partialRun.job.id),
+    'A confirmed interrupted response stays recoverable but never becomes an acceptable draft, even with a final period.')
+
+  // A compatibility adapter may have salvaged an inner object from an unfinished outer array.
+  const envelopePath = join(outDir, 'unfinished-outer-array.json')
+  await writeFile(envelopePath, JSON.stringify(partialRun.appData), 'utf8')
+  const envelopeRuntime = await h.loadAgentRuntimeData({ storagePath: envelopePath, userDataPath: outDir })
+  const inner = { title: '雨夜', body: retainedBody }
+  let envelopeCalls = 0
+  const envelopeRun = await h.executeAgentChapterPipeline({ appData: envelopeRuntime.data, runtime: envelopeRuntime,
+    agentRunId: partialRun.agentRun.id, jobId: partialRun.job.id }, { diagnostics: retainedDiagnostics,
+    workflowAI: { ...retainedAI, async generateChapterDraft() {
+      envelopeCalls++
+      return { ok: true, usedAI: true, data: inner, finishReason: 'stop', rawText: '[' + JSON.stringify(inner) + ',' }
+    } } })
+  assert(envelopeRun.failedStep?.type === 'generate_chapter_draft' && envelopeCalls === 1 &&
+    !envelopeRun.appData.generatedChapterDrafts.some(row => row.jobId === partialRun.job.id),
+    'A malformed wire envelope must not become an acceptable candidate, even when the adapter recovered an apparent body.')
   const persistedSteps = reloaded.data.chapterGenerationSteps.filter((step) => step.jobId === result.job.id)
   assert(persistedSteps.every((step) => step.status === 'completed'), 'Every completed step must be persisted for recovery.', persistedSteps)
   assert(reloaded.data.generatedChapterDrafts.some((item) => item.id === draft.id), 'Generated draft must survive a storage reload.')
@@ -1542,6 +1660,8 @@ async function main() {
         ok: true,
         completedStepCount: result.completedStepCount,
         draftId: draft.id,
+        retainedDraft: { storage: sqliteRetention ? 'sqlite' : 'json', proseCallsAfterAuditRetry: paidDraftCalls,
+          storedDrafts: retainedRows.length, incompleteFragmentStayedOutOfDrafts: true },
         qualityReportId: report.id,
         modelSnapshot: captures.qualityModels[0],
         persistedStepCount: persistedSteps.length,

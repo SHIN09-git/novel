@@ -79,9 +79,14 @@ import type {
 } from '../types'
 
 import { arrayOrEmpty, objectOrEmpty, stringArrayValue, stringValue } from './common'
+import { normalizeHardCanonAudit } from './hardCanonAudit'
+import { readTokenUsage } from '../tokenUsage'
 
 export function normalizeQualityGateReport(value: QualityGateReport | Record<string, unknown>): QualityGateReport {
   const report = objectOrEmpty(value)
+  const { hardCanonAudit, hardCanonBasePass, ...original } = (value ?? {}) as QualityGateReport
+  const audit = normalizeHardCanonAudit(hardCanonAudit)
+  const boundAudit = audit && audit.projectId === report.projectId && audit.draftContentHash === report.draftContentHash ? audit : undefined
   const dimensions = objectOrEmpty(report.dimensions)
   const telemetry = objectOrEmpty(report.aiTelemetry)
   const usage = objectOrEmpty(telemetry.usage)
@@ -97,16 +102,9 @@ export function normalizeQualityGateReport(value: QualityGateReport | Record<str
         durationMs: typeof telemetry.durationMs === 'number' && Number.isFinite(telemetry.durationMs) ? Math.max(0, telemetry.durationMs) : 0,
         attempts: typeof telemetry.attempts === 'number' && Number.isFinite(telemetry.attempts) ? Math.max(0, Math.round(telemetry.attempts)) : 0,
         responseFormatFallback: telemetry.responseFormatFallback === true,
+        ...(telemetry.usageJournalIncomplete === true ? { usageJournalIncomplete: true as const } : {}),
         finishReason: stringValue(telemetry.finishReason) || undefined,
-        usage: Object.keys(usage).length
-          ? {
-              promptTokens: typeof usage.promptTokens === 'number' && Number.isFinite(usage.promptTokens) ? Math.max(0, usage.promptTokens) : undefined,
-              completionTokens: typeof usage.completionTokens === 'number' && Number.isFinite(usage.completionTokens) ? Math.max(0, usage.completionTokens) : undefined,
-              totalTokens: typeof usage.totalTokens === 'number' && Number.isFinite(usage.totalTokens) ? Math.max(0, usage.totalTokens) : undefined,
-              reasoningTokens: typeof usage.reasoningTokens === 'number' && Number.isFinite(usage.reasoningTokens) ? Math.max(0, usage.reasoningTokens) : undefined,
-              cachedPromptTokens: typeof usage.cachedPromptTokens === 'number' && Number.isFinite(usage.cachedPromptTokens) ? Math.max(0, usage.cachedPromptTokens) : undefined
-            }
-          : undefined,
+        usage: readTokenUsage(usage),
         terminationCategory:
           telemetry.terminationCategory === 'cancelled' || telemetry.terminationCategory === 'timeout'
             ? telemetry.terminationCategory
@@ -114,7 +112,9 @@ export function normalizeQualityGateReport(value: QualityGateReport | Record<str
       } as const
     : undefined
   return {
-    ...(value as QualityGateReport),
+    ...original,
+    ...(boundAudit ? { hardCanonAudit: boundAudit } : {}),
+    ...(boundAudit && typeof hardCanonBasePass === 'boolean' ? { hardCanonBasePass } : {}),
     draftContentHash: stringValue(report.draftContentHash) || null,
     dimensions: {
       plotCoherence: typeof dimensions.plotCoherence === 'number' ? dimensions.plotCoherence : 70,

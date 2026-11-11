@@ -1,4 +1,5 @@
 import { normalizeCandidateDecisionReceipts } from './candidateDecision'
+import { normalizeChapterTitleReceipts } from './chapterTitle'
 import { normalizeQuickRewriteDrafts } from './quickRewrite'
 import type {
   AppData,
@@ -91,14 +92,19 @@ import {
   defaultModulesForMode
 } from '../defaults/index'
 import { arrayOrEmpty, objectOrEmpty, recordOrEmpty, stringArrayValue, stringValue } from './common'
+import { normalizeChapterWritebackFailures } from './chapterWritebackFailures'
 import { normalizeCharacterStateChangeCandidate, normalizeCharacterStateFact, normalizeCharacterStateLog, normalizeCharacterStateTransaction } from './characterState'
 import { normalizeChapterContinuityBridge, normalizeContinuityBridgeSuggestion } from './continuity'
 import { normalizeBudgetProfile, normalizeContextNeedPlan, normalizeContextSelectionResult } from './context'
+import { normalizeBookWordTarget } from './bookWordTarget'
+import { normalizeProjectModelRates } from '../projectUsagePricing'
 import { normalizeForeshadowing } from './foreshadowing'
+import { normalizeHardCanonCheck } from './hardCanonCheck'
 import { normalizeMemoryUpdateCandidate } from './memoryUpdate'
 import { normalizeConsistencyReviewReport, normalizeEditorialVerdict, normalizeQualityGateReport, normalizeRedundancyReport } from './reports'
 import { normalizeGenerationRunTrace, normalizeRunTraceAuthorSummary } from './runTrace'
 import { normalizeStoryDirectionGuide } from './storyDirection'
+import { normalizeTimelineEvents } from './timeline'
 import { normalizeAgentActionPreview, normalizeAgentRun } from './agent'
 import { normalizeWorldManagementReceipts } from './worldManagement'
 import { normalizeChapterTask, normalizeChapterTaskEdit, normalizePipelineMode, normalizePipelineRecipeReference } from './generation'
@@ -114,9 +120,20 @@ function normalizeRequestTimeoutMs(value: unknown): number {
 
 function normalizeCharacter(value: unknown): Character {
   const character = objectOrEmpty(value)
+  const { lastCardReview, ...original } = character
+  const review = objectOrEmpty(lastCardReview)
   const timestamp = new Date().toISOString()
   return {
-    ...(value as Character),
+    ...original,
+    ...(typeof review.chapterId === 'string' && review.chapterId.trim() &&
+      typeof review.chapterOrder === 'number' && Number.isSafeInteger(review.chapterOrder) && review.chapterOrder > 0 &&
+      (review.chapterVersionId === null || (typeof review.chapterVersionId === 'string' && review.chapterVersionId.trim())) &&
+      typeof review.reviewedAt === 'string' && Number.isFinite(Date.parse(review.reviewedAt)) &&
+      typeof review.basisFingerprint === 'string' && /^decision-v1-[0-9a-f]{16}-\d+$/.test(review.basisFingerprint) &&
+      (review.decision === 'keep' || review.decision === 'update')
+      ? { lastCardReview: { chapterId: review.chapterId, chapterOrder: review.chapterOrder,
+        chapterVersionId: review.chapterVersionId, reviewedAt: review.reviewedAt,
+        basisFingerprint: review.basisFingerprint, decision: review.decision } } : {}),
     id: stringValue(character.id), projectId: stringValue(character.projectId), name: stringValue(character.name),
     role: stringValue(character.role), surfaceGoal: stringValue(character.surfaceGoal), deepDesire: stringValue(character.deepDesire),
     coreFear: stringValue(character.coreFear), selfDeception: stringValue(character.selfDeception),
@@ -186,12 +203,18 @@ function normalizeHardCanonStatus(value: unknown): HardCanonStatus {
   return value === 'active' || value === 'inactive' || value === 'deprecated' ? value : 'active'
 }
 
-function normalizeHardCanonItem(value: HardCanonItem | Record<string, unknown>, projectIdHint = ''): HardCanonItem {
+function normalizeHardCanonItem(value: HardCanonItem | Record<string, unknown>, projectIdHint: string, characters?: Character[]): HardCanonItem {
   const item = objectOrEmpty(value)
   const timestamp = new Date().toISOString()
   const projectId = stringValue(item.projectId) || projectIdHint
+  const { check: rawCheck, ...rest } = item
+  const check = projectId === projectIdHint && stringValue(item.id).trim() && stringValue(item.title).trim() &&
+    stringValue(item.content).trim() && (item.status === 'active' || item.status === 'inactive' || item.status === 'deprecated')
+    ? normalizeHardCanonCheck(rawCheck) : undefined
+  const characterId = check?.kind === 'actor_action' ? check.characterId : undefined
   return {
-    ...(value as HardCanonItem),
+    ...rest,
+    ...(check && (!characterId || !characters || characters.some((c) => c.id === characterId && c.projectId === projectId)) && { check }),
     id: stringValue(item.id) || `hard-canon-item-${timestamp}`,
     projectId,
     category: normalizeHardCanonCategory(item.category),
@@ -219,7 +242,7 @@ function normalizeHardCanonItem(value: HardCanonItem | Record<string, unknown>, 
   }
 }
 
-function normalizeHardCanonPack(value: HardCanonPack | Record<string, unknown>): HardCanonPack {
+function normalizeHardCanonPack(value: HardCanonPack | Record<string, unknown>, characters?: Character[]): HardCanonPack {
   const pack = objectOrEmpty(value)
   const timestamp = new Date().toISOString()
   const projectId = stringValue(pack.projectId)
@@ -229,7 +252,7 @@ function normalizeHardCanonPack(value: HardCanonPack | Record<string, unknown>):
     projectId,
     title: stringValue(pack.title) || '不可违背设定包',
     description: stringValue(pack.description),
-    items: arrayOrEmpty<HardCanonItem>(pack.items).map((item) => normalizeHardCanonItem(item, projectId)),
+    items: arrayOrEmpty<HardCanonItem>(pack.items).map((item) => normalizeHardCanonItem(item, projectId, characters)),
     maxPromptTokens: typeof pack.maxPromptTokens === 'number' && pack.maxPromptTokens > 0 ? pack.maxPromptTokens : 900,
     createdAt: stringValue(pack.createdAt) || timestamp,
     updatedAt: stringValue(pack.updatedAt) || timestamp,
@@ -357,10 +380,15 @@ function normalizeChapterGenerationJob(
 
 function normalizeProject(value: Project | Record<string, unknown>): Project {
   const project = objectOrEmpty(value)
+  const { bookWordTarget: rawTarget, modelRates: rawRates, ...fields } = project
+  const modelRates = normalizeProjectModelRates(rawRates)
+  const bookWordTarget = normalizeBookWordTarget(rawTarget)
   const timestamp = new Date().toISOString()
   const createdAt = stringValue(project.createdAt) || timestamp
   return {
-    ...(value as Project),
+    ...fields,
+    ...(bookWordTarget ? { bookWordTarget } : {}),
+    ...(modelRates.length ? { modelRates } : {}),
     id: stringValue(project.id),
     name: stringValue(project.name) || '未命名项目',
     genre: stringValue(project.genre),
@@ -408,7 +436,9 @@ export function normalizeAppData(input: Partial<AppData>): AppData {
   const chapterGenerationSteps = arrayOrEmpty<ChapterGenerationStep>(raw.chapterGenerationSteps)
   const chapterGenerationJobs = arrayOrEmpty<ChapterGenerationJob>(raw.chapterGenerationJobs)
   const legacyPipelineModes = indexLegacyPipelineModes(chapterGenerationJobs, chapterGenerationSteps)
-  const normalizedHardCanonPacks = arrayOrEmpty<HardCanonPack>(raw.hardCanonPacks).map(normalizeHardCanonPack)
+  const characters = arrayOrEmpty(raw.characters).map(normalizeCharacter)
+  const normalizedHardCanonPacks = arrayOrEmpty<HardCanonPack>(raw.hardCanonPacks).map((pack) =>
+    normalizeHardCanonPack(pack, Array.isArray(raw.characters) ? characters : undefined))
   const hardCanonProjectIds = new Set(normalizedHardCanonPacks.map((pack) => pack.projectId))
   const hardCanonPacks = [
     ...normalizedHardCanonPacks,
@@ -439,13 +469,14 @@ export function normalizeAppData(input: Partial<AppData>): AppData {
     projects,
     storyBibles: arrayOrEmpty(raw.storyBibles),
     chapters: arrayOrEmpty<Chapter>(raw.chapters).map(normalizeChapter),
-    characters: arrayOrEmpty(raw.characters).map(normalizeCharacter),
+    chapterTitleReceipts: normalizeChapterTitleReceipts(raw.chapterTitleReceipts),
+    characters,
     characterStateLogs: arrayOrEmpty<CharacterStateLog>(raw.characterStateLogs).map(normalizeCharacterStateLog),
     characterStateFacts: arrayOrEmpty<CharacterStateFact>(raw.characterStateFacts).map(normalizeCharacterStateFact),
     characterStateTransactions: arrayOrEmpty<CharacterStateTransaction>(raw.characterStateTransactions).map(normalizeCharacterStateTransaction),
     characterStateChangeCandidates: arrayOrEmpty<CharacterStateChangeCandidate>(raw.characterStateChangeCandidates).map(normalizeCharacterStateChangeCandidate),
     foreshadowings: arrayOrEmpty<Foreshadowing>(raw.foreshadowings).map(normalizeForeshadowing),
-    timelineEvents: arrayOrEmpty(raw.timelineEvents),
+    timelineEvents: normalizeTimelineEvents(arrayOrEmpty(raw.timelineEvents), Array.isArray(raw.chapters) ? raw.chapters : undefined),
     stageSummaries: arrayOrEmpty<StageSummary>(raw.stageSummaries).map(normalizeStageSummary),
     promptVersions: arrayOrEmpty(raw.promptVersions),
     promptContextSnapshots: arrayOrEmpty<PromptContextSnapshot>(raw.promptContextSnapshots).map(normalizePromptContextSnapshot),
@@ -476,6 +507,7 @@ export function normalizeAppData(input: Partial<AppData>): AppData {
     chapterVersions: arrayOrEmpty(raw.chapterVersions),
     chapterCommitBundles: arrayOrEmpty<ChapterCommitBundle>(raw.chapterCommitBundles),
     revisionCommitBundles: arrayOrEmpty<RevisionCommitBundle>(raw.revisionCommitBundles),
+    chapterWritebackFailures: normalizeChapterWritebackFailures(raw.chapterWritebackFailures, legacyApiKey, projects),
     agentRuns: arrayOrEmpty<AgentRun>(raw.agentRuns).map(normalizeAgentRun),
     agentActionPreviews: arrayOrEmpty<AgentActionPreview>(raw.agentActionPreviews).map(normalizeAgentActionPreview)
   }

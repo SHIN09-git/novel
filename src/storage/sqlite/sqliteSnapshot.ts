@@ -6,15 +6,16 @@ import type { AppDataArrayKey, SqliteDatabase } from './sqliteTypes'
 
 // A read projection is not a full AppData snapshot and must never be saved as one.
 export function readAppDataCollectionsFromDatabase(
-  db: SqliteDatabase, collections: readonly AppDataArrayKey[]
+  db: SqliteDatabase, collections: readonly AppDataArrayKey[], projectId?: string
 ): Partial<AppData> {
   const partial: Partial<AppData> = {}
   if (!collections.length) return partial
   const targets = partial as Record<string, unknown[]>
   for (const key of collections) targets[key] = []
   const placeholders = collections.map(() => '?').join(', ')
-  const rows = db.prepare(`SELECT collection, json FROM entities WHERE collection IN (${placeholders}) ORDER BY collection, id`)
-    .all(...collections)
+  const scope = projectId === undefined ? '' : " AND (project_id = ? OR (collection = 'projects' AND id = ?))"
+  const rows = db.prepare(`SELECT collection, json FROM entities WHERE collection IN (${placeholders})${scope} ORDER BY collection, id`)
+    .all(...collections, ...(projectId === undefined ? [] : [projectId, projectId]))
   for (const row of rows) {
     if (typeof row.collection !== 'string' || typeof row.json !== 'string') continue
     const target = targets[row.collection]

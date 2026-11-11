@@ -1,4 +1,5 @@
 import type { AiCallTelemetry, ID } from './base'
+import type { HardCanonAuditResult } from './hardCanonCheck'
 
 export type NoveltyAuditSeverity = 'pass' | 'warning' | 'fail'
 
@@ -127,6 +128,10 @@ export interface QualityGateReport {
   promptContextSnapshotId?: ID | null
   overallScore: number
   pass: boolean
+  /** Snapshot for this text and these rules, not an acceptance-time check. */
+  hardCanonAudit?: HardCanonAuditResult
+  /** Original pass before the audit was applied; scores, issues and fixes stay unchanged. */
+  hardCanonBasePass?: boolean
   dimensions: QualityGateDimensionScores
   issues: QualityGateIssue[]
   requiredFixes: string[]

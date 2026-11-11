@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { draftContentHash } from '../../../../services/DraftDiagnosticBindingService'
 import type {
   AIResult,
   AppSettings,
@@ -12,6 +13,7 @@ import type {
 } from '../../../../shared/types'
 
 interface UseChapterAiDraftsInput {
+  projectId: string
   settings: AppSettings
   selected: Chapter | null
   characters: Character[]
@@ -23,6 +25,7 @@ interface UseChapterAiDraftsInput {
 }
 
 export function useChapterAiDrafts({
+  projectId,
   settings,
   selected,
   characters,
@@ -35,6 +38,7 @@ export function useChapterAiDrafts({
   const [loadingAction, setLoadingAction] = useState<string | null>(null)
   const [rawAIText, setRawAIText] = useState('')
   const [reviewDraft, setReviewDraft] = useState<ChapterReviewDraft | null>(null)
+  const [reviewSourceBodyHash, setReviewSourceBodyHash] = useState<string>()
   const [characterSuggestions, setCharacterSuggestions] = useState<CharacterStateSuggestion[]>([])
   const [foreshadowingDraft, setForeshadowingDraft] = useState<ForeshadowingExtractionResult | null>(null)
   const [nextSuggestions, setNextSuggestions] = useState<NextChapterSuggestions | null>(null)
@@ -45,8 +49,8 @@ export function useChapterAiDrafts({
 
   const getAiService = useCallback(async () => {
     const { AIService } = await import('../../../../services/AIService')
-    return new AIService(settings)
-  }, [settings])
+    return new AIService(settings, { projectId })
+  }, [settings, projectId])
 
   useEffect(() => {
     actionTokenRef.current += 1
@@ -54,6 +58,7 @@ export function useChapterAiDrafts({
     setLoadingAction(null)
     setRawAIText('')
     setReviewDraft(null)
+    setReviewSourceBodyHash(undefined)
     setCharacterSuggestions([])
     setForeshadowingDraft(null)
     setNextSuggestions(null)
@@ -102,11 +107,14 @@ export function useChapterAiDrafts({
   }, [flushBody, handleResult, selected, setMessage])
 
   const actions = useMemo(() => ({
-    generateReview: () => runAction(
-      'review',
-      async () => (await getAiService()).generateChapterReview(chapterText(), chapterContext()),
-      setReviewDraft
-    ),
+    generateReview: () => {
+      let sourceHash: string
+      return runAction('review', async () => {
+        const body = chapterText()
+        sourceHash = draftContentHash(body)
+        return (await getAiService()).generateChapterReview(body, chapterContext())
+      }, review => { setReviewDraft(review); setReviewSourceBodyHash(sourceHash) })
+    },
     extractCharacters: () => runAction(
       'characters',
       async () => (await getAiService()).updateCharacterStates(chapterText(), characters, chapterContext()),
@@ -130,6 +138,7 @@ export function useChapterAiDrafts({
     loadingAction,
     rawAIText,
     reviewDraft,
+    reviewSourceBodyHash,
     characterSuggestions,
     foreshadowingDraft,
     nextSuggestions,

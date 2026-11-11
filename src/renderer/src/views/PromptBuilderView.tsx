@@ -16,6 +16,7 @@ import type {
 } from '../../../shared/types'
 import { createEmptyChapterTask, defaultModulesForMode } from '../../../shared/defaults'
 import { ContextNeedPlannerService } from '../../../services/ContextNeedPlannerService'
+import { projectCharacterStatesAtChapter } from '../../../services/characterState/stateAsOf'
 import { resolveContinuityBridge } from '../../../services/ContinuityService'
 import { PromptBuilderService } from '../../../services/PromptBuilderService'
 import { StoryDirectionService } from '../../../services/StoryDirectionService'
@@ -209,6 +210,8 @@ export function PromptBuilderView({ data, project, saveData, onSendToPipeline }:
       characters: scoped.characters,
       characterStateLogs: scoped.characterStateLogs,
       characterStateFacts: scoped.characterStateFacts,
+      characterStateTransactions: scoped.characterStateTransactions,
+      stateSourceChapters: scoped.allChapters,
       foreshadowings: scoped.foreshadowings,
       timelineEvents: scoped.timelineEvents,
       stageSummaries: scoped.stageSummaries,
@@ -263,7 +266,8 @@ export function PromptBuilderView({ data, project, saveData, onSendToPipeline }:
       previousChapter,
       continuityBridge: continuity.bridge,
       characters: scoped.characters,
-      characterStateFacts: scoped.characterStateFacts,
+      characterStateFacts: projectCharacterStatesAtChapter(scoped.characterStateFacts, scoped.characterStateTransactions,
+        targetChapterOrder, scoped.allChapters),
       foreshadowing: scoped.foreshadowings,
       timelineEvents: scoped.timelineEvents,
       stageSummaries: scoped.stageSummaries,

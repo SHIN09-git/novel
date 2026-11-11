@@ -2,6 +2,7 @@ import type { ForcedContextBlock, ID, PromptBlockOrderItem } from '../../../../.
 import { ContextBudgetManager } from '../../../../../services/ContextBudgetManager'
 import { ContextNeedPlannerService } from '../../../../../services/ContextNeedPlannerService'
 import { CharacterStateService } from '../../../../../services/CharacterStateService'
+import { characterStatesForProjectAtChapter } from '../../../../../services/characterState/stateAsOf'
 import { TokenEstimator } from '../../../../../services/TokenEstimator'
 import { inferPromptBlockOrderFromPrompt } from '../../../../../services/PromptBuilderService'
 import { PromptLintService } from '../../../../../services/PromptLintService'
@@ -61,7 +62,7 @@ export function runContextNeedPlanningStep(ctx: PipelineStepHandlerContext) {
     previousChapter,
     continuityBridge: continuityResult.bridge,
     characters: plannerCharacters,
-    characterStateFacts: isolateOpeningLegacyContext ? [] : scoped.characterStateFacts,
+    characterStateFacts: isolateOpeningLegacyContext ? [] : characterStatesForProjectAtChapter(state.working, project.id, options.targetChapterOrder),
     foreshadowing: scoped.foreshadowings,
     timelineEvents: isolateOpeningLegacyContext ? [] : scoped.timelineEvents,
     stageSummaries: scoped.stageSummaries,
@@ -228,14 +229,14 @@ export function runBuildContextStep(ctx: PipelineStepHandlerContext) {
     selectedCharacterIds,
     state.contextNeedPlan,
     options.targetChapterOrder,
-    state.working.characterStateFacts.filter((fact) => fact.projectId === project.id)
+    characterStatesForProjectAtChapter(state.working, project.id, options.targetChapterOrder)
   )
-  const includedCharacterStateFacts = characterStateFactsPresentInPrompt(state.context, relevantCharacterStateFacts)
+  const includedCharacterStateFacts = characterStateFactsPresentInPrompt(state.context, relevantCharacterStateFacts, env.scoped.characters)
   const requiresCharacterStateFacts = Object.values(state.contextNeedPlan?.requiredStateFactCategories ?? {}).some(
     (categories) => categories.length > 0
   )
-  const storyDirectionGuideId = state.context.includes('中期剧情导向')
-    ? snapshot?.storyDirectionGuide?.id ?? activeStoryDirectionGuide?.id ?? null
+  const storyDirectionGuideId = promptBlockOrder.some(block => block.included && block.kind === 'story_direction')
+    ? storyDirectionTracePatch.storyDirectionGuideId ?? activeStoryDirectionGuide?.id ?? null
     : null
   const contextSelectionTrace = enrichContextSelectionTrace(
     snapshot?.contextSelectionResult.contextSelectionTrace ?? state.budgetSelection?.contextSelectionTrace,

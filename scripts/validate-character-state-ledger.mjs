@@ -1,79 +1,20 @@
-import { mkdir, readFile, rm, writeFile } from 'node:fs/promises'
-import { dirname, join, resolve } from 'node:path'
-import { pathToFileURL } from 'node:url'
-import ts from 'typescript'
+import { readFile } from 'node:fs/promises'
+import { join } from 'node:path'
+import { build } from 'esbuild'
 import { repoRoot } from './utils/repo-root.mjs'
 
 const root = repoRoot
-const outDir = join(root, 'tmp', 'character-state-ledger-test')
 const timestamp = '2026-01-01T00:00:00.000Z'
 
 function assert(condition, message, details = {}) {
   return condition ? { ok: true, message } : { ok: false, message, details }
 }
 
-function rewriteRelativeImports(source) {
-  return source.replace(/(from\s+['"])(\.{1,2}\/[^'"]+?)(['"])/g, (_match, prefix, specifier, suffix) => {
-    if (/\.(mjs|js|json)$/.test(specifier)) return `${prefix}${specifier}${suffix}`
-    if (specifier === './normalizers' || specifier.endsWith('/normalizers')) return `${prefix}${specifier}/index.mjs${suffix}`
-    return `${prefix}${specifier}.mjs${suffix}`
-  })
-}
-
-async function compileTsTree(files) {
-  await rm(outDir, { recursive: true, force: true })
-  for (const relativePath of files) {
-    const source = await readFile(join(root, relativePath), 'utf-8')
-    const compiled = ts.transpileModule(source, {
-      compilerOptions: {
-        module: ts.ModuleKind.ES2022,
-        target: ts.ScriptTarget.ES2022,
-        useDefineForClassFields: true
-      }
-    })
-    const outPath = join(outDir, relativePath).replace(/\.tsx?$/, '.mjs')
-    await mkdir(dirname(outPath), { recursive: true })
-    await writeFile(outPath, rewriteRelativeImports(compiled.outputText), 'utf-8')
-  }
-}
-
 async function loadModules() {
-  await compileTsTree([
-    'src/services/CharacterStateService.ts',
-    'src/services/characterState/logInference.ts',
-    'src/services/characterState/stateMutations.ts',
-    'src/services/characterState/stateSelection.ts',
-    'src/services/characterState/stateValidation.ts',
-    'src/services/characterState/stateValue.ts',
-    'src/shared/defaults.ts',
-    'src/shared/defaults/index.ts',
-    'src/shared/normalizers/index.ts',
-    'src/shared/normalizers/common.ts',
-    'src/shared/normalizers/agent.ts',
-    'src/shared/normalizers/appData.ts',
-    'src/shared/normalizers/candidateDecision.ts',
-    'src/shared/normalizers/candidateDecisionHistory.ts',
-    'src/shared/normalizers/worldManagement.ts',
-    'src/shared/normalizers/quickRewrite.ts',
-    'src/shared/normalizers/characterState.ts',
-    'src/shared/normalizers/context.ts',
-    'src/shared/normalizers/contextBudget.ts',
-    'src/shared/normalizers/contextNeedPlan.ts',
-    'src/shared/normalizers/contextPrimitives.ts',
-    'src/shared/normalizers/contextSelection.ts',
-    'src/shared/normalizers/pipelineRunConfig.ts',
-    'src/shared/normalizers/continuity.ts',
-    'src/shared/normalizers/foreshadowing.ts',
-    'src/shared/normalizers/generation.ts',
-    'src/shared/normalizers/memoryUpdate.ts',
-    'src/shared/normalizers/reports.ts',
-    'src/shared/normalizers/runTrace.ts',
-    'src/shared/normalizers/storyDirection.ts',
-    'src/shared/foreshadowingTreatment.ts'
-  ])
-  const service = await import(`${pathToFileURL(join(outDir, 'src/services/CharacterStateService.mjs')).href}?t=${Date.now()}`)
-  const defaults = await import(`${pathToFileURL(join(outDir, 'src/shared/defaults.mjs')).href}?t=${Date.now()}`)
-  return { ...service, ...defaults }
+  const { outputFiles } = await build({ stdin: { resolveDir: root, contents:
+    "export * from './src/services/CharacterStateService'; export * from './src/shared/defaults';" },
+    bundle: true, write: false, format: 'esm', platform: 'node', target: 'node22' })
+  return import('data:text/javascript;base64,' + Buffer.from(outputFiles[0].contents).toString('base64'))
 }
 
 function baseData(overrides = {}) {

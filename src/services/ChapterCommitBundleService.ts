@@ -23,7 +23,7 @@ import {
 } from './DraftDiagnosticBindingService'
 import { validateChapterCommitBundleData } from './commitBundles/chapterCommitValidation'
 import { requireCommitText, upsertCommitEntities, upsertCommitEntity } from './commitBundles/commitBundleUtils'
-import { buildChapterAcceptanceReview } from './ChapterAcceptanceReviewService'
+import { prepareDraftCommitReview } from './ChapterAcceptanceReviewService'
 
 export const CHAPTER_COMMIT_BUNDLE_SCHEMA_VERSION = 1
 
@@ -39,6 +39,8 @@ export interface BuildAcceptedDraftCommitBundleInput {
   commitNote?: string
   acceptanceMode?: ChapterAcceptanceReview['mode']
   requireEditorialVerdict?: boolean
+  /** The notice shown in the author confirmation or bound Agent preview, not an authorization flag. */
+  reviewedLengthOverflowNotice?: string | null
 }
 
 function normalizeAppliedStateTransactions(bundle: ChapterCommitBundle): CharacterStateTransaction[] {
@@ -119,9 +121,7 @@ export function buildAcceptedDraftCommitBundle(input: BuildAcceptedDraftCommitBu
   if (draft.projectId !== input.projectId) {
     throw new Error('ChapterCommitBundle draft projectId does not match projectId.')
   }
-  const acceptanceReview = input.acceptanceMode !== undefined
-    ? buildChapterAcceptanceReview(input.appData, draft, input.acceptanceMode, input.requireEditorialVerdict)
-    : undefined
+  const acceptanceReview = prepareDraftCommitReview(input, draft)
 
   const existingChapter = input.appData.chapters.find(
     (chapter) => chapter.projectId === input.projectId && chapter.order === input.targetChapterOrder

@@ -10,6 +10,7 @@ import type {
 } from '../types'
 import { normalizeMemoryUpdatePatch } from './memoryUpdate'
 import { normalizeCandidateDecisionEffects } from './candidateDecisionHistory'
+import { timelineTimeFields, timelineTimeValues } from './timeline'
 
 type UnknownRecord = Record<string, unknown>
 
@@ -175,9 +176,11 @@ export function normalizeCandidateMemoryPatchAmendment(input: unknown): Candidat
     if (!optionalStrings(patch, result, ['summary'])) return undefined
     if (Object.hasOwn(patch, 'event')) {
       const event = record(patch.event)
-      const fields = ['title', 'storyTime', 'participantCharacterIds', 'result', 'downstreamImpact']
+      const fields = ['title', 'storyTime', 'participantCharacterIds', 'result', 'downstreamImpact', ...timelineTimeFields]
       if (!event || !hasOnlyKeys(event, fields)) return undefined
-      const normalized: UnknownRecord = {}
+      const time = timelineTimeValues(event)
+      if (timelineTimeFields.some(key => key in event && !(key in time))) return undefined
+      const normalized: UnknownRecord = { ...time }
       if (!optionalStrings(event, normalized, ['title', 'storyTime', 'result', 'downstreamImpact'])) return undefined
       if (Object.hasOwn(event, 'participantCharacterIds')) {
         const ids = stringArray(event.participantCharacterIds)

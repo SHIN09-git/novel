@@ -1,7 +1,12 @@
 import type { AppData, Chapter, ChapterGenerationJob, GeneratedChapterDraft, ID } from '../shared/types'
-import { activeChapters, nextChapterOrder } from './ChapterLifecycleService'
+import { activeChapters } from './ChapterLifecycleService'
 import { latestQualityReportForDraft } from './DraftDiagnosticBindingService'
 import { AuthorDecisionPolicyService } from './AuthorDecisionPolicyService'
+import { ChapterTaskContractService } from './ChapterTaskContractService'
+import { isCurrentFragmentStep } from '../shared/chapterStepFragment'
+import { currentHardCanonAudit, hardCanonNotice } from './HardCanonPreflight'
+import { withCurrentHardCanonAudit } from './qualityGate/hardCanonQuality'
+import { summarizeBookManuscript } from './bookProgress/manuscript'
 
 export type DirectorDestination = 'pipeline' | 'characters' | 'inbox'
 export interface DirectorNextAction {
@@ -36,6 +41,10 @@ export function getDirectorDashboard(
   const drafts = recentFirst((data.generatedChapterDrafts ?? []).filter((item) => item.projectId === projectId))
   const latestDraftByJob = new Map<ID, GeneratedChapterDraft>()
   for (const draft of drafts) if (!latestDraftByJob.has(draft.jobId)) latestDraftByJob.set(draft.jobId, draft)
+  for (const step of data.chapterGenerationSteps ?? []) {
+    const draft = latestDraftByJob.get(step.jobId)
+    if (draft && isCurrentFragmentStep(step, draft)) latestDraftByJob.delete(step.jobId)
+  }
   // An earlier failed attempt is not a new task once a later attempt for that chapter exists.
   const latestJobsByOrder = new Map<number, ChapterGenerationJob>()
   for (const job of [...jobs].sort((a, b) => b.createdAt.localeCompare(a.createdAt) || b.id.localeCompare(a.id))) {
@@ -54,18 +63,33 @@ export function getDirectorDashboard(
   })
   const pendingMemory = (data.memoryUpdateCandidates ?? []).filter((item) => item.projectId === projectId && item.status === 'pending')
   const pendingState = (data.characterStateChangeCandidates ?? []).filter((item) => item.projectId === projectId && item.status === 'pending')
-  const nextOrder = nextChapterOrder(allChapters, projectId)
+  const { totalWords, nextAssignableOrder: nextOrder } = summarizeBookManuscript(allChapters, projectId)
   const recentChapter = recentChapters[0] ?? null
-  const jobIds = new Set(jobs.map((job) => job.id))
-  const latestDraft = (draftJob ? latestDraftByJob.get(draftJob.id) : null) ?? drafts.find((draft) => jobIds.has(draft.jobId)) ?? null
-  const qualityReport = latestDraft ? latestQualityReportForDraft(
+  const jobIds = new Set(currentJobs.map((job) => job.id))
+  const latestDraft = (draftJob ? latestDraftByJob.get(draftJob.id) : null) ??
+    drafts.find((draft) => jobIds.has(draft.jobId) && latestDraftByJob.get(draft.jobId) === draft) ?? null
+  const lengthOverflowNotice = latestDraft && ChapterTaskContractService.lengthOverflowNotice({
+    body: latestDraft.body, chapterTask: (draftJob ?? currentJobs.find((job) => job.id === latestDraft.jobId))?.chapterTaskSnapshot
+  })
+  const canon = latestDraft && draftJob ? currentHardCanonAudit(data, { projectId, chapterOrder: draftJob.targetChapterOrder,
+    body: latestDraft.body, chapterId: latestDraft.chapterId }) : null
+  const canonBlock = hardCanonNotice(canon, 'block')
+  const storedQuality = latestDraft ? latestQualityReportForDraft(
     (data.qualityGateReports ?? []).filter((report) => report.projectId === projectId && report.jobId === latestDraft.jobId), latestDraft
   ) : null
+  const qualityReport = storedQuality && (draftJob ? withCurrentHardCanonAudit(storedQuality, canon) : storedQuality)
   const editorialVerdict = latestDraft
     ? AuthorDecisionPolicyService.latestEditorialVerdictForDraft(data.editorialVerdicts ?? [], latestDraft)
     : null
   const choices: DirectorNextAction[] = []
-  if (draftJob && editorialVerdict) {
+  if (draftJob && canonBlock) {
+    choices.push({ kind: 'review_draft', title: `第 ${draftJob.targetChapterOrder} 章 · 硬设定冲突`,
+      label: '查看冲突原句', reason: canonBlock, chapterOrder: draftJob.targetChapterOrder, jobId: draftJob.id, destination: 'pipeline' })
+  } else if (draftJob && lengthOverflowNotice) {
+    choices.push({ kind: 'review_draft', title: `第 ${draftJob.targetChapterOrder} 章 · 正文超出篇幅上限`,
+      label: '审阅超限草稿', reason: `${lengthOverflowNotice}可先改短正文，或明确确认保留原文。`,
+      chapterOrder: draftJob.targetChapterOrder, jobId: draftJob.id, destination: 'pipeline' })
+  } else if (draftJob && editorialVerdict) {
     choices.push({
       kind: 'review_draft',
       title: `第 ${draftJob.targetChapterOrder} 章 · ${editorialVerdict.status === 'approved' ? '草稿可采纳' : '编辑裁定待处理'}`,
@@ -88,7 +112,7 @@ export function getDirectorDashboard(
     reason: unfinished.status === 'failed' ? '上次生成停在中途，已完成的步骤仍然保留。' : '这次生成尚未完成，可在流水线中查看任务并接着推进。',
     chapterOrder: unfinished.targetChapterOrder, jobId: unfinished.id, destination: 'pipeline'
   })
-  if (draftJob && !editorialVerdict) choices.push({
+  if (draftJob && !editorialVerdict && !lengthOverflowNotice && !canonBlock) choices.push({
     kind: 'review_draft', title: `第 ${draftJob.targetChapterOrder} 章 · 草稿待审阅`, label: '审阅最新草稿',
     reason: '正文已经生成，接下来决定采纳、修订，或保留为候选。',
     chapterOrder: draftJob.targetChapterOrder, jobId: draftJob.id, destination: 'pipeline'
@@ -128,9 +152,9 @@ export function getDirectorDashboard(
     return true
   }).slice(0, 3)
   return {
-    actions, recentChapters, latestDraft, qualityReport, editorialVerdict, nextOrder,
+    actions, recentChapters, latestDraft, qualityReport, editorialVerdict, lengthOverflowNotice, nextOrder,
     chapterCount: chapters.length,
-    totalWords: chapters.reduce((sum, chapter) => sum + chapter.body.replace(/\s/g, '').length, 0),
+    totalWords,
     pendingCandidateCount: pendingMemory.length + pendingState.length,
     latestChapterOrder: chapters.reduce((highest, chapter) => Math.max(highest, chapter.order), 0)
   }

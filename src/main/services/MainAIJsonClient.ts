@@ -3,14 +3,15 @@ import type { AIResult, AppSettings } from '../../shared/types'
 import { normalizeAIError, parseWithFallback } from '../../services/AIJsonParser'
 import { fallbackResult, isTruncatedFinishReason } from '../../services/ai/AIResponseNormalizer'
 import { formatSchemaValidationError, type AISchemaValidator } from '../../services/ai/AISchemaValidator'
-import type { AIJsonClient } from '../../services/ai/AIJsonClient'
-import type { IAIService } from './AIService'
+import { getRejectedChapterEnvelope, type AIJsonClient, type AIRequestControl } from '../../services/ai/AIJsonClient'
+import { projectUsageContext, type AIJsonTransport } from '../../services/ai/AITransport'
 
 export class MainAIJsonClient implements AIJsonClient {
   constructor(
     private readonly settings: AppSettings,
-    private readonly aiTransport: IAIService,
-    private readonly runId?: string
+    private readonly aiTransport: AIJsonTransport,
+    private readonly runId?: string,
+    private readonly projectId?: string
   ) {}
 
   private hasApiConfig(): boolean {
@@ -23,14 +24,16 @@ export class MainAIJsonClient implements AIJsonClient {
     normalize: (value: unknown) => T,
     fallback: T,
     parseFallback?: (rawText: string) => T | null,
-    validate?: AISchemaValidator
+    validate?: AISchemaValidator,
+    requestControl?: AIRequestControl
   ): Promise<AIResult<T>> {
-    if (!this.hasApiConfig()) return fallbackResult(fallback)
-
     try {
+      if (!this.hasApiConfig() && !(await this.aiTransport.isManagedEndpoint?.(this.settings.baseUrl))) return fallbackResult(fallback)
       const request: ChatCompletionRequest = {
         settings: this.settings,
-        runId: this.runId,
+        runId: requestControl?.runId ?? this.runId,
+        clientCallId: requestControl?.clientCallId,
+        usageContext: projectUsageContext(this.projectId, requestControl?.phase),
         messages: [
           { role: 'system', content: systemPrompt },
           { role: 'user', content: userPrompt }
@@ -57,6 +60,8 @@ export class MainAIJsonClient implements AIJsonClient {
           error: 'AI 输出被 max tokens 截断。请提高 Max Tokens，或降低章节预计字数后重试。'
         }
       }
+      const rejected = getRejectedChapterEnvelope(response, normalize, validate)
+      if (rejected) return rejected
       try {
         const parsed = parseWithFallback(response.content, 'AI 返回内容')
         if (!parsed.ok) throw new Error(parsed.parseError)

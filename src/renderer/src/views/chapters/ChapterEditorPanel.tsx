@@ -1,8 +1,9 @@
 import type { ReactNode } from 'react'
+import { Pencil } from 'lucide-react'
 import type { Chapter } from '../../../../shared/types'
 import type { AIService } from '../../../../services/AIService'
 import { AiRewriteTextArea } from '../../components/AiRewriteTextArea'
-import { NumberInput, TextInput, Toggle } from '../../components/FormFields'
+import { NumberInput, Toggle } from '../../components/FormFields'
 import { CHAPTER_BODY_SAVE_LABELS, type ChapterBodySaveStatus } from './chapterBodyDraftModel'
 
 interface ChapterEditorPanelProps {
@@ -24,6 +25,8 @@ interface ChapterEditorPanelProps {
   showReviewPanel: boolean
   versionHistory: ReactNode
   onUpdateChapter: (patch: Partial<Chapter>) => void | Promise<unknown>
+  renameBlocked: string
+  onRenameTitle: () => void
   onBodyChange: (body: string) => void
   onApplyRewrite: (body: string) => Promise<boolean>
   onBodyBlur: () => void
@@ -62,6 +65,8 @@ export function ChapterEditorPanel({
   showReviewPanel,
   versionHistory,
   onUpdateChapter,
+  renameBlocked,
+  onRenameTitle,
   onBodyChange,
   onApplyRewrite,
   onBodyBlur,
@@ -119,13 +124,12 @@ export function ChapterEditorPanel({
           onChange={(order) => onUpdateChapter({ order: order ?? selected.order })}
           hint="若目标章序已存在，将与对应章节交换位置。"
         />
-        <TextInput
-          label="章节标题"
-          value={selected.title}
-          debounceMs={400}
-          bufferKey={selected.id}
-          onChange={(title) => onUpdateChapter({ title })}
-        />
+        <div className="field"><span className="field-label">章节标题</span>
+          <div className="row-actions chapter-current-title"><input aria-label="章节标题" value={selected.title} placeholder="未命名" readOnly />
+            <button type="button" className="ghost-button" aria-label="更改本章标题" title={renameBlocked || '更改本章标题'}
+              disabled={Boolean(renameBlocked)} onClick={onRenameTitle}><Pencil size={15} /></button></div>
+          {renameBlocked && <small>{renameBlocked}</small>}
+        </div>
       </div>
       <AiRewriteTextArea
         label="正文稿纸"

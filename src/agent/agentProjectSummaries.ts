@@ -1,5 +1,7 @@
 import type { AppData, ID } from '../shared/types'
 import { activeChapters, archivedChapters, nextChapterOrder } from '../services/ChapterLifecycleService'
+import { summarizeBookManuscript } from '../services/bookProgress/manuscript'
+import { visibleCharacterCount } from '../services/chapterTaskContractText'
 import type { AgentProjectOverviewData } from './agentProjectOverviewData'
 import {
   byChapterOrderDesc,
@@ -49,6 +51,7 @@ export function getProjectDigest(data: AgentProjectOverviewData, projectId: ID):
   if (!project) throw new Error(`Project not found: ${projectId}`)
   const projectChapters = data.chapters.filter((chapter) => chapter.projectId === projectId)
   const chapters = activeChapters(projectChapters).sort(byChapterOrderDesc)
+  const manuscript = summarizeBookManuscript(projectChapters, projectId)
   const latestGenerationJob = latestJobForProject(data, projectId)
   const hardCanonPack = data.hardCanonPacks.find((pack) => pack.projectId === projectId) ?? null
   const activeStoryDirection = [...data.storyDirectionGuides]
@@ -63,7 +66,8 @@ export function getProjectDigest(data: AgentProjectOverviewData, projectId: ID):
       description: compact(project.description, 300),
       updatedAt: project.updatedAt
     },
-    nextChapterOrder: nextChapterOrder(data.chapters, projectId),
+    nextChapterOrder: manuscript.nextAssignableOrder,
+    manuscript: { totalWords: manuscript.totalWords, chapterCount: manuscript.chapterCount, completeThrough: manuscript.completeThrough },
     counts: {
       chapters: chapters.length,
       archivedChapters: archivedChapters(projectChapters).length,
@@ -85,6 +89,7 @@ export function getProjectDigest(data: AgentProjectOverviewData, projectId: ID):
       title: chapter.title,
       updatedAt: chapter.updatedAt,
       bodyCharCount: chapter.body.length,
+      wordCount: visibleCharacterCount(chapter.body),
       summary: compact(chapter.summary),
       endingHook: compact(chapter.endingHook)
     })),
@@ -104,16 +109,18 @@ export function getProjectDigest(data: AgentProjectOverviewData, projectId: ID):
 export function getNextChapterTarget(
   data: AgentProjectOverviewData,
   projectId: ID
-): { projectId: ID; nextChapterOrder: number; reason: string } {
+) {
   const project = findProject(data, projectId)
   if (!project) throw new Error(`Project not found: ${projectId}`)
   const nextOrder = nextChapterOrder(data.chapters, projectId)
   return {
     projectId,
     nextChapterOrder: nextOrder,
+    nextAssignableOrder: nextOrder,
+    progressTool: 'agent.getBookProgress' as const,
     reason:
       nextOrder > 1
-        ? `Highest allocated chapter order is ${nextOrder - 1}; archived orders are not reused.`
+        ? `Highest allocated chapter order is ${nextOrder - 1}; archived orders are not reused. This is not proof that every prior chapter was written back.`
         : 'No chapter orders have been allocated.'
   }
 }

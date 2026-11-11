@@ -77,6 +77,72 @@ try {
   }
   for (const sqlite of [false, true]) {
     const label = sqlite ? 'SQLite' : 'JSON'
+    await check(`${label}: a current approved verdict cannot auto-commit an over-limit draft; a scoped explicit decision can`, async () => {
+      const h = await harness(sqlite, true)
+      try {
+        await h.edit(d => {
+          d.agentRuns[0].goal = '审阅当前正文'
+          Object.assign(d.qualityGateReports[0], { pass: true, overallScore: 98, requiredFixes: [] })
+          d.editorialVerdicts = [{ id: 'v', projectId: 'p', jobId: 'job', draftId: 'draft', status: 'approved',
+            draftContentHash: api.draftContentHash(body), draftRevision: time, summary: '审稿通过',
+            sourceRefs: { qualityGateReportId: 'quality' }, createdAt: time, updatedAt: time }]
+        })
+        const decide = () => h.call('recordAcceptanceDecision', { agentRunId: 'run', jobId: 'job' })
+        const ordinary = (await decide()).preview
+        assert.equal(ordinary.requiresHumanApproval, false)
+        assert.equal(ordinary.recommendation, 'accept')
+        await h.edit(d => { d.chapterGenerationJobs[0].chapterTaskSnapshot = { targetWordCount: '最多10字', styleRequirement: '禁用“主角”' } })
+        const risk = await decide()
+        assert.equal(risk.recommendation.recommendation, 'revise')
+        assert.equal(risk.recommendation.riskLevel, 'high')
+        assert.match(risk.recommendation.reasons.join(' '), /最多 10 字，实际/)
+        await assert.rejects(() => h.call('applyApprovedChapterCommit', { previewId: ordinary.id, confirm: true }), /超出上限/)
+        const p = await h.preview()
+        assert.match(p.review.lengthOverflowNotice, /最多 10 字/)
+        await assert.rejects(() => h.accept(p), /grant/i)
+        assert.equal((await h.data()).chapterCommitBundles.length, 0)
+        const grant = await h.grant(['accept_draft'], { chapterStart: 2, chapterEnd: 2 })
+        await h.edit(d => { d.chapterGenerationJobs[0].chapterTaskSnapshot.targetWordCount = '最多12字' })
+        await assert.rejects(() => h.accept(p), /变化/)
+        const fresh = await h.preview({ operationId: 'keep-long', reason: '明确保留超限原文。' })
+        const saved = await h.accept(fresh)
+        assert.equal(saved.authorizationGrantId, grant.id)
+        assert.equal(saved.review.lengthOverflowNotice, fresh.review.lengthOverflowNotice)
+        assert.equal((await h.data()).chapters[0].body, body)
+      } finally { h.storage.close?.() }
+    })
+    await check(`${label}: compact diagnostics omit fragment prose, full returns the exact step body, never an acceptable draft`, async () => {
+      const h = await harness(sqlite, true)
+      const fragment = { kind: 'incomplete_chapter_fragment', title: '保留片段', body: '仅在全文中可见\n' + '正文'.repeat(1500) + '\n最后一行', finishReason: 'length' }
+      try {
+        await h.edit(d => {
+          Object.assign(d.chapterGenerationJobs[0], { status: 'failed', currentStep: 'generate_chapter_draft' })
+          d.chapterGenerationSteps = ['generate_chapter_draft', 'build_context'].map(type => ({
+            id: type, type, jobId: 'job', status: 'failed', inputSnapshot: '', errorMessage: '',
+            output: JSON.stringify(fragment), createdAt: time, updatedAt: time }))
+        })
+        const proseStep = result => result.steps.find(step => step.type === 'generate_chapter_draft')
+        for (const tool of ['getRunDiagnostics', 'inspectPipelineJob']) {
+          for (const detail of [undefined, 'summary', 'compact']) {
+            const result = await h.call(tool, { jobId: 'job', detail, maxChars: 99999 })
+            assert.equal(proseStep(result).fragment.kind, fragment.kind)
+            assert.equal(proseStep(result).fragment.body, undefined)
+            assert.equal(result.steps.find(step => step.type === 'build_context').fragment, undefined)
+            assert.doesNotMatch(JSON.stringify(result), /仅在全文中可见|最后一行/)
+          }
+          assert.equal(proseStep(await h.call(tool, { jobId: 'job', detail: 'full' })).fragment.body, fragment.body)
+          assert.equal(proseStep(await h.call(tool, { jobId: 'job', detail: 'full', maxChars: 7 })).fragment.body, fragment.body.slice(0, 7))
+        }
+        const state = await h.call('getChapterProductionState', { chapterOrder: 2 })
+        assert.equal(state.latestAttemptHasOnlyFragment, true)
+        assert.equal(state.diagnostics.qualityGate, null)
+        assert.equal((await h.call('getAcceptanceRecommendation', { jobId: 'job' })).draftId, null)
+        await assert.rejects(() => h.call('getDraftText', { draftId: 'generate_chapter_draft' }), /Draft not found/)
+        await h.grant(['accept_draft', 'accept_unreviewed_draft'])
+        await assert.rejects(() => h.preview({ draftId: 'generate_chapter_draft' }), /草稿不存在/)
+        assert.equal((await h.data()).chapterCommitBundles.length, 0)
+      } finally { h.storage.close?.() }
+    })
     await check(`${label}: high-risk candidate preview and transactional apply use real author grant; revoke blocks the next operation`, async () => {
       const h = await harness(sqlite)
       try {

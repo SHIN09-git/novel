@@ -1,6 +1,9 @@
 import { loadAgentProjectOverview } from '../AgentProjectOverviewRuntime'
 import { getNextChapterTarget, getProjectDigest, listProjects } from '../agentProjectSummaries'
 import { findProjectId, stringArg } from './agentToolArguments'
+import { readAgentBookProgress } from './agentBookProgressRead'
+import { readAgentBookContinuity } from './agentBookContinuityRead'
+import { estimateAgentProjectUsage, readAgentProjectUsage } from './agentProjectUsageRead'
 import type { AgentToolCallResult } from './agentToolTypes'
 
 const OVERVIEW_TOOLS = new Set([
@@ -11,6 +14,12 @@ const OVERVIEW_TOOLS = new Set([
 export async function handleAgentOverviewReadTool(
   name: string, args: Record<string, unknown>
 ): Promise<AgentToolCallResult | null> {
+  switch (name) {
+    case 'agent.getProjectUsage': return readAgentProjectUsage(args)
+    case 'agent.estimateProjectUsage': return estimateAgentProjectUsage(args)
+    case 'agent.getBookProgress': return readAgentBookProgress(args)
+    case 'agent.getBookContinuityReport': return readAgentBookContinuity(args)
+  }
   if (!OVERVIEW_TOOLS.has(name)) return null
   const runtime = await loadAgentProjectOverview({
     storagePath: stringArg(args, 'storagePath'), userDataPath: stringArg(args, 'userDataPath')

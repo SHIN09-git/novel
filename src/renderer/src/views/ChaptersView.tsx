@@ -13,11 +13,13 @@ import {
   restoreArchivedChapterInAppData
 } from '../../../services/ChapterLifecycleService'
 import { useConfirm } from '../components/ConfirmDialog'
+import { projectCharacterStatesAtChapter } from '../../../services/characterState/stateAsOf'
 import { EmptyState } from '../components/FormFields'
 import { Header } from '../components/Layout'
 import { useProjectData } from '../hooks/useProjectData'
 import { newId, now } from '../utils/format'
-import type { SaveDataHandler } from '../utils/saveDataState'
+import type { RunPersistedStorageOperation, SaveDataHandler } from '../utils/saveDataState'
+import { useChapterTitleActions } from './chapters/useChapterTitleActions'
 import { ChapterEditorPanel } from './chapters/ChapterEditorPanel'
 import { ChapterListPanel } from './chapters/ChapterListPanel'
 import { buildChapterAiContext } from './chapters/chapterAiContext'
@@ -53,6 +55,8 @@ interface ProjectProps {
   data: AppData
   project: Project
   saveData: SaveDataHandler
+  runPersistedStorageOperation?: RunPersistedStorageOperation
+  storageBlocked?: boolean
   saveRevisionCommitBundle?: (buildCommit: (currentData: AppData) => { next: AppData; bundle: RevisionCommitBundle }) => Promise<void>
   initialChapterId?: ID | null
   onInitialChapterConsumed?: () => void
@@ -63,6 +67,8 @@ export function ChaptersView({
   data,
   project,
   saveData,
+  runPersistedStorageOperation,
+  storageBlocked,
   saveRevisionCommitBundle,
   initialChapterId,
   onInitialChapterConsumed,
@@ -79,6 +85,8 @@ export function ChaptersView({
   const defaultSelectedChapter = chapterListItems[0] ?? null
   const [selectedId, setSelectedId] = useState<ID | null>(defaultSelectedChapter?.id ?? null)
   const selected = chapters.find((chapter) => chapter.id === selectedId) ?? defaultSelectedChapter
+  const chapterStateFacts = useMemo(() => selected ? projectCharacterStatesAtChapter(scoped.characterStateFacts,
+    scoped.characterStateTransactions, selected.order, scoped.allChapters) : [], [selected?.order, scoped.characterStateFacts, scoped.characterStateTransactions, scoped.allChapters])
   const selectedBridge = selected
     ? scoped.chapterContinuityBridges.find((bridge) => bridge.fromChapterId === selected.id && bridge.toChapterOrder === selected.order + 1) ?? null
     : null
@@ -98,6 +106,7 @@ export function ChaptersView({
     replaceWithPersistedBody
   } = bodyEditor
   const chapterAi = useChapterAiDrafts({
+    projectId: project.id,
     settings: data.settings,
     selected,
     characters: scoped.characters,
@@ -107,6 +116,8 @@ export function ChaptersView({
     flushBody,
     setMessage: setAiMessage
   })
+  const titles = useChapterTitleActions({ projectId: project.id, chapters, run: runPersistedStorageOperation, storageBlocked,
+    editorBusy: bodySaveStatus !== 'saved' || Boolean(bodyConflict || chapterAi.loadingAction), onMessage: setAiMessage })
 
   useEffect(() => {
     if (initialChapterId && chapters.some((chapter) => chapter.id === initialChapterId)) {
@@ -136,6 +147,7 @@ export function ChaptersView({
       bible: scoped.bible,
       chapters: scoped.chapters,
       characters: scoped.characters,
+      characterStateFacts: chapterStateFacts,
       foreshadowings: scoped.foreshadowings,
       selectedChapter: selected
     })
@@ -178,14 +190,15 @@ export function ChaptersView({
   }
 
   async function updateChapter(id: ID, patch: Partial<Chapter>) {
+    if ('title' in patch) return { ok: false as const, errorMessage: '请通过改名预览更改正式章名。' }
     if (typeof patch.order === 'number') {
-      return saveData((current) => reorderChapterInAppData(current, id, patch.order as number, now()))
+      return titles.track([id + ':order'], () => saveData((current) => reorderChapterInAppData(current, id, patch.order as number, now())))
     }
-    return saveData((current) => ({
+    return titles.track(Object.keys(patch).map(k => id + ':' + k), () => saveData((current) => ({
       ...current,
       projects: updateProjectTimestamp(current, project.id),
       chapters: current.chapters.map((chapter) => (chapter.id === id ? { ...chapter, ...patch, updatedAt: now() } : chapter))
-    }))
+    })))
   }
 
   async function archiveChapter(id: ID) {
@@ -265,7 +278,8 @@ export function ChaptersView({
     selected,
     project,
     characters: scoped.characters,
-    characterStateFacts: scoped.characterStateFacts,
+    characterStateFacts: chapterStateFacts,
+    reviewSourceBodyHash: chapterAi.reviewSourceBodyHash,
     saveData,
     setCharacterSuggestions: chapterAi.setCharacterSuggestions,
     setAiMessage
@@ -323,10 +337,12 @@ export function ChaptersView({
             <button className="ghost-button" onClick={() => void openReader()}>连贯阅读</button>
             <button className="ghost-button" onClick={() => exportAllChapters('txt')}>导出全部 TXT</button>
             <button className="ghost-button" onClick={() => exportAllChapters('md')}>导出全部 MD</button>
+            {titles.batchButton}
             <button className="primary-button" onClick={addChapter}>新增章节</button>
           </>
         }
       />
+      {titles.dialog}
       <section className="split-layout chapter-workbench">
         <ChapterListPanel
           chapters={chapterListItems}
@@ -377,6 +393,7 @@ export function ChaptersView({
                   </Suspense>
                 }
                 onUpdateChapter={(patch) => updateChapter(selected.id, patch)}
+                renameBlocked={titles.blocked} onRenameTitle={() => titles.openSingle(selected.id)}
                 onBodyChange={updateBodyDraft}
                 onApplyRewrite={async (body) => { updateBodyDraft(body); return flushBody() }}
                 onBodyBlur={() => {
@@ -456,12 +473,9 @@ export function ChaptersView({
                     selected={selected}
                     selectedBridge={selectedBridge}
                     reviewFields={reviewFields}
-                    onUpdateChapter={(patch) => {
-                      void updateChapter(selected.id, patch)
-                    }}
-                    onUpdateContinuityBridgeField={(field, value) => {
-                      void updateContinuityBridgeField(field, value)
-                    }}
+                    onUpdateChapter={(patch) => updateChapter(selected.id, patch)}
+                    onUpdateContinuityBridgeField={(field, value) => titles.track([selected.id + ':bridge:' + field],
+                      () => updateContinuityBridgeField(field, value))}
                   />
                 </Suspense>
               ) : null}

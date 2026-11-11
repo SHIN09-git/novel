@@ -8,6 +8,7 @@ import type {
   ID,
   NextChapterSuggestions
 } from '../../../shared/types'
+import { startsWithNumberedProseLabel } from '../../ChapterDraftEnvelopeService'
 import { ensureCharacterStateChangeSuggestion } from './characterState'
 import {
   asNumber,
@@ -19,6 +20,8 @@ import {
   normalizeRecommendedTreatmentMode,
   normalizeWeight
 } from './primitives'
+
+export { isIncompleteChapterEnvelope } from '../../ChapterDraftEnvelopeService'
 
 export function ensureChapterReview(value: unknown): ChapterReviewDraft {
   const obj = asObject(value)
@@ -182,7 +185,8 @@ export function rawTextAsChapterDraft(rawText: string, fallbackTitle: string): C
   const fenced = trimmed.match(/```(?:json|markdown|md|text)?\s*([\s\S]*?)```/i)?.[1]?.trim()
   const body = fenced || trimmed
   if (!body) return null
-  if (/^\s*[\[{]/.test(body) || /"(?:body|chapterBody|chapterText|content)"\s*:/.test(body)) return null
+  if (body.startsWith('{') || (body.startsWith('[') && !startsWithNumberedProseLabel(body))
+    || /"(?:body|chapterBody|chapterText|content)"\s*:/.test(body)) return null
   return {
     title: fallbackTitle || '未命名章节',
     body
@@ -190,5 +194,7 @@ export function rawTextAsChapterDraft(rawText: string, fallbackTitle: string): C
 }
 
 export function isTruncatedFinishReason(value: string | undefined): boolean {
-  return /length|max[_-]?tokens|token_limit/i.test(value ?? '')
+  const reason = value?.trim().toLowerCase().replaceAll('-', '_') ?? ''
+  return /^(?:length|(?:max|model)_?length)$/.test(reason)
+    || /^(?:max_?(?:(?:output|completion|new)_?)?tokens|(?:output_?)?token_?limit)(?:_?reached)?$/.test(reason)
 }

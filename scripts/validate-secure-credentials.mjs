@@ -94,7 +94,7 @@ async function main() {
     assert(
       dataIpc.includes('secureAndSanitizeAppData') &&
         credentialSanitizer.includes('migrateLegacyApiKey') &&
-        mainAiService.includes('credentialService.getApiKey()') &&
+        mainAiService.includes('credentialService.getApiKey(settings.baseUrl)') &&
         /sanitizeAiErrorText\(\s*message\s*,\s*apiKey(?:\s*,[^)]*)?\)/.test(mainAiService) &&
         !aiMainSource.includes('headers.Authorization = `Bearer ${settings.apiKey'),
       'main process migrates legacy keys, injects secure key for AI calls, and redacts AI errors'
@@ -170,7 +170,7 @@ async function main() {
   checks.push(
     assert(
       credentialSanitizer.includes('const legacyApiKey = normalized.settings.apiKey.trim()') &&
-        credentialSanitizer.includes('await context.credentialService.migrateLegacyApiKey(legacyApiKey)') &&
+        credentialSanitizer.includes('await context.credentialService.migrateLegacyApiKey(legacyApiKey, normalized.settings.baseUrl)') &&
         credentialSanitizer.includes('apiKey: \'\',') &&
         dataIpc.includes('storage.saveIfCurrent(secured.data'),
       'legacy AppData apiKey is migrated to secure storage and removed before persistence'

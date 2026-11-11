@@ -1,75 +1,16 @@
-import { mkdir, readFile, rm, writeFile } from 'node:fs/promises'
-import { dirname, join, resolve } from 'node:path'
-import { pathToFileURL } from 'node:url'
-import ts from 'typescript'
+import { loadDomainModules } from './utils/load-domain-modules.mjs'
+import { readFile } from 'node:fs/promises'
+import { join } from 'node:path'
 import { repoRoot } from './utils/repo-root.mjs'
 
 const root = repoRoot
-const outDir = join(root, 'tmp', 'prompt-compression-replacement-test')
 
 function assert(condition, message, details = {}) {
   return condition ? { ok: true, message } : { ok: false, message, details }
 }
 
-function rewriteRelativeImports(source) {
-  return source.replace(/(from\s+['"])(\.{1,2}\/[^'"]+?)(['"])/g, (_match, prefix, specifier, suffix) => {
-    if (/\.(mjs|js|json)$/.test(specifier)) return `${prefix}${specifier}${suffix}`
-    return `${prefix}${specifier}.mjs${suffix}`
-  })
-}
-
-async function compileTsTree(files) {
-  await rm(outDir, { recursive: true, force: true })
-  for (const relativePath of files) {
-    const source = await readFile(join(root, relativePath), 'utf-8')
-    const compiled = ts.transpileModule(source, {
-      compilerOptions: {
-        module: ts.ModuleKind.ES2022,
-        target: ts.ScriptTarget.ES2022,
-        jsx: ts.JsxEmit.ReactJSX,
-        useDefineForClassFields: true
-      }
-    })
-    const outPath = join(outDir, relativePath).replace(/\.tsx?$/, '.mjs')
-    await mkdir(dirname(outPath), { recursive: true })
-    await writeFile(outPath, rewriteRelativeImports(compiled.outputText), 'utf-8')
-  }
-}
-
-async function loadModules() {
-  await compileTsTree([
-    'src/shared/chapterText.ts',
-    'src/shared/foreshadowingTreatment.ts',
-    'src/services/TokenEstimator.ts',
-    'src/services/ContinuityService.ts',
-    'src/services/CharacterStateService.ts',
-    'src/services/characterState/logInference.ts',
-    'src/services/characterState/stateMutations.ts',
-    'src/services/characterState/stateSelection.ts',
-    'src/services/characterState/stateValidation.ts',
-    'src/services/characterState/stateValue.ts',
-    'src/services/StageSummaryService.ts',
-    'src/services/ContextCompressionService.ts',
-    'src/services/contextBudget/types.ts',
-    'src/services/contextBudget/scoringEngine.ts',
-    'src/services/contextBudget/selectionEngine.ts',
-    'src/services/contextBudget/selectionFinalizer.ts',
-    'src/services/contextBudget/traceBuilder.ts',
-    'src/services/ChapterLifecycleService.ts',
-    'src/services/ContextBudgetManager.ts',
-    'src/services/StoryDirectionService.ts',
-    'src/services/HardCanonPackService.ts',
-    'src/services/PromptLintService.ts',
-    'src/services/promptFormatters/chapterFormatters.ts',
-    'src/services/promptFormatters/characterFormatters.ts',
-    'src/services/promptFormatters/foreshadowingFormatters.ts',
-    'src/services/promptFormatters/promptUtils.ts',
-    'src/services/PromptBuilderService.ts'
-  ])
-  const contextBudget = await import(`${pathToFileURL(join(outDir, 'src/services/ContextBudgetManager.mjs')).href}?t=${Date.now()}`)
-  const promptBuilder = await import(`${pathToFileURL(join(outDir, 'src/services/PromptBuilderService.mjs')).href}?t=${Date.now()}`)
-  const compression = await import(`${pathToFileURL(join(outDir, 'src/services/ContextCompressionService.mjs')).href}?t=${Date.now()}`)
-  return { ...contextBudget, ...promptBuilder, ...compression }
+function loadModules() {
+  return loadDomainModules('services/ContextBudgetManager', 'services/PromptBuilderService', 'services/ContextCompressionService')
 }
 
 const timestamp = '2026-01-01T00:00:00.000Z'

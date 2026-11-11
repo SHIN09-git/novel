@@ -71,10 +71,10 @@ import type {
   StoryDirectionChapterBeat,
   StoryDirectionGuide,
   StoryDirectionGuideSource,
-  StoryDirectionGuideStatus,
-  StoryDirectionHorizon
+  StoryDirectionGuideStatus
 } from '../types'
 
+import { DEFAULT_STORY_DIRECTION_CHAPTERS, inspectStoryDirectionRange, isChapterOrder, storyDirectionLengthConflict } from '../storyDirectionRange'
 import { arrayOrEmpty, objectOrEmpty, stringArrayValue, stringValue } from './common'
 
 export function normalizeStoryDirectionStatus(value: unknown): StoryDirectionGuideStatus {
@@ -85,20 +85,15 @@ function normalizeStoryDirectionSource(value: unknown): StoryDirectionGuideSourc
   return value === 'user_polished' || value === 'mixed' || value === 'ai_generated' ? value : 'ai_generated'
 }
 
-function normalizeStoryDirectionHorizon(value: unknown): StoryDirectionHorizon {
-  return value === 10 ? 10 : 5
-}
-
-export function normalizeStoryDirectionBeat(value: unknown, index = 0, startChapterOrder = 1): StoryDirectionChapterBeat {
+export function normalizeStoryDirectionBeat(value: unknown, index = 0, startChapterOrder = 1, guideId = 'story'): StoryDirectionChapterBeat {
   const beat = objectOrEmpty(value)
-  const chapterOffset = typeof beat.chapterOffset === 'number' && Number.isFinite(beat.chapterOffset) ? Math.max(1, Math.round(beat.chapterOffset)) : index + 1
+  const chapterOffset = typeof beat.chapterOffset === 'number' ? beat.chapterOffset :
+    isChapterOrder(beat.chapterOrder) ? beat.chapterOrder - startChapterOrder + 1 : index + 1
   return {
-    id: stringValue(beat.id) || `story-beat-${Date.now()}-${index}`,
+    id: stringValue(beat.id) || `${guideId}-beat-${index + 1}`,
     chapterOffset,
     chapterOrder:
-      typeof beat.chapterOrder === 'number' && Number.isFinite(beat.chapterOrder)
-        ? Math.max(1, Math.round(beat.chapterOrder))
-        : startChapterOrder + chapterOffset - 1,
+      typeof beat.chapterOrder === 'number' ? beat.chapterOrder : startChapterOrder + (chapterOffset - 1),
     goal: stringValue(beat.goal),
     conflict: stringValue(beat.conflict),
     characterFocus: stringValue(beat.characterFocus),
@@ -115,18 +110,24 @@ export function normalizeStoryDirectionBeat(value: unknown, index = 0, startChap
 export function normalizeStoryDirectionGuide(value: StoryDirectionGuide | Record<string, unknown>): StoryDirectionGuide {
   const guide = objectOrEmpty(value)
   const timestamp = new Date().toISOString()
-  const horizonChapters = normalizeStoryDirectionHorizon(guide.horizonChapters)
-  const startChapterOrder =
-    typeof guide.startChapterOrder === 'number' && Number.isFinite(guide.startChapterOrder)
-      ? Math.max(1, Math.round(guide.startChapterOrder))
-      : 1
-  const endChapterOrder =
-    typeof guide.endChapterOrder === 'number' && Number.isFinite(guide.endChapterOrder)
-      ? Math.max(startChapterOrder, Math.round(guide.endChapterOrder))
-      : startChapterOrder + horizonChapters - 1
+  const id = stringValue(guide.id) || `story-direction-${timestamp}`
+  const startChapterOrder = isChapterOrder(guide.startChapterOrder) ? guide.startChapterOrder : 1
+  const recordedEnd = isChapterOrder(guide.endChapterOrder) && guide.endChapterOrder >= startChapterOrder ? guide.endChapterOrder : null
+  const legacyLength = isChapterOrder(guide.horizonChapters) ? guide.horizonChapters : DEFAULT_STORY_DIRECTION_CHAPTERS
+  const endChapterOrder = recordedEnd ?? startChapterOrder + (legacyLength - 1)
+  const horizonChapters = recordedEnd === null ? legacyLength : endChapterOrder - startChapterOrder + 1
+  const warnings = stringArrayValue(guide.warnings)
+  const warn = (message: string | null | undefined) => { if (message && !warnings.includes(message)) warnings.push(message) }
+  if (recordedEnd !== null && isChapterOrder(guide.startChapterOrder)) {
+    warn(storyDirectionLengthConflict({ startChapterOrder, endChapterOrder, horizonChapters }, guide.horizonChapters))
+  } else if (recordedEnd === null && guide.horizonChapters != null && !isChapterOrder(guide.horizonChapters)) {
+    warn(`旧导向没有有效结束章节或正整数长度，按旧版默认 ${DEFAULT_STORY_DIRECTION_CHAPTERS} 章显示。`)
+  }
+  // Preserve oversized historical ranges on read; new writes and generation reject them.
+  warn(inspectStoryDirectionRange(startChapterOrder, endChapterOrder).error)
   return {
     ...(value as StoryDirectionGuide),
-    id: stringValue(guide.id) || `story-direction-${timestamp}`,
+    id,
     projectId: stringValue(guide.projectId),
     title: stringValue(guide.title) || 'Story direction guide',
     status: normalizeStoryDirectionStatus(guide.status),
@@ -144,10 +145,10 @@ export function normalizeStoryDirectionGuide(value: StoryDirectionGuide | Record
     foreshadowingDirectives: stringValue(guide.foreshadowingDirectives),
     constraints: stringValue(guide.constraints),
     forbiddenTurns: stringValue(guide.forbiddenTurns),
-    chapterBeats: arrayOrEmpty(guide.chapterBeats).map((beat, index) => normalizeStoryDirectionBeat(beat, index, startChapterOrder)),
+    chapterBeats: arrayOrEmpty(guide.chapterBeats).map((beat, index) => normalizeStoryDirectionBeat(beat, index, startChapterOrder, id)),
     generatedFromStageSummaryIds: stringArrayValue(guide.generatedFromStageSummaryIds),
     generatedFromChapterIds: stringArrayValue(guide.generatedFromChapterIds),
-    warnings: stringArrayValue(guide.warnings),
+    warnings,
     createdAt: stringValue(guide.createdAt) || timestamp,
     updatedAt: stringValue(guide.updatedAt) || timestamp
   }

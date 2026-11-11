@@ -14,6 +14,7 @@ import { isChapterArchived } from './ChapterLifecycleService'
 import { requireCommitText, upsertCommitEntity } from './commitBundles/commitBundleUtils'
 import { validateRevisionCommitBundleData } from './commitBundles/revisionCommitValidation'
 import { assertRevisionSourceMatches } from './RevisionSourceBindingService'
+import { assertRevisionFitsHardCanon } from './HardCanonPreflight'
 
 export const REVISION_COMMIT_BUNDLE_SCHEMA_VERSION = 1
 
@@ -116,6 +117,7 @@ export function buildRevisionCommitBundle(input: BuildRevisionCommitBundleInput)
     : null
   const afterText = input.afterText ?? revisionVersion?.body ?? ''
   requireCommitText(afterText, 'RevisionCommitBundle requires afterText.')
+  assertRevisionFitsHardCanon(input.appData, chapter, afterText)
 
   const baseVersion = latestChapterVersion(input.appData, input.projectId, chapter.id)
   const linkedTrace = findRunTraceForRevision(input.appData, input.projectId, revisionSession)

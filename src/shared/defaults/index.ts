@@ -102,6 +102,7 @@ export const EMPTY_APP_DATA: AppData = {
   projects: [],
   storyBibles: [],
   chapters: [],
+  chapterTitleReceipts: [],
   characters: [],
   characterStateLogs: [],
   characterStateFacts: [],
@@ -137,6 +138,7 @@ export const EMPTY_APP_DATA: AppData = {
   chapterVersions: [],
   chapterCommitBundles: [],
   revisionCommitBundles: [],
+  chapterWritebackFailures: [],
   agentRuns: [],
   agentActionPreviews: [],
   settings: DEFAULT_SETTINGS

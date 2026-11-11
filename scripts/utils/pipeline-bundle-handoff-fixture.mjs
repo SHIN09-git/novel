@@ -102,7 +102,7 @@ export function handoffPlugin(repoRoot) {
     usePipelineConfigState: `export const usePipelineConfigState = () => ({nextChapter:2,targetChapterOrder:2,pipelineMode:'standard',
       estimatedWordCount:'1000',readerEmotionTarget:'Fixture',budgetMode:'balanced',budgetMaxTokens:3456,contextSource:'auto',selectedSnapshot:null,
       setSelectedJobId:id=>{globalThis.__pipelineHandoff.selectedJobId=id},rememberCurrentReaderEmotionTarget:()=>{}});`,
-    useSelectedPipelineJob: `export const useSelectedPipelineJob = () => ({selectedJob:null,latestDraft:null,selectedSteps:[],jobs:[],
+    useSelectedPipelineJob: `export const useSelectedPipelineJob = () => ({selectedJob:null,latestDraft:null,selectedDrafts:[],selectedSteps:[],jobs:[],
       selectedCandidates:[],selectedReports:[],selectedRevisionCandidates:[],consistencyIssueById:new Map()});`,
     usePipelineRunner: `import {usePipelineRunner as run} from 'real-handoff-runner';
       export {canSkipPipelineStep,PIPELINE_STEP_LABELS} from 'real-handoff-steps';

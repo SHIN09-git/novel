@@ -1,9 +1,9 @@
-import type { ForcedContextBlock, GeneratedChapterDraft, ID, PromptBlockOrderItem } from '../../../../../shared/types'
+import type { ForcedContextBlock, ID, PromptBlockOrderItem } from '../../../../../shared/types'
 import { ContextBudgetManager } from '../../../../../services/ContextBudgetManager'
 import { CharacterStateService } from '../../../../../services/CharacterStateService'
 import { ChapterTaskContractService } from '../../../../../services/ChapterTaskContractService'
 import { TokenEstimator } from '../../../../../services/TokenEstimator'
-import { bindNoveltyAuditToDraft } from '../../../../../services/DraftDiagnosticBindingService'
+import { bindNoveltyAuditToDraft, noveltyAuditMatchesDraft, redundancyReportMatchesDraft } from '../../../../../services/DraftDiagnosticBindingService'
 import { inferPromptBlockOrderFromPrompt } from '../../../../../services/PromptBuilderService'
 import { PromptLintService } from '../../../../../services/PromptLintService'
 import { PromptCompositionMetricsService } from '../../../../../services/PromptCompositionMetricsService'
@@ -13,19 +13,18 @@ import { PlanContextGapAnalyzerService } from '../../../../../services/PlanConte
 import { shouldIsolateOpeningLegacyContext } from '../../../../../services/OpeningChapterContextPolicy'
 import { guardOpeningChapterPlanForDraft } from '../../../../../services/OpeningChapterPlanGuardService'
 import { activeChapters } from '../../../../../services/ChapterLifecycleService'
-import { newId, now } from '../../../utils/format'
+import { characterStatesForProjectAtChapter } from '../../../../../services/characterState/stateAsOf'
+import { captureReviewableDraft, checkpointForDraft, draftInputHash, resumeCapturedDraft } from './draftCapture'
 import { analyzeRedundancyDiagnostic, auditNoveltyDiagnostic } from '../../../utils/diagnosticsApi'
 import { buildPipelineContextResultFromSelection, createContextBudgetProfile, selectBudgetContext } from '../../../utils/promptContext'
 import {
-  appendGenerationRunTraceAiCall,
   buildForeshadowingTreatmentModes,
   estimateForcedContextTokens,
   upsertGenerationRunTrace
 } from '../../../utils/runTrace'
 import {
   assertChapterTaskPresentInPrompt, characterStateFactsPresentInPrompt, diffIds, enrichContextSelectionTrace,
-  hardCanonTraceFromPrompt, noveltyReferenceContext, pipelineChapterTask, serializeOutput, summarizeSnapshot,
-  validateAuthoritativeChapterTaskDraft, validateGeneratedChapterDraft
+  hardCanonTraceFromPrompt, noveltyReferenceContext, pipelineChapterTask, serializeOutput
 } from '../pipelineUtils'
 import type { PipelineStepHandlerContext } from '../pipelineRunnerTypes'
 export function runPlanContextNeedStep(ctx: PipelineStepHandlerContext) {
@@ -41,7 +40,7 @@ export function runPlanContextNeedStep(ctx: PipelineStepHandlerContext) {
     characters: state.working.characters.filter((character) => character.projectId === project.id),
     foreshadowings: state.working.foreshadowings.filter((item) => item.projectId === project.id),
     timelineEvents: state.working.timelineEvents.filter((event) => event.projectId === project.id),
-    characterStateFacts: state.working.characterStateFacts.filter((fact) => fact.projectId === project.id),
+    characterStateFacts: characterStatesForProjectAtChapter(state.working, project.id, options.targetChapterOrder),
     suppressLegacyStateExpansion: options.targetChapterOrder === 1 && Boolean(job.chapterTaskSnapshot),
     suppressLegacyContextExpansion: options.targetChapterOrder === 1 && Boolean(job.chapterTaskSnapshot)
   })
@@ -213,14 +212,14 @@ export function runRebuildContextWithPlanStep(ctx: PipelineStepHandlerContext) {
     selectedCharacterIds,
     activeNeedPlan,
     options.targetChapterOrder,
-    state.working.characterStateFacts.filter((fact) => fact.projectId === project.id)
+    characterStatesForProjectAtChapter(state.working, project.id, options.targetChapterOrder)
   )
-  const includedCharacterStateFacts = characterStateFactsPresentInPrompt(state.context, relevantCharacterStateFacts)
+  const includedCharacterStateFacts = characterStateFactsPresentInPrompt(state.context, relevantCharacterStateFacts, env.scoped.characters)
   const requiresCharacterStateFacts = Object.values(activeNeedPlan?.requiredStateFactCategories ?? {}).some(
     (categories) => categories.length > 0
   )
-  const storyDirectionGuideId = state.context.includes('中期剧情导向')
-    ? snapshot?.storyDirectionGuide?.id ?? activeStoryDirectionGuide?.id ?? null
+  const storyDirectionGuideId = promptBlockOrder.some(block => block.included && block.kind === 'story_direction')
+    ? storyDirectionTracePatch.storyDirectionGuideId ?? activeStoryDirectionGuide?.id ?? null
     : null
   const contextSelectionTrace = enrichContextSelectionTrace(
     snapshot?.contextSelectionResult.contextSelectionTrace ?? state.budgetSelection?.contextSelectionTrace,
@@ -312,81 +311,26 @@ export function runRebuildContextWithPlanStep(ctx: PipelineStepHandlerContext) {
 export async function runGenerateChapterDraftStep(ctx: PipelineStepHandlerContext) {
   const { env, state, job, step, options, activeStoryDirectionGuide } = ctx
   const { project, updateStepInData } = env
-  const aiService = await env.getAiService('prose')
   if (!state.plan) throw new Error('缺少章节任务书，无法生成正文')
   if (job.contextSource !== 'prompt_snapshot' && !state.rebuiltContextFromPlan) throw new Error('缺少计划后重建上下文，无法生成正文。')
   const chapterTask = pipelineChapterTask(project, options, activeStoryDirectionGuide, job.chapterTaskSnapshot)
   state.plan = guardOpeningChapterPlanForDraft({ generatedPlan: state.plan, targetChapterOrder: options.targetChapterOrder, chapterTaskSnapshot: job.chapterTaskSnapshot })
   if (job.chapterTaskSnapshot) assertChapterTaskPresentInPrompt(state.context, chapterTask, 'draft')
-  let result = await aiService.generateChapterDraft(state.plan, state.context, {
-    mode: options.pipelineMode,
-    targetChapterOrder: options.targetChapterOrder,
-    estimatedWordCount: options.estimatedWordCount,
-    readerEmotionTarget: options.readerEmotionTarget,
-    chapterTask,
-    authoritativeChapterTask: Boolean(job.chapterTaskSnapshot)
-  })
-  state.working = appendGenerationRunTraceAiCall(
-    state.working,
-    job.id,
-    step,
-    'prose',
-    result.telemetry,
-    result.ok && Boolean(result.data) ? 'success' : 'failed'
-  )
-  if (!result.data) throw new Error(result.error || result.parseError || '正文生成失败')
-  let validationError = validateAuthoritativeChapterTaskDraft(result.data.body, result.data.title, options.estimatedWordCount, result.usedAI, job.chapterTaskSnapshot)
-  if (validationError && result.usedAI) {
-    const earlierResult = result
-    const earlierContract = job.chapterTaskSnapshot && earlierResult.data ? ChapterTaskContractService.evaluate({ ...earlierResult.data, chapterTask }) : null
-    const previousDraft = earlierContract && earlierResult.data &&
-      validateGeneratedChapterDraft(earlierResult.data.body, options.estimatedWordCount, earlierResult.usedAI) === null &&
-      ChapterTaskContractService.isLocallyRepairable(earlierContract) ? earlierResult.data : undefined
-    const retryResult = await aiService.generateChapterDraft(state.plan, state.context, {
-      mode: options.pipelineMode,
-      targetChapterOrder: options.targetChapterOrder,
-      estimatedWordCount: options.estimatedWordCount,
-      readerEmotionTarget: options.readerEmotionTarget,
-      chapterTask,
-      authoritativeChapterTask: Boolean(job.chapterTaskSnapshot),
-      retryReason: validationError, previousDraft,
-      retryIssueTypes: earlierContract?.issues.map((issue) => issue.type) ?? []
-    })
-    state.working = appendGenerationRunTraceAiCall(
-      state.working,
-      job.id,
-      step,
-      'prose',
-      retryResult.telemetry,
-      retryResult.ok && Boolean(retryResult.data) ? 'success' : 'failed'
-    )
-    if (!retryResult.data) throw new Error(retryResult.error || retryResult.parseError || '正文重新生成失败')
-    result = job.chapterTaskSnapshot && earlierResult.data && ChapterTaskContractService.shouldPreferEarlierAfterRetry({ earlier: earlierResult.data, later: retryResult.data, chapterTask }) ? earlierResult : retryResult
-  }
-  if (!result.data) throw new Error(result.error || result.parseError || '正文生成失败')
-  if (validationError && result.usedAI) validationError = validateAuthoritativeChapterTaskDraft(result.data.body, result.data.title, options.estimatedWordCount, result.usedAI, job.chapterTaskSnapshot, { allowReviewableLengthUnderflow: true })
-  if (validationError) {
-    throw new Error(`${validationError} 请检查任务约束后重试。`)
-  }
-  const draft: GeneratedChapterDraft = {
-    id: newId(),
-    projectId: project.id,
-    chapterId: null,
-    jobId: job.id,
-    title: result.data.title,
-    body: result.data.body,
-    summary: state.plan.chapterGoal,
-    status: 'draft',
-    tokenEstimate: TokenEstimator.estimate(result.data.body),
-    createdAt: now(),
-    updatedAt: now()
-  }
-  state.draftResult = result.data
+  const inputHash = draftInputHash(ctx, chapterTask)
+  const recovered = resumeCapturedDraft(ctx, inputHash)
+  const draft = recovered ??
+    await captureReviewableDraft(ctx, state.plan, chapterTask, inputHash, await env.getAiService('prose'))
+  state.draftRecord = draft
+  state.draftResult = { title: draft.title, body: draft.body }
   const auditNovelty = env.diagnostics?.auditNovelty ?? auditNoveltyDiagnostic
   const analyzeRedundancy = env.diagnostics?.analyzeRedundancy ?? analyzeRedundancyDiagnostic
-  state.noveltyAuditResult = bindNoveltyAuditToDraft(
+  const savedTrace = recovered && state.working.generationRunTraces.find((item) => item.jobId === job.id && item.generatedDraftId === draft.id)
+  const savedAudit = savedTrace?.noveltyAuditResult
+  const savedRedundancy = savedTrace?.redundancyReportId && state.working.redundancyReports.find((item) =>
+    item.id === savedTrace.redundancyReportId && redundancyReportMatchesDraft(item, draft))
+  state.noveltyAuditResult = savedAudit && noveltyAuditMatchesDraft(savedAudit, draft) ? savedAudit : bindNoveltyAuditToDraft(
     await auditNovelty({
-      generatedText: result.data.body,
+      generatedText: draft.body,
       context: state.context,
       chapterPlan: state.plan,
       project,
@@ -394,19 +338,20 @@ export async function runGenerateChapterDraftStep(ctx: PipelineStepHandlerContex
     }),
     draft
   )
-  const redundancyReport = await analyzeRedundancy({
+  const redundancyReport = savedRedundancy || await analyzeRedundancy({
     projectId: project.id,
     chapterId: null,
     draftId: draft.id,
-    body: result.data.body
+    body: draft.body
   })
-  redundancyReport.jobId = job.id
-  redundancyReport.updatedAt = redundancyReport.createdAt
-  state.draftRecord = draft
+  const lengthNotice = ChapterTaskContractService.lengthOverflowNotice({ body: draft.body, chapterTask: job.chapterTaskSnapshot })
   state.working = {
-    ...updateStepInData(state.working, step.id, { status: 'completed', output: serializeOutput(result.data) }),
-    generatedChapterDrafts: [draft, ...state.working.generatedChapterDrafts],
-    redundancyReports: [redundancyReport, ...state.working.redundancyReports]
+    ...updateStepInData(state.working, step.id, { status: 'completed', output: serializeOutput({
+      ...state.draftResult, checkpoint: checkpointForDraft(draft, inputHash), ...(lengthNotice ? { lengthNotice } : {})
+    }) }),
+    redundancyReports: savedRedundancy ? state.working.redundancyReports : [
+      { ...redundancyReport, jobId: job.id, updatedAt: redundancyReport.createdAt }, ...state.working.redundancyReports
+    ]
   }
   state.working = upsertGenerationRunTrace(state.working, job, {
     generatedDraftId: draft.id,

@@ -9,6 +9,7 @@ import type {
 } from '../shared/types'
 import { normalizeTreatmentMode } from '../shared/foreshadowingTreatment'
 import { normalizeMemoryUpdatePatch } from '../shared/normalizers/memoryUpdate'
+import { editTimelineEvent, timelineTimeValues } from '../shared/normalizers/timeline'
 
 export interface ApplicableMemoryCandidatePatch {
   candidate: MemoryUpdateCandidate
@@ -421,11 +422,11 @@ export function applyMemoryCandidatePatchToData({
     nextData = {
       ...nextData,
       timelineEvents: [
-        {
+        editTimelineEvent({
           id: eventId,
           projectId,
           title: event.title ?? '未命名时间线事件',
-          chapterOrder: event.chapterOrder ?? candidateTargetChapterOrder,
+          chapterOrder: null,
           storyTime: event.storyTime ?? '',
           narrativeOrder: event.narrativeOrder ?? candidateTargetChapterOrder ?? 0,
           participantCharacterIds,
@@ -433,7 +434,10 @@ export function applyMemoryCandidatePatchToData({
           downstreamImpact: event.downstreamImpact ?? '',
           createdAt: event.createdAt ?? timestamp,
           updatedAt: timestamp
-        },
+        }, {
+          ...timelineTimeValues(event, true), chapterOrder: event.chapterOrder ?? candidateTargetChapterOrder,
+          ...(event.chapterId !== undefined ? { chapterId: event.chapterId } : {})
+        }, current.chapters),
         ...nextData.timelineEvents
       ]
     }

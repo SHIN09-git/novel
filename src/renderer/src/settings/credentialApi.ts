@@ -1,12 +1,11 @@
 import { getNovelDirectorCredentialsApi } from '../platform/novelDirectorBridge'
 
-export async function getApiKeyState(): Promise<boolean> {
-  const result = await getNovelDirectorCredentialsApi().hasApiKey()
-  return result.hasApiKey
+export function getApiKeyState(baseUrl?: string) {
+  return getNovelDirectorCredentialsApi().hasApiKey(baseUrl)
 }
 
-export async function saveApiKey(apiKey: string): Promise<boolean> {
-  const result = await getNovelDirectorCredentialsApi().setApiKey(apiKey)
+export async function saveApiKey(apiKey: string, baseUrl: string): Promise<boolean> {
+  const result = await getNovelDirectorCredentialsApi().setApiKey(apiKey, baseUrl)
   return result.hasApiKey
 }
 

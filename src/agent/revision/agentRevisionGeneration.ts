@@ -1,12 +1,13 @@
 import type { AppData, RevisionVersion } from '../../shared/types'
 import { AIService } from '../../services/AIService'
-import { resolvePipelineRoleSettings } from '../../services/PipelineRunContextService'
+import { resolvePipelineRoleSettings, resolvePipelineRunSettings } from '../../services/PipelineRunContextService'
 import { normalizePipelineAIModelOverride } from '../../shared/normalizers/pipelineRunConfig'
 import { projectData } from '../../renderer/src/utils/projectData'
 import { buildRevisionAiContext } from '../../renderer/src/views/revision/revisionAiContext'
 import { findRewriteRange } from '../../renderer/src/components/aiRewriteResultModel'
 import { looksLikeFullChapterRevision } from '../../renderer/src/utils/revisionMerge'
 import { createHeadlessTransport } from '../AgentPipelineExecutor'
+import { agentApiKey, apiEndpoint, readApiRegistry } from '../../main/services/ApiRegistry'
 import { loadAgentRuntimeData, saveAgentRuntimeData, type AgentRuntimeData } from '../AgentRuntime'
 import { findProjectId, requiredString } from '../tools/agentToolArguments'
 import { readRevisionVersion } from './agentRevisionReads'
@@ -44,9 +45,18 @@ export async function generateAgentRevisionVersion(
   const context = buildRevisionAiContext({ ...scoped, project, selectedChapter: resolved.chapter ?? null, selectedDraft: resolved.draft ?? null })
   const sourceRun = resolved.draft ? scoped.chapterGenerationJobs.find((job) => job.id === resolved.draft!.jobId) : undefined
   const roleSettings = resolvePipelineRoleSettings(sourceRun?.aiRunConfig, data.settings, 'revision')
-  const settings = { ...roleSettings, hasApiKey: roleSettings.hasApiKey || Boolean(process.env.NOVEL_DIRECTOR_API_KEY?.trim()) }
+  const base = resolvePipelineRunSettings(sourceRun?.aiRunConfig, data.settings)
+  const remote = roleSettings.apiProvider === 'compatible' || roleSettings.apiProvider === 'openai'
+  const registry = remote ? await readApiRegistry() : new Map()
+  const settings = { ...roleSettings, hasApiKey: remote && Boolean(agentApiKey(registry, roleSettings.baseUrl, base.baseUrl)) }
+  const route = registry.get(apiEndpoint(settings.baseUrl))
+  if (!dependencies.ai && route && !settings.hasApiKey) {
+    throw new Error(`修订使用的服务 ${route.id} 缺少 ${route.keyEnv}。`)
+  }
   const aiRunId = sourceRun?.id ?? identity.agentRunId
-  const ai = dependencies.ai ?? new AIService(settings, { runId: aiRunId, transport: createHeadlessTransport(settings).transport })
+  const ai = dependencies.ai ?? new AIService(settings, {
+    projectId, runId: aiRunId, transport: createHeadlessTransport(base, registry, runtime.storagePath).transport
+  })
   const result = await ai.generateRevision({
     type: request.type, instruction: request.instruction, fullChapterText: resolved.body,
     revisionScope: range ? 'local' : 'full', ...(range ? { targetRange: range.text } : {})

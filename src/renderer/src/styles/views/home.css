@@ -1,61 +1,20 @@
-/* Project library: an ink masthead over a shelf of manuscripts. */
+/* Project library: a large-title header over a grid of manuscripts (no dark slab in the content layer). */
 .home .page-header {
   position: relative;
   align-items: flex-end;
   margin-bottom: 32px;
-  padding: 36px 36px 32px;
-  border: 1px solid var(--rail-border);
-  border-radius: var(--radius-xl);
-  color: var(--rail-strong);
-  background:
-    radial-gradient(70% 140% at 100% 0%, rgba(169, 191, 211, 0.18), transparent 60%),
-    radial-gradient(50% 120% at 0% 100%, rgba(58, 93, 150, 0.24), transparent 70%),
-    var(--slate);
-  box-shadow: var(--shadow-raised);
-  overflow: hidden;
+  padding: 28px 4px 8px;
   animation: nd-rise-in var(--duration-slow) var(--ease-out) backwards;
 }
 
-.home .page-header::after {
-  content: "长篇小说导演台";
-  position: absolute;
-  right: 36px;
-  top: 26px;
-  color: var(--rail-muted);
-  font-size: var(--text-xs);
-  letter-spacing: 0.32em;
-}
-
 .home .page-header h1 {
-  color: var(--rail-strong);
   font-size: 40px;
-  letter-spacing: -0.02em;
+  font-weight: 700;
+  letter-spacing: -0.025em;
 }
 
 .home .page-header p {
-  color: var(--rail-text);
   font-size: var(--text-lg);
-}
-
-.home .page-header .ghost-button {
-  border-color: rgba(255, 255, 255, 0.16);
-  color: var(--rail-strong);
-  background: rgba(255, 255, 255, 0.04);
-}
-
-.home .page-header .ghost-button:hover:not(:disabled) {
-  border-color: rgba(255, 255, 255, 0.3);
-  color: var(--rail-strong);
-  background: rgba(255, 255, 255, 0.1);
-}
-
-.home .page-header .primary-button {
-  background: var(--rail-accent);
-  color: #111a26;
-}
-
-.home .page-header .primary-button:hover:not(:disabled) {
-  background: color-mix(in srgb, var(--rail-accent) 86%, white);
 }
 
 .home-workspace {

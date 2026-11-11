@@ -4,6 +4,7 @@ import { AuthorDecisionPolicyService } from '../../../../services/AuthorDecision
 export function PipelineRiskBanner({
   job,
   draft,
+  lengthOverflowNotice,
   qualityReport,
   consistencyReports,
   memoryCandidates,
@@ -13,6 +14,7 @@ export function PipelineRiskBanner({
 }: {
   job: ChapterGenerationJob | null
   draft: GeneratedChapterDraft | null
+  lengthOverflowNotice?: string | null
   qualityReport: QualityGateReport | null
   consistencyReports: ConsistencyReviewReport[]
   memoryCandidates: MemoryUpdateCandidate[]
@@ -25,6 +27,7 @@ export function PipelineRiskBanner({
   const pendingCandidates = memoryCandidates.filter((candidate) => candidate.status === 'pending').length
 
   if (job?.status === 'failed') risks.push(job.errorMessage || '流水线失败，请查看失败步骤。')
+  if (draft?.status === 'draft' && lengthOverflowNotice) risks.push(lengthOverflowNotice)
   const qualityRisk = AuthorDecisionPolicyService.riskMessage(qualityReport)
   if (qualityRisk) risks.push(qualityRisk)
   if (highConsistencyCount > 0) risks.push(`存在 ${highConsistencyCount} 个 high severity 一致性问题。`)

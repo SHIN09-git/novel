@@ -44,8 +44,8 @@ export function ReadingView({
   const chapters = useMemo(() => [...scoped.chapters].sort((a, b) => a.order - b.order), [scoped.chapters])
   const getAiService = useCallback(async () => {
     const { AIService } = await import('../../../services/AIService')
-    return new AIService(data.settings)
-  }, [data.settings])
+    return new AIService(data.settings, { projectId: project.id })
+  }, [data.settings, project.id])
   const [selection, setSelection] = useState<ReaderSelection | null>(null)
   const [customInstruction, setCustomInstruction] = useState('')
   const [message, setMessage] = useState('')

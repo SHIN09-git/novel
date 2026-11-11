@@ -5,7 +5,6 @@ import type {
   Foreshadowing,
   HardCanonItem,
   ID,
-  StoryDirectionChapterBeat,
   StoryDirectionGuide,
   TimelineEvent,
   WorldManagedEntity,
@@ -14,11 +13,15 @@ import type {
   WorldManagementReceipt,
   WorldManagementSource
 } from '../shared/types'
+import { editTimelineEvent, timelineSeasons, timelineShifts, timelineTimeFields } from '../shared/normalizers/timeline'
 import { normalizeTreatmentMode } from '../shared/foreshadowingTreatment'
 import { normalizeStoryDirectionGuide } from '../shared/normalizers/storyDirection'
+import { assertStoryDirectionBeats, DEFAULT_STORY_DIRECTION_CHAPTERS, inspectStoryDirectionRange, isChapterOrder, MAX_STORY_DIRECTION_CHAPTERS } from '../shared/storyDirectionRange'
+import { parseHardCanonCheck } from '../shared/normalizers/hardCanonCheck'
 import { decisionFingerprint } from './candidateDecisionPrimitives'
 import { CharacterStateService } from './CharacterStateService'
 import { HardCanonPackService } from './HardCanonPackService'
+import type { HardCanonDuplicates } from './hardCanonDuplicates'
 
 export type { WorldManagedEntity, WorldManagementAction, WorldManagementCommand, WorldManagementSource } from '../shared/types'
 
@@ -45,6 +48,7 @@ export interface WorldManagementResult {
     replayed: boolean
     before: unknown | null
     after: unknown
+    hardCanonDuplicates?: HardCanonDuplicates
     audit: WorldManagementAudit
   }
 }
@@ -70,11 +74,12 @@ const FORESHADOWING_FIELDS = [
   'payoffMethod', 'relatedCharacterIds', 'relatedMainPlot', 'notes', 'actualPayoffChapter'
 ] as const
 const TIMELINE_FIELDS = [
-  'title', 'chapterOrder', 'storyTime', 'narrativeOrder', 'participantCharacterIds', 'result', 'downstreamImpact'
+  'title', 'chapterId', 'chapterOrder', 'storyTime', 'narrativeOrder', 'participantCharacterIds', 'result', 'downstreamImpact',
+  ...timelineTimeFields
 ] as const
 const HARD_CANON_FIELDS = [
   'category', 'title', 'content', 'priority', 'status', 'sourceId', 'relatedCharacterIds',
-  'relatedForeshadowingIds', 'relatedTimelineEventIds'
+  'relatedForeshadowingIds', 'relatedTimelineEventIds', 'check'
 ] as const
 const DIRECTION_FIELDS = [
   'title', 'status', 'horizonChapters', 'startChapterOrder', 'endChapterOrder', 'userRawIdea',
@@ -117,14 +122,17 @@ export const WORLD_MANAGEMENT_FIELD_HELP = {
     fields: FORESHADOWING_FIELDS,
     enums: { status: FORESHADOWING_STATUSES, weight: FORESHADOWING_WEIGHTS, treatmentMode: FORESHADOWING_TREATMENTS }
   },
-  timeline_event: { fields: TIMELINE_FIELDS },
+  timeline_event: { fields: TIMELINE_FIELDS, enums: { season: timelineSeasons, timeShift: timelineShifts },
+    dayReference: 'elapsedDays counts whole days from timeAnchor; remainingDays is for one fixed deadlineKey. sourceExcerpt quotes the current chapter.' },
   hard_canon: {
     fields: HARD_CANON_FIELDS,
     enums: { category: HARD_CANON_CATEGORIES, priority: HARD_CANON_PRIORITIES, status: HARD_CANON_STATUSES }
   },
   story_direction: {
     fields: DIRECTION_FIELDS,
-    enums: { status: DIRECTION_STATUSES, horizonChapters: [5, 10] as const },
+    enums: { status: DIRECTION_STATUSES },
+    range: { inclusive: true, minChapters: 1, maxChapters: MAX_STORY_DIRECTION_CHAPTERS,
+      rule: 'startChapterOrder and endChapterOrder determine the length. For legacy creates without an end, use horizonChapters (default 5). A conflicting length is reported in after.warnings.' },
     chapterBeatFields: BEAT_FIELDS
   }
 } as const
@@ -235,31 +243,6 @@ function findRecord(data: AppData, projectId: ID, entity: WorldManagedEntity, id
   return itemCollection(data, projectId, entity).find((item) => item.id === id) ?? null
 }
 
-// Keep this in lockstep with HardCanonPackService.upsertHardCanonItem. The
-// domain service intentionally coalesces a sourced duplicate onto its old ID;
-// an Agent operation must instead name that ID and make an explicit update.
-function findHardCanonDeduplicationConflict(data: AppData, projectId: ID, candidate: HardCanonItem): HardCanonItem | null {
-  const sourceId = candidate.sourceId
-  if (!sourceId) return null
-  const sourceType = candidate.sourceType ?? 'manual'
-  const content = candidate.content.trim()
-  return HardCanonPackService.getHardCanonPackForProject(data, projectId).items.find((existing) =>
-    existing.id !== candidate.id &&
-    Boolean(existing.sourceId) &&
-    existing.sourceId === sourceId &&
-    existing.sourceType === sourceType &&
-    existing.category === candidate.category &&
-    existing.content.trim() === content
-  ) ?? null
-}
-
-function assertNoHardCanonDeduplicationConflict(data: AppData, projectId: ID, candidate: HardCanonItem): void {
-  const duplicate = findHardCanonDeduplicationConflict(data, projectId, candidate)
-  if (duplicate) {
-    throw new Error(`HardCanon already exists for this source and content: ${duplicate.id}. Use action "update" with id "${duplicate.id}" instead.`)
-  }
-}
-
 function sameManagedFields(left: ManagedRecord, right: ManagedRecord): boolean {
   const { createdAt: _leftCreatedAt, updatedAt: _leftUpdatedAt, ...leftStable } = left as ManagedRecord & { createdAt: string; updatedAt: string }
   const { createdAt: _rightCreatedAt, updatedAt: _rightUpdatedAt, ...rightStable } = right as ManagedRecord & { createdAt: string; updatedAt: string }
@@ -358,40 +341,45 @@ function validateForeshadowingPatch(data: AppData, projectId: ID, patch: Record<
 
 function validateTimelinePatch(data: AppData, projectId: ID, patch: Record<string, unknown>): void {
   assertOnlyFields(patch, TIMELINE_FIELDS, 'timeline patch')
+  assertOptionalString(patch, ['chapterId'], 'timeline patch', true)
   assertOptionalString(patch, ['title', 'storyTime', 'result', 'downstreamImpact'], 'timeline patch')
   assertOptionalInteger(patch, ['chapterOrder', 'narrativeOrder'], 'timeline patch')
   assertReferences(data, projectId, patch.participantCharacterIds, 'characters', 'timeline patch.participantCharacterIds')
 }
 
-function validateHardCanonPatch(data: AppData, projectId: ID, patch: Record<string, unknown>): void {
+function checkedHardCanonPatch(data: AppData, projectId: ID, patch: Record<string, unknown>, updating = false): Record<string, unknown> {
   assertOnlyFields(patch, HARD_CANON_FIELDS, 'HardCanon patch')
-  assertOptionalString(patch, ['category', 'title', 'content', 'priority', 'status', 'sourceId'], 'HardCanon patch', true)
+  for (const field of ['title', 'content']) if (field in patch) requireString(patch[field], `HardCanon patch.${field}`)
+  assertOptionalString(patch, ['sourceId'], 'HardCanon patch', true)
   assertOptionalEnum(patch, 'category', HARD_CANON_CATEGORIES, 'HardCanon patch')
   assertOptionalEnum(patch, 'priority', HARD_CANON_PRIORITIES, 'HardCanon patch')
   assertOptionalEnum(patch, 'status', HARD_CANON_STATUSES, 'HardCanon patch')
   assertReferences(data, projectId, patch.relatedCharacterIds, 'characters', 'HardCanon patch.relatedCharacterIds')
   assertReferences(data, projectId, patch.relatedForeshadowingIds, 'foreshadowings', 'HardCanon patch.relatedForeshadowingIds')
   assertReferences(data, projectId, patch.relatedTimelineEventIds, 'timelineEvents', 'HardCanon patch.relatedTimelineEventIds')
+  if (!('check' in patch)) return patch
+  if (updating && patch.check === null) return { ...patch, check: undefined }
+  return { ...patch, check: parseHardCanonCheck(patch.check) }
 }
 
 function validateDirectionPatch(data: AppData, projectId: ID, patch: Record<string, unknown>): void {
   assertOnlyFields(patch, DIRECTION_FIELDS, 'story direction patch')
   assertOptionalString(patch, ['title', 'status', 'userRawIdea', 'userPolishedIdea', 'aiGuidance', 'strategicTheme', 'coreDramaticPromise', 'emotionalCurve', 'characterArcDirectives', 'foreshadowingDirectives', 'constraints', 'forbiddenTurns'], 'story direction patch')
-  assertOptionalInteger(patch, ['horizonChapters', 'startChapterOrder', 'endChapterOrder'], 'story direction patch', false)
   assertOptionalEnum(patch, 'status', DIRECTION_STATUSES, 'story direction patch')
-  if (patch.horizonChapters !== undefined && patch.horizonChapters !== 5 && patch.horizonChapters !== 10) {
-    throw new Error('story direction patch.horizonChapters must be 5 or 10.')
-  }
   for (const field of ['generatedFromStageSummaryIds', 'generatedFromChapterIds', 'warnings'] as const) {
     if (patch[field] !== undefined) assertStringArray(patch[field], `story direction patch.${field}`)
   }
   if (patch.chapterBeats !== undefined) {
     if (!Array.isArray(patch.chapterBeats)) throw new Error('story direction patch.chapterBeats must be an array.')
+    if (patch.chapterBeats.length > MAX_STORY_DIRECTION_CHAPTERS) throw new Error(`剧情导向最多允许 ${MAX_STORY_DIRECTION_CHAPTERS} 个节拍。`)
     patch.chapterBeats.forEach((beat, index) => {
       const raw = requireObject(beat, `story direction patch.chapterBeats[${index}]`)
       assertOnlyFields(raw, BEAT_FIELDS, `story direction patch.chapterBeats[${index}]`)
       assertOptionalString(raw, BEAT_FIELDS.filter((field) => !['chapterOffset', 'chapterOrder'].includes(field)), `story direction patch.chapterBeats[${index}]`)
-      assertOptionalInteger(raw, ['chapterOffset', 'chapterOrder'], `story direction patch.chapterBeats[${index}]`)
+      for (const field of ['chapterOffset', 'chapterOrder']) {
+        if (raw[field] === undefined || (field === 'chapterOrder' && raw[field] === null)) continue
+        if (!isChapterOrder(raw[field])) throw new Error(`chapterBeats[${index}].${field} 必须是正整数。`)
+      }
     })
   }
   if (patch.generatedFromStageSummaryIds !== undefined) {
@@ -405,21 +393,6 @@ function validateDirectionPatch(data: AppData, projectId: ID, patch: Record<stri
     const known = new Set(data.chapters.filter((item) => item.projectId === projectId).map((item) => item.id))
     for (const id of patch.generatedFromChapterIds as string[]) {
       if (!known.has(id)) throw new Error(`story direction patch.generatedFromChapterIds references a missing or foreign record: ${id}`)
-    }
-  }
-}
-
-function assertActiveDirectionRange(guide: StoryDirectionGuide): void {
-  if (guide.status !== 'active') return
-  const expectedEnd = guide.startChapterOrder + guide.horizonChapters - 1
-  if (guide.endChapterOrder !== expectedEnd) {
-    throw new Error(`Active story direction must cover exactly ${guide.horizonChapters} chapters (${guide.startChapterOrder}-${expectedEnd}).`)
-  }
-  for (const beat of guide.chapterBeats) {
-    const expectedOrder = guide.startChapterOrder + beat.chapterOffset - 1
-    if (beat.chapterOffset < 1 || beat.chapterOffset > guide.horizonChapters ||
-      (beat.chapterOrder !== null && beat.chapterOrder !== expectedOrder)) {
-      throw new Error('Active story direction beats must stay within the guide range and match their chapterOffset.')
     }
   }
 }
@@ -458,12 +431,12 @@ function foreshadowingFromPatch(projectId: ID, id: ID, patch: Record<string, unk
   } as Foreshadowing
 }
 
-function timelineFromPatch(projectId: ID, id: ID, patch: Record<string, unknown>, at: string): TimelineEvent {
+function timelineFromPatch(data: AppData, projectId: ID, id: ID, patch: Record<string, unknown>, at: string): TimelineEvent {
   if (!patch.title || typeof patch.title !== 'string' || !patch.title.trim()) throw new Error('timeline patch.title is required for create.')
-  return {
+  return editTimelineEvent({
     id, projectId, title: patch.title.trim(), chapterOrder: null, storyTime: '', narrativeOrder: 0,
-    participantCharacterIds: [], result: '', downstreamImpact: '', createdAt: at, updatedAt: at, ...patch
-  } as TimelineEvent
+    participantCharacterIds: [], result: '', downstreamImpact: '', createdAt: at, updatedAt: at
+  }, patch, data.chapters)
 }
 
 function hardCanonFromPatch(projectId: ID, id: ID, patch: Record<string, unknown>, at: string): HardCanonItem {
@@ -475,28 +448,31 @@ function hardCanonFromPatch(projectId: ID, id: ID, patch: Record<string, unknown
   } as HardCanonItem
 }
 
-function directionFromPatch(projectId: ID, id: ID, patch: Record<string, unknown>, at: string): StoryDirectionGuide {
-  if (!patch.title || typeof patch.title !== 'string' || !patch.title.trim()) throw new Error('story direction patch.title is required for create.')
-  const start = typeof patch.startChapterOrder === 'number' ? patch.startChapterOrder : 1
-  const horizon = patch.horizonChapters === 10 ? 10 : 5
+function directionFromPatch(projectId: ID, id: ID, patch: Record<string, unknown>, at: string, before?: StoryDirectionGuide): StoryDirectionGuide {
+  const previous = before && normalizeStoryDirectionGuide(before)
+  const start = patch.startChapterOrder === undefined ? previous?.startChapterOrder ?? 1 : patch.startChapterOrder
+  const end = patch.endChapterOrder === undefined ? previous?.endChapterOrder : patch.endChapterOrder
+  const length = patch.horizonChapters === undefined && end === undefined ? DEFAULT_STORY_DIRECTION_CHAPTERS : patch.horizonChapters
+  const { range, error } = inspectStoryDirectionRange(start, end, length)
+  if (!range) throw new Error(error)
+  const title = requireString(patch.title ?? previous?.title, 'story direction patch.title')
   const guide = normalizeStoryDirectionGuide({
-    id, projectId, title: patch.title.trim(), status: 'draft', source: 'mixed', horizonChapters: horizon,
-    startChapterOrder: start, endChapterOrder: typeof patch.endChapterOrder === 'number' ? patch.endChapterOrder : start + horizon - 1,
-    userRawIdea: '', userPolishedIdea: '', aiGuidance: '', strategicTheme: '', coreDramaticPromise: '', emotionalCurve: '',
-    characterArcDirectives: '', foreshadowingDirectives: '', constraints: '', forbiddenTurns: '', chapterBeats: [],
-    generatedFromStageSummaryIds: [], generatedFromChapterIds: [], warnings: [], createdAt: at, updatedAt: at, ...patch
+    createdAt: at, ...previous, ...patch, ...range, horizonChapters: patch.horizonChapters ?? range.horizonChapters,
+    id, projectId, title, source: 'mixed', updatedAt: at
   })
-  assertActiveDirectionRange(guide)
+  assertStoryDirectionBeats(guide.chapterBeats, range, false)
   return guide
 }
 
-function updateRecord(data: AppData, projectId: ID, entity: WorldManagedEntity, id: ID, next: ManagedRecord, at: string): AppData {
+type OtherEntity = Exclude<WorldManagedEntity, 'hard_canon'>
+
+function updateRecord(data: AppData, projectId: ID, entity: OtherEntity, id: ID, next: ManagedRecord, at: string): AppData {
   let changed: AppData
   if (entity === 'character') changed = { ...data, characters: data.characters.map((item) => item.id === id && item.projectId === projectId ? next as Character : item) }
-  else if (entity === 'character_state') changed = { ...data, characterStateFacts: data.characterStateFacts.map((item) => item.id === id && item.projectId === projectId ? next as CharacterStateFact : item) }
+  else if (entity === 'character_state') changed = CharacterStateService.createOrUpdateFact(next as CharacterStateFact, data)
   else if (entity === 'foreshadowing') changed = { ...data, foreshadowings: data.foreshadowings.map((item) => item.id === id && item.projectId === projectId ? next as Foreshadowing : item) }
   else if (entity === 'timeline_event') changed = { ...data, timelineEvents: data.timelineEvents.map((item) => item.id === id && item.projectId === projectId ? next as TimelineEvent : item) }
-  else if (entity === 'story_direction') changed = {
+  else changed = {
     ...data,
     storyDirectionGuides: data.storyDirectionGuides.map((item) => {
       if (item.id === id && item.projectId === projectId) return next as StoryDirectionGuide
@@ -504,22 +480,32 @@ function updateRecord(data: AppData, projectId: ID, entity: WorldManagedEntity, 
       return item
     })
   }
-  else changed = HardCanonPackService.upsertHardCanonItem(data, next as HardCanonItem)
   return projectTimestamp(changed, projectId, at)
 }
 
-function createRecord(data: AppData, projectId: ID, entity: WorldManagedEntity, record: ManagedRecord, at: string): AppData {
+function createRecord(data: AppData, projectId: ID, entity: OtherEntity, record: ManagedRecord, at: string): AppData {
   if (entity === 'character') return projectTimestamp({ ...data, characters: [...data.characters, record as Character] }, projectId, at)
   if (entity === 'character_state') return projectTimestamp(data, projectId, at)
   if (entity === 'foreshadowing') return projectTimestamp({ ...data, foreshadowings: [...data.foreshadowings, record as Foreshadowing] }, projectId, at)
   if (entity === 'timeline_event') return projectTimestamp({ ...data, timelineEvents: [...data.timelineEvents, record as TimelineEvent] }, projectId, at)
-  if (entity === 'story_direction') return updateRecord({ ...data, storyDirectionGuides: [...data.storyDirectionGuides, record as StoryDirectionGuide] }, projectId, entity, record.id, record, at)
-  return projectTimestamp(HardCanonPackService.upsertHardCanonItem(data, record as HardCanonItem), projectId, at)
+  return updateRecord({ ...data, storyDirectionGuides: [...data.storyDirectionGuides, record as StoryDirectionGuide] }, projectId, entity, record.id, record, at)
 }
 
 function expectedFingerprint(data: AppData, command: WorldManagementCommand): string {
   const current = command.id ? findRecord(data, command.projectId, command.entity, command.id) : null
-  return decisionFingerprint({ command: { ...command, expectedFingerprint: undefined }, current })
+  // A create can become a reuse (or gain a near match) without its requested
+  // ID changing. Bind the preview to the compared pack as well as the target.
+  const comparedItems = command.entity === 'hard_canon' && (command.action === 'create' || command.action === 'update')
+    ? HardCanonPackService.getHardCanonPackForProject(data, command.projectId).items : undefined
+  let timelineBinding
+  if (command.entity === 'timeline_event') {
+    const patch = command.patch ?? {}, event = current as TimelineEvent | null
+    const ref = 'chapterId' in patch ? patch.chapterId : 'chapterOrder' in patch ? patch.chapterOrder
+      : event?.chapterId === undefined ? event?.chapterOrder : event.chapterId
+    timelineBinding = data.chapters.filter(ch => ch.projectId === command.projectId && (ch.id === ref || ch.order === ref))
+      .map(ch => [ch.id, ch.order, ch.archivedAt ?? null])
+  }
+  return decisionFingerprint({ command: { ...command, expectedFingerprint: undefined }, current, comparedItems, timelineBinding })
 }
 
 function commandFingerprint(command: WorldManagementCommand): string {
@@ -562,7 +548,25 @@ function resultFromReceipt(command: WorldManagementCommand, receipt: WorldManage
   }
 }
 
-function buildMutation(data: AppData, command: WorldManagementCommand): { data: AppData; id: ID; before: ManagedRecord | null; after: ManagedRecord; changed: boolean } {
+interface WorldMutation {
+  data: AppData; id: ID; before: ManagedRecord | null; after: ManagedRecord; changed: boolean
+  hardCanonDuplicates?: HardCanonDuplicates
+}
+
+function authorHardCanon(data: AppData, draft: HardCanonItem, before: ManagedRecord | null, at: string): WorldMutation {
+  const saved = HardCanonPackService.saveAuthoredItem(data, draft, at)
+  const hardCanonDuplicates = copy(saved.duplicates)
+  if (before && sameManagedFields(before, saved.item)) {
+    return { data, id: before.id, before, after: before, changed: false, hardCanonDuplicates }
+  }
+  return {
+    data: saved.reused ? data : projectTimestamp(saved.data, draft.projectId, at),
+    id: saved.item.id, before: saved.reused ? saved.item : before, after: saved.item, changed: !saved.reused,
+    hardCanonDuplicates
+  }
+}
+
+function buildMutation(data: AppData, command: WorldManagementCommand): WorldMutation {
   const at = timestamp(command.source)
   const patch = command.patch ?? {}
   const createId = recordId(command.entity, command.operationId)
@@ -583,7 +587,7 @@ function buildMutation(data: AppData, command: WorldManagementCommand): { data: 
     }
     const created = buildCreated(data, command, id, at)
     if (command.entity === 'hard_canon') {
-      assertNoHardCanonDeduplicationConflict(data, command.projectId, created.record as HardCanonItem)
+      return authorHardCanon(data, created.record as HardCanonItem, null, at)
     }
     const next = command.entity === 'character_state'
       ? created.data
@@ -596,9 +600,7 @@ function buildMutation(data: AppData, command: WorldManagementCommand): { data: 
   if (!before) throw new Error(`${command.entity} not found in project: ${id}`)
   const update = buildUpdated(data, command, before, at)
   const after = update.record
-  if (command.entity === 'hard_canon') {
-    assertNoHardCanonDeduplicationConflict(data, command.projectId, after as HardCanonItem)
-  }
+  if (command.entity === 'hard_canon') return authorHardCanon(data, after as HardCanonItem, before, at)
   if (sameManagedFields(before, after)) return { data, id, before, after: before, changed: false }
   const nextData = update.data
     ? projectTimestamp(update.data, command.projectId, at)
@@ -621,11 +623,10 @@ function buildCreated(data: AppData, command: WorldManagementCommand, id: ID, at
   }
   if (command.entity === 'timeline_event') {
     validateTimelinePatch(data, command.projectId, patch)
-    return { record: timelineFromPatch(command.projectId, id, patch, at), data }
+    return { record: timelineFromPatch(data, command.projectId, id, patch, at), data }
   }
   if (command.entity === 'hard_canon') {
-    validateHardCanonPatch(data, command.projectId, patch)
-    return { record: hardCanonFromPatch(command.projectId, id, patch, at), data }
+    return { record: hardCanonFromPatch(command.projectId, id, checkedHardCanonPatch(data, command.projectId, patch), at), data }
   }
   validateDirectionPatch(data, command.projectId, patch)
   return { record: directionFromPatch(command.projectId, id, patch, at), data }
@@ -634,6 +635,7 @@ function buildCreated(data: AppData, command: WorldManagementCommand, id: ID, at
 function buildUpdated(data: AppData, command: WorldManagementCommand, before: ManagedRecord, at: string): { record: ManagedRecord; data?: AppData } {
   const patch = command.patch ?? {}
   if (command.action === 'archive') {
+    if (command.entity === 'hard_canon') assertOnlyFields(patch, [], 'HardCanon archive patch')
     if (command.entity === 'character' || command.entity === 'timeline_event') {
       throw new Error(`${command.entity} has no supported archive lifecycle. Edit the record; do not emulate an untracked archive.`)
     }
@@ -664,7 +666,10 @@ function buildUpdated(data: AppData, command: WorldManagementCommand, before: Ma
       return { record: { ...next, treatmentMode: normalizeTreatmentMode(next.treatmentMode, next.status, next.weight) } }
     }
     const record = { ...before, status, updatedAt: at } as ManagedRecord
-    if (command.entity === 'story_direction') assertActiveDirectionRange(record as StoryDirectionGuide)
+    if (command.entity === 'story_direction' && status === 'active') {
+      const guide = record as StoryDirectionGuide
+      return { record: { ...directionFromPatch(command.projectId, guide.id, patch, at, guide), source: guide.source } }
+    }
     return { record }
   }
 
@@ -693,16 +698,14 @@ function buildUpdated(data: AppData, command: WorldManagementCommand, before: Ma
   }
   if (command.entity === 'timeline_event') {
     validateTimelinePatch(data, command.projectId, patch)
-    return { record: { ...before, ...patch, updatedAt: at } as TimelineEvent }
+    return { record: editTimelineEvent(before as TimelineEvent, { ...patch, updatedAt: at }, data.chapters) }
   }
   if (command.entity === 'hard_canon') {
-    validateHardCanonPatch(data, command.projectId, patch)
-    return { record: { ...before, ...patch, projectId: command.projectId, sourceType: 'manual', updatedAt: at } as HardCanonItem }
+    const fields = checkedHardCanonPatch(data, command.projectId, patch, true)
+    return { record: { ...before, ...fields, projectId: command.projectId, updatedAt: at } as HardCanonItem }
   }
   validateDirectionPatch(data, command.projectId, patch)
-  const guide = normalizeStoryDirectionGuide({ ...before, ...patch, projectId: command.projectId, source: 'mixed', updatedAt: at })
-  assertActiveDirectionRange(guide)
-  return { record: guide }
+  return { record: directionFromPatch(command.projectId, before.id, patch, at, before as StoryDirectionGuide) }
 }
 
 export class WorldManagementService {
@@ -749,6 +752,7 @@ export class WorldManagementService {
       fingerprint: previewFingerprint, changed: mutation.changed, replayed: false,
       before: mutation.before ? visibleRecord(mutation.before) : null,
       after: visibleRecord(mutation.after),
+      ...(mutation.hardCanonDuplicates && { hardCanonDuplicates: mutation.hardCanonDuplicates }),
       audit: { actor: 'agent', source: command.source, operationId: command.operationId, entity: command.entity, action: command.action,
         recordedAt: at, receiptId: receiptId(command.operationId), authorizationGrantId: null }
     }
@@ -781,6 +785,7 @@ export class WorldManagementService {
       result: {
         projectId: command.projectId, entity: command.entity, action: command.action, id: mutation.id,
         fingerprint: currentFingerprint, changed: mutation.changed, replayed: false,
+        ...(mutation.hardCanonDuplicates && { hardCanonDuplicates: mutation.hardCanonDuplicates }),
         before: receipt.before, after: receipt.after, audit: audit(command, receipt)
       }
     }

@@ -1,56 +1,15 @@
-import { mkdir, readFile, rm, writeFile } from 'node:fs/promises'
-import { dirname, join, resolve } from 'node:path'
-import { pathToFileURL } from 'node:url'
-import ts from 'typescript'
+import { loadDomainModules } from './utils/load-domain-modules.mjs'
 import { repoRoot } from './utils/repo-root.mjs'
 
 const root = repoRoot
-const outDir = join(root, 'tmp', 'context-relevance-scoring-test')
 const timestamp = '2026-01-01T00:00:00.000Z'
 
 function assert(condition, message, details = {}) {
   return condition ? { ok: true, message } : { ok: false, message, details }
 }
 
-function rewriteRelativeImports(source) {
-  return source.replace(/(from\s+['"])(\.{1,2}\/[^'"]+?)(['"])/g, (_match, prefix, specifier, suffix) => {
-    if (/\.(mjs|js|json)$/.test(specifier)) return `${prefix}${specifier}${suffix}`
-    return `${prefix}${specifier}.mjs${suffix}`
-  })
-}
-
-async function compileTsTree(files) {
-  await rm(outDir, { recursive: true, force: true })
-  for (const relativePath of files) {
-    const source = await readFile(join(root, relativePath), 'utf-8')
-    const compiled = ts.transpileModule(source, {
-      compilerOptions: {
-        module: ts.ModuleKind.ES2022,
-        target: ts.ScriptTarget.ES2022,
-        useDefineForClassFields: true
-      }
-    })
-    const outPath = join(outDir, relativePath).replace(/\.tsx?$/, '.mjs')
-    await mkdir(dirname(outPath), { recursive: true })
-    await writeFile(outPath, rewriteRelativeImports(compiled.outputText), 'utf-8')
-  }
-}
-
-async function loadModules() {
-  await compileTsTree([
-    'src/shared/foreshadowingTreatment.ts',
-    'src/services/TokenEstimator.ts',
-    'src/services/StageSummaryService.ts',
-    'src/services/ContextCompressionService.ts',
-    'src/services/contextBudget/types.ts',
-    'src/services/contextBudget/scoringEngine.ts',
-    'src/services/contextBudget/selectionEngine.ts',
-    'src/services/contextBudget/selectionFinalizer.ts',
-    'src/services/contextBudget/traceBuilder.ts',
-    'src/services/ChapterLifecycleService.ts',
-    'src/services/ContextBudgetManager.ts'
-  ])
-  return import(`${pathToFileURL(join(outDir, 'src/services/ContextBudgetManager.mjs')).href}?t=${Date.now()}`)
+function loadModules() {
+  return loadDomainModules('services/ContextBudgetManager')
 }
 
 function makeProject() {

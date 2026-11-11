@@ -1,4 +1,4 @@
-import { keywordOccurrences } from './noveltyMatcher'
+import { createKeywordMatcher, keywordOccurrences } from './noveltyMatcher'
 import { normalizeForMatch } from './noveltyTextCore'
 
 export {
@@ -14,7 +14,11 @@ export {
   type KeywordOccurrence
 } from './noveltyMatcher'
 
-type NoveltyTextMatchMemo = Map<string, Map<string, boolean>>
+type NoveltyTextMatchMemo = Map<string, {
+  normalized: string
+  match: ReturnType<typeof createKeywordMatcher>
+  terms: Map<string, boolean>
+}>
 
 let activeAuditMemo: NoveltyTextMatchMemo | null = null
 
@@ -34,12 +38,18 @@ export function withNoveltyAuditMemo<T>(run: () => T): T {
 export function textMatches(source: string, term: string): boolean {
   const memo = activeAuditMemo
   if (!memo) return textMatchesUncached(source, term)
-  const cached = memo.get(source)?.get(term)
+  const cached = memo.get(source)?.terms.get(term)
   if (cached !== undefined) return cached
-  const result = textMatchesUncached(source, term)
-  const terms = memo.get(source) ?? new Map<string, boolean>()
-  terms.set(term, result)
-  memo.set(source, terms)
+  const normalizedTerm = normalizeForMatch(term)
+  if (!source || normalizedTerm.length < 2) return false
+  let prepared = memo.get(source)
+  if (!prepared) {
+    prepared = { normalized: normalizeForMatch(source), match: createKeywordMatcher(source), terms: new Map() }
+    memo.set(source, prepared)
+  }
+  const result = Boolean(prepared.normalized) &&
+    (prepared.normalized === normalizedTerm || prepared.match([term], 0).length > 0)
+  prepared.terms.set(term, result)
   return result
 }
 

@@ -1,19 +1,22 @@
 import { useMemo, useRef, useState } from 'react'
-import type { Chapter, ID } from '../../../shared/types'
+import type { Chapter } from '../../../shared/types'
 import { StageSummaryService } from '../../../services/StageSummaryService'
 import { nextChapterOrder } from '../../../services/ChapterLifecycleService'
 import { getDirectorDashboard, type DirectorDestination, type DirectorNextAction } from '../../../services/DirectorNextActionService'
+import { visibleCharacterCount } from '../../../services/chapterTaskContractText'
 import { qualityGateEffectivelyPassed } from '../../../shared/qualityGatePolicy'
 import { StatusBadge } from '../components/UI'
 import { useProjectData } from '../hooks/useProjectData'
 import { formatDate, newId, now } from '../utils/format'
 import type { ProjectProps } from './viewTypes'
 import { updateProjectTimestamp } from './viewTypes'
+import { BookProgressSection } from './bookProgress/BookProgressSection'
+import { ProjectUsagePanel } from './projectUsage/ProjectUsagePanel'
+import type { BookProgressNavigation } from './bookProgress/navigation'
 import '../styles/views/dashboard.css'
 
-interface DashboardProps extends ProjectProps {
+interface DashboardProps extends ProjectProps, BookProgressNavigation {
   onNavigate?: (view: DirectorDestination) => void
-  onOpenChapter?: (chapterId: ID) => void
 }
 
 const draftStatusLabels = { draft: '待审阅', accepted: '已采纳', rejected: '已放弃' }
@@ -23,11 +26,11 @@ function excerpt(text: string | undefined, limit = 180): string {
   return value.length > limit ? `${value.slice(0, limit)}…` : value
 }
 
-export function DashboardView({ data, project, saveData, onNavigate, onOpenChapter }: DashboardProps) {
+export function DashboardView({ data, project, saveData, onNavigate, onOpenChapter, onOpenSource }: DashboardProps) {
   const scoped = useProjectData(data, project.id)
-  const dashboard = useMemo(() => getDirectorDashboard(data, project.id, {
-    navigate: Boolean(onNavigate), openChapter: Boolean(onOpenChapter)
-  }), [data, project.id, onNavigate, onOpenChapter])
+  const navigate = Boolean(onNavigate), openChapter = Boolean(onOpenChapter)
+  const dashboard = useMemo(() => getDirectorDashboard(data, project.id, { navigate, openChapter }),
+    [data, project.id, navigate, openChapter])
   const latestStage = useMemo(() => [...scoped.stageSummaries]
     .sort((a, b) => b.chapterEnd - a.chapterEnd)[0], [scoped.stageSummaries])
   const latestLog = useMemo(() => [...scoped.characterStateLogs]
@@ -126,6 +129,9 @@ export function DashboardView({ data, project, saveData, onNavigate, onOpenChapt
         <div><dt>待确认变化</dt><dd>{dashboard.pendingCandidateCount}<small>条</small></dd></div>
         <div><dt>剧情回顾覆盖</dt><dd>{latestStage ? `${latestStage.chapterStart}–${latestStage.chapterEnd}` : '尚无'}{latestStage && <small>章</small>}</dd></div>
       </dl>
+      <BookProgressSection key={project.id} data={data} project={project} saveData={saveData}
+        totalWords={dashboard.totalWords} onOpenChapter={onOpenChapter} onOpenSource={onOpenSource} />
+      <ProjectUsagePanel project={project} saveData={saveData} />
 
       <div className="director-workspace">
         <section className="director-manuscript" aria-labelledby="director-manuscript-title">
@@ -141,7 +147,7 @@ export function DashboardView({ data, project, saveData, onNavigate, onOpenChapt
               {dashboard.recentChapters.map((chapter) => <button type="button" key={chapter.id} disabled={!onOpenChapter}
                 onClick={() => onOpenChapter?.(chapter.id)} aria-label={`打开第 ${chapter.order} 章：${chapter.title}`}>
                 <span className="director-chapter-number">{String(chapter.order).padStart(2, '0')}</span>
-                <strong>{chapter.title}</strong><span>{chapter.body.replace(/\s/g, '').length.toLocaleString()} 字</span><span aria-hidden="true">→</span>
+                <strong>{chapter.title}</strong><span>{visibleCharacterCount(chapter.body).toLocaleString()} 字</span><span aria-hidden="true">→</span>
               </button>)}
             </div>
           </> : <div className="director-empty"><strong>第一章，等你落笔。</strong><p>还没有章节正文。</p></div>}
@@ -153,7 +159,7 @@ export function DashboardView({ data, project, saveData, onNavigate, onOpenChapt
             {latestDraft && <li>
               <div><StatusBadge tone={latestDraft.status === 'accepted' ? 'success' : 'info'}>{draftStatusLabels[latestDraft.status]}</StatusBadge><time>{formatDate(latestDraft.updatedAt)}</time></div>
               <h3>{latestDraft.title}</h3>
-              <p>{qualityReport ? `质量审阅 ${qualityReport.overallScore} 分 · ${qualityGateEffectivelyPassed(qualityReport) ? '已通过' : '待调整'}` : '当前正文尚待质量审阅'}</p>
+              <p>{dashboard.lengthOverflowNotice ?? (qualityReport ? `质量审阅 ${qualityReport.overallScore} 分 · ${qualityGateEffectivelyPassed(qualityReport) ? '已通过' : '待调整'}` : '当前正文尚待质量审阅')}</p>
             </li>}
             {latestLog && <li><div><StatusBadge tone="neutral">角色变化</StatusBadge><time>{formatDate(latestLog.createdAt)}</time></div>
               <h3>{logCharacter?.name || '角色状态记录'}</h3><p>{excerpt(latestLog.note, 110)}</p></li>}

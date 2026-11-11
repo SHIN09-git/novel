@@ -9,6 +9,7 @@ import type {
   DiagnosticsEvaluateQualityGateResult
 } from '../../shared/ipc/ipcTypes'
 import { validateString } from '../../shared/validation'
+import { normalizeHardCanonAudit } from '../../shared/normalizers/hardCanonAudit'
 import type { ChapterTask } from '../../shared/types'
 import type { DiagnosticsService } from '../services/DiagnosticsService'
 import { validateChatCompletionRequest } from './aiChatValidation'
@@ -98,6 +99,8 @@ export function registerDiagnosticsIpcHandlers(diagnosticsService: DiagnosticsSe
   ipcMain.handle(
     IPC_CHANNELS.DIAGNOSTICS_EVALUATE_QUALITY_GATE,
     safeIpcHandler(async (_event, request: DiagnosticsEvaluateQualityGateRequest): Promise<DiagnosticsEvaluateQualityGateResult> => {
+      const hardCanonAudit = normalizeHardCanonAudit(request.hardCanonAudit)
+      if (request.hardCanonAudit !== undefined && !hardCanonAudit) throw new Error('硬设定核查记录不完整，请重新核查当前正文。')
       return diagnosticsService.evaluateQualityGate({
         ...request,
         runId: request.runId === undefined
@@ -110,6 +113,7 @@ export function registerDiagnosticsIpcHandlers(diagnosticsService: DiagnosticsSe
         draftId: request.draftId === null ? null : validateString(request.draftId, 'draftId', { minLength: 1, maxLength: 200 }),
         context: validateString(request.context, 'context', { minLength: 0, maxLength: 1_000_000, trim: false }),
         targetChapterOrder: optionalPositiveInteger(request.targetChapterOrder, 'targetChapterOrder'),
+        hardCanonAudit,
         hasAuthoritativeChapterTask: optionalBoolean(request.hasAuthoritativeChapterTask, 'hasAuthoritativeChapterTask'),
         chapterTask: optionalChapterTask(request.chapterTask, 'chapterTask'),
         characterStateFacts: boundedArray(request.characterStateFacts, 'characterStateFacts', 2_000)?.filter((fact) => fact.projectId === request.projectId),

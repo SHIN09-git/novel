@@ -6,6 +6,10 @@ import type {
 } from '../shared/types'
 import { effectiveTreatmentMode, isForeshadowingAvailableAtChapter, treatmentAllowsDefaultPrompt } from '../shared/foreshadowingTreatment'
 import { activeChapters } from './ChapterLifecycleService'
+import { projectCharacterStatesAtChapter } from './characterState/stateAsOf'
+import { getRelevantCharacterStatesForPrompt } from './characterState/stateSelection'
+import { writingCardAtChapter } from './characterState/writingCard'
+import { isolateOpeningCharacterCards } from './OpeningChapterContextPolicy'
 import type {
   ContextEvaluationCandidate,
   ContextEvaluationOptions,
@@ -92,8 +96,20 @@ export class ContextBudgetManager {
     budgetProfile: ContextBudgetProfile,
     forcedSelection: ForcedContextSelection = {}
   ): ContextSelectionResult {
-    data = { ...data, chapters: activeChapters(data.chapters) }
     const isolateOpeningLegacyContext = Boolean(forcedSelection.isolateOpeningLegacyContext && targetChapterOrder === 1)
+    const sourceChapters = data.stateSourceChapters ?? data.chapters
+    const historicalReplay = sourceChapters.some(c =>
+      c.projectId === data.project.id && !c.archivedAt?.trim() && c.body?.trim() && c.order >= targetChapterOrder)
+    const characters = data.characters.filter(c => c.projectId === data.project.id)
+    const allProjectedFacts = isolateOpeningLegacyContext ? [] : projectCharacterStatesAtChapter(
+      (data.characterStateFacts ?? []).filter(f => f.projectId === data.project.id),
+      (data.characterStateTransactions ?? []).filter(t => t.projectId === data.project.id), targetChapterOrder,
+      sourceChapters, data.stateSourceChapters ? 'complete' : 'partial')
+    const selectedFacts = targetChapterOrder === 1 ? [] : getRelevantCharacterStatesForPrompt(
+      characters.map(c => c.id), forcedSelection.contextNeedPlan ?? null, targetChapterOrder, allProjectedFacts)
+    data = { ...data, chapters: activeChapters(data.chapters), characterStateFacts: selectedFacts,
+      characters: isolateOpeningLegacyContext ? isolateOpeningCharacterCards(characters) :
+        characters.map(c => writingCardAtChapter(c, allProjectedFacts, targetChapterOrder, historicalReplay).card) }
     const openingTaskText = isolateOpeningLegacyContext ? positiveTaskText(forcedSelection.chapterTask) : ''
     const openingTaskCharacterIds = new Set(
       isolateOpeningLegacyContext
@@ -131,6 +147,7 @@ export class ContextBudgetManager {
 
     const scoringBase: ScoringContext = {
       targetChapterOrder,
+      characterStateFacts: selectedFacts,
       task: forcedSelection.chapterTask ?? null,
       forcedCharacterIds,
       forcedForeshadowingIds,

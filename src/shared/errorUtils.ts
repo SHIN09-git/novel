@@ -18,26 +18,9 @@ export function isJsonParseError(error: unknown): boolean {
 }
 
 export function describeNetworkError(error: unknown): string {
-  if (!(error instanceof Error)) return getUserFriendlyError(error)
-
-  const parts = [error.message]
-  const cause = (error as Error & { cause?: unknown }).cause
-  if (cause && typeof cause === 'object') {
-    const causeRecord = cause as Record<string, unknown>
-    const causeMessage = typeof causeRecord.message === 'string' ? causeRecord.message : ''
-    const detailKeys = ['code', 'errno', 'syscall', 'hostname', 'host', 'port']
-    const details = detailKeys
-      .map((key) => {
-        const value = causeRecord[key]
-        return value === undefined || value === null || value === '' ? '' : `${key}=${String(value)}`
-      })
-      .filter(Boolean)
-
-    if (causeMessage && !parts.includes(causeMessage)) parts.push(causeMessage)
-    if (details.length) parts.push(details.join(', '))
-  }
-
-  return parts.filter(Boolean).join('；')
+  // The transport diagnoses known causes separately. A raw nested message or URL can contain credentials.
+  if (error instanceof SyntaxError) return '无法解析 JSON 响应，请检查服务地址与接口格式。'
+  return redactSensitiveText(getUserFriendlyError(error).replace(/\b[a-z][\w+.-]{0,31}:\/\/[^\s"'<>]+/gi, '[地址已隐藏]'))
 }
 
 export function redactSensitiveText(text: string, secrets: Array<string | undefined | null> = []): string {
@@ -47,6 +30,8 @@ export function redactSensitiveText(text: string, secrets: Array<string | undefi
     if (trimmed) sanitized = sanitized.split(trimmed).join('[REDACTED]')
   }
   return sanitized
+    .replace(/\b([a-z][\w+.-]{0,31}:\/\/)[^/\s?#"'<>]*@/gi, '$1[REDACTED]@')
+    .replace(/(Authorization["']?\s*:\s*["']?Basic\s+)[A-Za-z0-9+/=_-]+/gi, '$1[REDACTED]')
     .replace(/"api[_-]?key"\s*:\s*"[^"]+"/gi, '"apiKey":"[REDACTED]"')
     .replace(/Authorization\s*:\s*Bearer\s+[^\s"',;]+/gi, 'Authorization: Bearer [REDACTED]')
     .replace(/\bsk-ant-[A-Za-z0-9_-]{8,}\b/g, 'sk-ant-[REDACTED]')

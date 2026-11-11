@@ -4,6 +4,7 @@ import { getEventListeners } from 'node:events'
 import { createRequire } from 'node:module'
 import { join } from 'node:path'
 import { performance } from 'node:perf_hooks'
+import { inspect } from 'node:util'
 import { build } from 'esbuild'
 import { repoRoot } from './utils/repo-root.mjs'
 
@@ -320,22 +321,40 @@ if (process.argv.includes('--benchmark')) {
   await test('HTTP success and body failure release caller abort listeners and timeout handles', async () => {
     const timers = new Set()
     const caller = new AbortController()
+    const { diagnoseAiConnection } = await load('src/main/utils/connectionDiagnosis.ts')
+    const privateMarker = 'FIXTURE_PRIVATE_BODY'
+    let receivedHeaders = 0
     let failBody = false
+    let reset = false
     const { AIHttpClient } = await load('src/main/services/AIHttpClient.ts', {}, {
       setTimeout: (callback) => { timers.add(callback); return callback },
       clearTimeout: (callback) => timers.delete(callback),
       fetch: async () => new Response(new ReadableStream({
         start(controller) {
-          if (failBody) controller.error(new Error('fixture body error'))
+          if (failBody) controller.error(Object.assign(new Error('fixture body error: ' + privateMarker), {
+            code: reset ? 'ECONNRESET' : privateMarker
+          }))
           else { controller.enqueue(new TextEncoder().encode('{}')); controller.close() }
         }
       }))
     })
     for (let index = 0; index < 30; index += 1) {
       failBody = index % 2 !== 0
-      const pending = new AIHttpClient().post('https://fixture.invalid', {}, {}, { signal: caller.signal })
-      if (failBody) await assert.rejects(pending, /fixture body error/)
+      reset = index % 4 === 3
+      const pending = new AIHttpClient().post('https://fixture.invalid', {}, {}, {
+        signal: caller.signal, onResponseStarted: () => { receivedHeaders++ }
+      })
+      if (failBody) await assert.rejects(pending, error => {
+        const diagnosis = diagnoseAiConnection(error, { transport: 'custom-fetch' })
+        assert.equal(error.phase, 'reading')
+        assert.equal(diagnosis?.kind, 'read_failure')
+        assert.match(diagnosis.message, /已收到响应头.*响应正文/)
+        assert.equal(error.cause?.code, reset ? 'ECONNRESET' : undefined)
+        assert.ok(![inspect(error), diagnosis.message].some(text => text.includes(privateMarker)), 'body error leaked private data')
+        return true
+      })
       else assert.deepEqual(await (await pending).json(), {})
+      assert.equal(receivedHeaders, index + 1)
       assert.equal(getEventListeners(caller.signal, 'abort').length, 0)
       assert.equal(timers.size, 0)
     }

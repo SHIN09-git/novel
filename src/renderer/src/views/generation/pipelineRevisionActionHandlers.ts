@@ -204,7 +204,7 @@ export async function generateRevisionCandidate(
   const { AIService } = await import('../../../../services/AIService')
   const sourceJob = data.chapterGenerationJobs.find((item) => item.id === draft.jobId) ?? selectedJob
   const runSettings = resolvePipelineRoleSettings(sourceJob?.aiRunConfig, data.settings, 'revision')
-  const aiService = new AIService(runSettings, { runId: sourceJob?.id ?? draft.jobId })
+  const aiService = new AIService(runSettings, { projectId: draft.projectId, runId: sourceJob?.id ?? draft.jobId })
   const result = await aiService.generateRevisionCandidate({ title: draft.title, body: draft.body }, issue, revisionContext.context)
   if (!result.data) {
     setPipelineMessage(result.error || result.parseError || '修订候选生成失败')

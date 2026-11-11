@@ -3,7 +3,10 @@ import { AGENT_REVISION_TOOL_DEFINITIONS } from './agentRevisionToolDefinitions'
 import { AGENT_CANDIDATE_UNDO_DEFINITIONS } from './agentCandidateUndoDefinitions'
 import { AGENT_CHAPTER_ACCEPTANCE_DEFINITIONS } from './agentChapterAcceptanceTools'
 import { AGENT_CHAPTER_TASK_TOOL_DEFINITIONS } from './agentChapterTaskDefinitions'
+import { chapterTitleDefinitions } from './agentChapterTitleTools'
 import { AGENT_WORLD_TOOL_DEFINITIONS } from './agentWorldDefinitions'
+import { timelineSeasons, timelineShifts } from '../../shared/normalizers/timeline'
+import { bookContinuityProperties } from './agentBookContinuityRead'
 
 const storageProperties = {
   storagePath: { type: 'string', description: 'Optional SQLite or JSON storage path.' },
@@ -137,6 +140,9 @@ function candidateDecisionsSchema(apply: boolean): JsonSchema {
           type: 'object', additionalProperties: false,
           properties: {
             title: { type: 'string' }, storyTime: { type: 'string' },
+            ...amendmentStringProperties(['timelineKey', 'location', 'timeAnchor', 'deadlineKey', 'sourceExcerpt']),
+            season: { type: 'string', enum: timelineSeasons }, timeShift: { type: 'string', enum: timelineShifts },
+            elapsedDays: { type: 'integer', minimum: 0 }, remainingDays: { type: 'integer', minimum: 0 },
             participantCharacterIds: { type: 'array', items: { type: 'string' } },
             result: { type: 'string' }, downstreamImpact: { type: 'string' }
           }, required: []
@@ -193,9 +199,16 @@ const candidateReadProperties = {
   maxChars: { type: 'integer', minimum: 1 }
 }
 
+const runDiagnosticsSchema = schema({
+  jobId: { type: 'string' },
+  detail: { type: 'string', enum: ['summary', 'compact', 'full'], default: 'compact' },
+  maxChars: { type: 'integer', minimum: 1 }
+}, ['jobId'])
+
 export const AGENT_TOOL_DEFINITIONS: AgentToolDefinition[] = [
   ...AGENT_CHAPTER_ACCEPTANCE_DEFINITIONS,
   ...AGENT_CHAPTER_TASK_TOOL_DEFINITIONS,
+  ...chapterTitleDefinitions(schema),
   ...AGENT_WORLD_TOOL_DEFINITIONS,
   {
     name: 'agent.getProjectAuthorization', riskLevel: 'read',
@@ -252,9 +265,37 @@ export const AGENT_TOOL_DEFINITIONS: AgentToolDefinition[] = [
   },
   {
     name: 'agent.getNextChapterTarget',
-    description: 'Find the next chapter order for a project.',
+    description: 'Find the next assignable chapter order, not evidence that earlier chapters were written back. Use agent.getBookProgress for manuscript coverage and gaps.',
     riskLevel: 'read',
     inputSchema: schema({ projectId: { type: 'string' }, project: { type: 'string' } })
+  },
+  {
+    name: 'agent.getProjectUsage',
+    description: 'Read known project-wide provider token counts, dispatches, gaps and user-priced estimates by phase and currency. Includes unaccepted work. No balance lookup or model call.',
+    riskLevel: 'read',
+    inputSchema: schema({ projectId: { type:'string' }, project: { type:'string' } })
+  },
+  {
+    name: 'agent.estimateProjectUsage',
+    description: 'Estimate one planned request locally against the project rate card. Use a counted input or a saved snapshot, not both. A snapshot excludes later prompt wrapping. Unknowns and subscription costs stay unknown.',
+    riskLevel: 'read',
+    inputSchema: schema({ projectId:{type:'string'}, project:{type:'string'}, provider:{type:'string',enum:['openai','compatible','local','codex_cli']},
+      endpoint:{type:'string'}, model:{type:'string'}, inputTokens:{type:'integer',minimum:0}, snapshotId:{type:'string'},
+      maxOutputTokens:{type:'integer',minimum:1} }, ['provider','model'])
+  },
+  {
+    name: 'agent.getBookProgress',
+    description: 'Read the current manuscript word count, goal, missing chapter ranges and paged writeback evidence. Historical text counts; drafts, archives and previous versions do not. No prose or model call.',
+    riskLevel: 'read',
+    inputSchema: schema({ projectId: { type: 'string' }, project: { type: 'string' },
+      fromChapter: { type: 'integer', minimum: 1 }, toChapter: { type: 'integer', minimum: 1 },
+      issuesOnly: { type: 'boolean' }, offset: { type: 'integer', minimum: 0 }, limit: { type: 'integer', minimum: 1, maximum: 200 } })
+  },
+  {
+    name: 'agent.getBookContinuityReport',
+    description: 'Read project-scoped continuity findings in the current manuscript: conflicts, evidence to verify, and open threads. Returns counts and a page of chapter IDs, current versions, content hashes and short quotes. No writes, full chapters, or model calls.',
+    riskLevel: 'read', annotations: { readOnlyHint: true },
+    inputSchema: { ...schema(bookContinuityProperties), anyOf: [{ required: ['projectId'] }, { required: ['project'] }] }
   },
   {
     name: 'agent.getArchivedChapters',
@@ -312,15 +353,15 @@ export const AGENT_TOOL_DEFINITIONS: AgentToolDefinition[] = [
   },
   {
     name: 'agent.getRunDiagnostics',
-    description: 'Read job steps, trace counters, and author summary.',
+    description: 'Read job steps, trace counters, and author summary. Incomplete prose is only a step fragment, not a draft. Use detail=full to read its body.',
     riskLevel: 'read',
-    inputSchema: schema({ jobId: { type: 'string' } }, ['jobId'])
+    inputSchema: runDiagnosticsSchema
   },
   {
     name: 'agent.inspectPipelineJob',
     description: 'Alias of agent.getRunDiagnostics for CLI/MCP parity.',
     riskLevel: 'read',
-    inputSchema: schema({ jobId: { type: 'string' } }, ['jobId'])
+    inputSchema: runDiagnosticsSchema
   },
   {
     name: 'agent.getFullRunTrace',
@@ -342,9 +383,9 @@ export const AGENT_TOOL_DEFINITIONS: AgentToolDefinition[] = [
   },
   {
     name: 'agent.getAcceptanceRecommendation',
-    description: 'Build an acceptance/revise/reject recommendation for a completed job.',
+    description: 'Assess the current draft against its reports and active HardCanon rules. Use detail=full for every matched passage and count.',
     riskLevel: 'read',
-    inputSchema: schema({ jobId: { type: 'string' } }, ['jobId'])
+    inputSchema: schema({ jobId: { type: 'string' }, detail: { type: 'string', enum: ['summary', 'compact', 'full'] } }, ['jobId'])
   },
   {
     name: 'agent.startAgentRun',

@@ -4,6 +4,7 @@ import type {
   ID
 } from '../../../../shared/types'
 import { StoryDirectionService } from '../../../../services/StoryDirectionService'
+import { coversStoryDirectionChapter } from '../../../../shared/storyDirectionRange'
 import { createContextBudgetProfile } from '../../utils/contextBudgetProfile'
 import { normalizePipelineOptions, serializeOutput } from './pipelineRuntimeBasics'
 import { PIPELINE_STEP_ORDER } from './pipelineStepDefinitions'
@@ -52,16 +53,17 @@ export async function runPipelineFromStepEngine(
     job.contextSource === 'prompt_snapshot' || job.chapterTaskSnapshot
       ? null
       : StoryDirectionService.getActiveGuideForChapter(effectiveInitialData.storyDirectionGuides ?? [], project.id, options.targetChapterOrder)
-  const activeStoryDirectionBeat = activeStoryDirectionGuide
-    ? StoryDirectionService.getBeatForChapter(activeStoryDirectionGuide, options.targetChapterOrder)
-    : null
+  const snapshotGuide = snapshot?.storyDirectionGuide
+  const tracedGuide = snapshot && snapshotGuide?.projectId === project.id && coversStoryDirectionChapter(snapshotGuide, snapshot.targetChapterOrder)
+    && /^##[ \t]+(?:\d+\.[ \t]*)?中期剧情导向/mu.test(snapshot.finalPrompt) ? snapshotGuide : activeStoryDirectionGuide
+  const tracedBeat = tracedGuide && StoryDirectionService.getBeatForChapter(tracedGuide, snapshot?.targetChapterOrder ?? options.targetChapterOrder)
   const storyDirectionTracePatch = {
-    storyDirectionGuideId: activeStoryDirectionGuide?.id ?? null,
-    storyDirectionGuideSource: activeStoryDirectionGuide?.source ?? null,
-    storyDirectionGuideHorizon: activeStoryDirectionGuide?.horizonChapters ?? null,
-    storyDirectionGuideStartChapterOrder: activeStoryDirectionGuide?.startChapterOrder ?? null,
-    storyDirectionGuideEndChapterOrder: activeStoryDirectionGuide?.endChapterOrder ?? null,
-    storyDirectionBeatId: activeStoryDirectionBeat?.id ?? null,
+    storyDirectionGuideId: tracedGuide?.id ?? null,
+    storyDirectionGuideSource: tracedGuide?.source ?? null,
+    storyDirectionGuideHorizon: tracedGuide ? tracedGuide.endChapterOrder - tracedGuide.startChapterOrder + 1 : null,
+    storyDirectionGuideStartChapterOrder: tracedGuide?.startChapterOrder ?? null,
+    storyDirectionGuideEndChapterOrder: tracedGuide?.endChapterOrder ?? null,
+    storyDirectionBeatId: tracedBeat?.id ?? null,
     storyDirectionAppliedToChapterTask: Boolean(activeStoryDirectionGuide)
   }
   const state: PipelineRunnerState = {

@@ -91,7 +91,6 @@ export async function handleAgentWriteTool(
       })
       await saveAgentRuntimeData(prepared.appData, runtime)
       const executed = await executeAgentChapterPipeline({
-        appData: prepared.appData,
         runtime,
         agentRunId: prepared.agentRun.id,
         jobId: prepared.job.id,
@@ -117,15 +116,7 @@ export async function handleAgentWriteTool(
     case 'agent.retryChapterPipeline': {
       const agentRunId = requiredString(args, 'agentRunId')
       const jobId = requiredString(args, 'jobId')
-      const run = data.agentRuns.find((item) => item.id === agentRunId)
-      const job = data.chapterGenerationJobs.find((item) => item.id === jobId)
-      if (!run) throw new Error(`AgentRun not found: ${agentRunId}`)
-      if (!job) throw new Error(`Pipeline job not found: ${jobId}`)
-      if (run.projectId !== job.projectId || !run.createdJobIds.includes(job.id)) {
-        throw new Error('AgentRun and pipeline job are not part of the same production run.')
-      }
       const executed = await executeAgentChapterPipeline({
-        appData: data,
         runtime,
         agentRunId,
         jobId,

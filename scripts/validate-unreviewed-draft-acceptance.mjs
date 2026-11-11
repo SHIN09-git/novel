@@ -467,6 +467,72 @@ function uiHarness(data, { confirmed = true, mutate, transactional = true } = {}
 }
 
 function registerUiTests() {
+  test('UI: an approved over-limit draft requires one informed confirmation, including for a new chapter', async () => {
+    const data = fixture({ quality: 'passed', editorial: 'approved', existingChapter: false })
+    data.chapterGenerationJobs[0].chapterTaskSnapshot = { targetWordCount: '2-4字', styleRequirement: '禁用“尾”' }
+    draftOf(data).body = '甲 乙\n𠮷丙尾'
+    data.qualityGateReports = [qualityReport(data, 'passed')]
+    data.editorialVerdicts = [verdict(data, 'approved')]
+    const h = uiHarness(data, { confirmed: false })
+    await h.hook.acceptDraft(h.draft)
+    assert.equal(h.calls.saves, 0)
+    assert.equal(h.calls.confirmations.length, 1)
+    assert.match(h.calls.confirmations[0].message, /目标 2–4 字，实际 5 字/)
+    const keep = uiHarness(data)
+    await keep.hook.acceptDraft(keep.draft)
+    assert.equal(keep.calls.saves, 1)
+    assert.equal(keep.current().chapters[0].body, draftOf(data).body)
+    assert.match(keep.calls.bundles[0].acceptanceReview.lengthOverflowNotice, /超出上限 1 字/)
+    const changed = uiHarness(data, { mutate: d => { d.chapterGenerationJobs[0].chapterTaskSnapshot.targetWordCount = '最多3字' } })
+    await changed.hook.acceptDraft(changed.draft)
+    assert.equal(changed.calls.saves, 0)
+  })
+  test('view: current body controls the warning and shortened text cannot inherit a pass', () => {
+    const data = fixture({ quality: 'passed', editorial: 'approved', existingChapter: false })
+    const job = data.chapterGenerationJobs[0]
+    job.chapterTaskSnapshot = { targetWordCount: '最多4字' }
+    data.editorialVerdicts[0].actions = [{ actionType: 'accept_draft', label: '直接接受旧稿', reason: '', priority: 1 }]
+    const render = (component, props) => require('react-dom/server').renderToStaticMarkup(require('react').createElement(component, props))
+    const panels = () => renderViewProbe(data).props
+    const over = panels()
+    assert.match(render(modules.artifact.PipelineCurrentArtifactPanel, { ...over.currentArtifactPanel, activeTab: 'draft' }), /实际 17 字.*请先改短/)
+    const diagnostics = render(modules.diagnostics.PipelineDiagnosticsPanel, over.diagnosticsPanel)
+    assert.match(diagnostics, /篇幅超限，待处理/)
+    assert.doesNotMatch(diagnostics, /可以采纳|直接接受旧稿/)
+    assert.equal(modules.director.getDirectorDashboard(data, 'p1').actions[0].label, '审阅超限草稿')
+    draftOf(data).body = '甲 乙\n𠮷丙'
+    const shortened = panels()
+    assert.equal(shortened.topStatusBar.qualityReport, null)
+    assert.equal(shortened.diagnosticsPanel.editorialVerdict, null)
+    const html = render(modules.artifact.PipelineCurrentArtifactPanel, { ...shortened.currentArtifactPanel, activeTab: 'draft' })
+    assert.match(html, /最多4字.*实际 4 个可见字符/)
+    assert.doesNotMatch(html, /超出上限|先改短/)
+    assert.equal(modules.director.getDirectorDashboard(data, 'p1').lengthOverflowNotice, null)
+    for (const task of [null, { targetWordCount: '约2字' }]) {
+      job.chapterTaskSnapshot = task
+      assert.equal(panels().currentArtifactPanel.lengthOverflowNotice, null)
+    }
+  })
+  test('view: interrupted retry shows the full step fragment without borrowing the previous draft verdict', () => {
+    const data = fixture({ quality: 'passed', editorial: 'approved' })
+    const body = '开头\n' + '正文'.repeat(1000) + '\n片段末尾'
+    Object.assign(data.chapterGenerationJobs[0], { status: 'failed', currentStep: 'generate_chapter_draft' })
+    data.chapterGenerationSteps = [{ id: 'fragment-step', jobId: 'j1', type: 'generate_chapter_draft', status: 'failed',
+      output: JSON.stringify({ kind: 'incomplete_chapter_fragment', title: '中断正文', body, finishReason: 'length' }), updatedAt: later }]
+    const props = renderViewProbe(data).props
+    assert.equal(props.topStatusBar.draft, null)
+    assert.equal(props.topStatusBar.qualityReport, null)
+    assert.equal(props.diagnosticsPanel.editorialVerdict, null)
+    const dashboard = modules.director.getDirectorDashboard(data, 'p1')
+    assert.equal(dashboard.actions[0].kind, 'resume_pipeline')
+    assert.equal(dashboard.qualityReport, null)
+    const html = require('react-dom/server').renderToStaticMarkup(require('react').createElement(modules.artifact.PipelineCurrentArtifactPanel,
+      { ...props.currentArtifactPanel, activeTab: 'steps' }))
+    assert.ok(html.includes(body))
+    assert.match(html, /不能采纳/)
+    assert.match(html, /此前的完整草稿/)
+    assert.doesNotMatch(html, /接受章节草稿|未完成审稿，直接采纳/)
+  })
   test('UI: default reviewed does not silently switch to unreviewed', async () => {
     const h = uiHarness(fixture())
     await h.hook.acceptDraft(h.draft)
@@ -618,6 +684,20 @@ async function storageFor(kind, data) {
 
 function registerStorageTests() {
   for (const kind of ['json', 'sqlite-boundary', 'sqlite-native']) {
+    test(`${kind}: a new upper bound rejects a previously clean receipt and a legacy preview inside the transaction`, async () => {
+      const { storage } = await storageFor(kind, fixture({ quality: 'passed', editorial: 'approved' }))
+      const initial = await storage.loadSnapshot()
+      const reviewed = commit(initial.data, 'reviewed')
+      const legacy = legacyRecord(initial.data)
+      initial.data.chapterGenerationJobs[0].chapterTaskSnapshot = { targetWordCount: '最多4字' }
+      await storage.saveIfCurrent(initial.data, initial.revision)
+      const before = await storage.loadSnapshot()
+      assert.throws(() => commit(before.data, 'reviewed'), /超出上限/)
+      for (const result of [reviewed, legacy]) {
+        await assert.rejects(() => storage.saveChapterCommitBundle(result, before.revision))
+        assert.deepEqual(await storage.loadSnapshot(), before)
+      }
+    })
     test(`${kind}: snapshot round-trip and exact replay preserve revision`, async () => {
       const { storage } = await storageFor(kind, fixture())
       const initial = await storage.loadSnapshot()
@@ -1021,6 +1101,9 @@ async function main() {
     if (!process.argv.includes('--native-only')) {
       modules.view = await bundleViewProbe()
       modules.panel = await bundle('src/renderer/src/components/pipeline/PipelineDraftPanel.tsx', 'panel')
+      modules.artifact = await bundle('src/renderer/src/components/pipeline/PipelineCurrentArtifactPanel.tsx', 'artifact')
+      modules.diagnostics = await bundle('src/renderer/src/components/pipeline/PipelineDiagnosticsPanel.tsx', 'diagnostics')
+      modules.director = await bundle('src/services/DirectorNextActionService.ts', 'director')
       modules.history = await bundle('src/renderer/src/views/chapters/ChapterVersionHistoryPanel.tsx', 'history')
     }
     modules.review = await findReviewHelper()

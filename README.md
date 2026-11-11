@@ -4,33 +4,11 @@
 
 Novel Director 是一个实验性的、本地优先的 AI 长篇小说工作台。它是面向长篇创作的“小说导演台”：管理项目圣经、章节连续性、角色状态账本、伏笔调度、Prompt 上下文、生成追踪、质量门禁和修订流程。
 
-当前仓库是早期 `0.1.6-preview.18` 本地试用候选，适合本地试用和开发验证，不表示已发布 GitHub Release。数据格式和交互体验仍在演进中，请在真实稿件上使用前做好备份。
+当前版本为 `0.1.6-preview.20`，仍在试用阶段。使用真实稿件前请备份。源码更新不代表安装包已更新，包的版本和验证记录以 `release/BUILD_INFO.json` 为准。
 
-Preview.18 将当前 Ink Desk 界面更新纳入安装包与 `win-unpacked`，统一导航、页面、正文区域和操作反馈。发行路径、验证和旧包清理范围见 [发行产物说明](./docs/RELEASE_ARTIFACTS.md)；不迁移或删除作者的小说数据。
+第一次使用请看 [新手教程](./docs/BEGINNER_TUTORIAL.md) 或 [快速开始](./QUICKSTART.md)。Codex 接入和项目权限见 [Agent 授权指南](./docs/AGENT_PROJECT_AUTHORIZATION.md)。
 
-Preview.17 针对后端实测热点减少每日备份检查的全库读取、旧任务恢复和 Novelty 审计的重复计算，修补 SQLite 首次打开及迁移失败路径，并保留现有事务、JSON fallback 和生成行为。范围、前后实测与复现命令见 [后端性能复核](./docs/BACKEND_PERFORMANCE_REVIEW.md)。
-
-Preview.16 修复角色之间的新建状态输入串用，以及日志/状态保存回执清掉新输入的问题。角色切换保留各自页内草稿，保存中防重复点击，失败可继续编辑和重试；不自动入账或接受候选。见 [角色编辑反馈验收](./docs/UI_HIG_CHARACTER_DRAFTS.md)。
-
-Preview.15 补齐官方 DeepSeek V4.1 Flash 的 `deepseek-flash` 名称兼容，保持与旧 Flash 名称一致的非思考请求参数，不改作者保存的模型和第三方端点。真实模型对照本轮按作者要求跳过，未产生费用；见 [检查与修复记录](./docs/DEEPSEEK_FLASH_COMPATIBILITY.md)。
-
-Preview.14 将角色页整理为角色资料、动态账本和状态日志，加入角色搜索、键盘页签和按需展开的新建状态表单。账本先呈现已生效状态，不改变候选确认和保存逻辑。见 [角色工作区验收](./docs/UI_HIG_CHARACTER_WORKSPACE.md)。
-
-Preview.13 延续 HIG 工作区优化：项目列表优先展示，Prompt 分为任务、编辑、上下文和历史，保留手动编辑及准确的快照来源；修订保存不覆盖新输入。页面变化、验证范围与实际包状态见 [作者工作区验收](./docs/UI_HIG_AUTHOR_WORKSPACE.md)。
-
-Preview.12 统一明暗主题、按钮和文字层级，顶部可收起侧栏，窄窗口保留章节列表与正文并排，修复深色角色页的可读性。借鉴 Apple HIG，保留 Windows 使用习惯；详见 [界面验收记录](./docs/UI_HIG_WORKSPACE.md)。
-
-Preview.11 修复采纳草稿时因默认字段差异误报生成记录不可变的问题；无需重新生成正文。修复边界与验证见 [采纳误冲突记录](./docs/FIX_DRAFT_ACCEPTANCE_TRACE.md)。
-
-Agent 四个项目概览工具已改为定向读取，500 章摘要中位耗时约从 397ms 降到 32ms，信息不减少。见 [Agent 概览实测](./docs/OPTIMIZATION_AGENT_OVERVIEW_READ.md)。需重新连接常驻的仓库 MCP 服务；本批不改变桌面全量刷新，也不宣称减少模型 token。
-
-本批针对实测瓶颈改善长篇保存：编辑一章不再重写全部历史，生成步骤校验不再加载整本小说。新增 10/100/500 章真实存储与 Electron 基准、正式采纳链成本归集；全量读取和真实模型质量/费用仍有待改进或对照，不夸大收益。数据与复现命令见 [W09/W10 实测记录](./docs/OPTIMIZATION_W09_W10_MEASUREMENT.md)。
-
-本批补齐 Agent 的任务、世界资料编辑和可撤回项目授权。作者在 Agent 页授予范围，Codex 可在范围内逐章生成、审阅、决定和提交，作者通过“读取最新结果”接手同一份数据。授权不随小说备份导入。操作见 [项目授权指南](./docs/AGENT_PROJECT_AUTHORIZATION.md)；是否已打包以同版本的 `release/BUILD_INFO.json` 为准。
-
-此前正文优先布局、配置与报告折叠见 [W07 试用记录](./docs/OPTIMIZATION_W07_TRIAL.md)，九字段编辑及上下文复用见 [任务编辑试用记录](./docs/OPTIMIZATION_W06_TRIAL.md)。
-
-此前已支持候选处理历史、部分选择、伏笔/时间线筛选，以及可预览、保留历史的撤销；Agent 共享同一事务命令。操作、边界和验收见 [第五批 W03 试用记录](./docs/OPTIMIZATION_W03_TRIAL.md)。跨页重写暂存、调用状态和 Agent 修订见 [第四批试用记录](./docs/OPTIMIZATION_W04_W05_W08_TRIAL.md)。
+版本变化见 [CHANGELOG](./CHANGELOG.md)，安装包位置见 [发行产物说明](./docs/RELEASE_ARTIFACTS.md)，后续工作见 [路线图](./ROADMAP.md)。2026-10-31 的重复计算与修订指令精简见 [性能记录](./docs/REDUNDANCY_PERFORMANCE.md)。
 
 ### 项目状态
 
@@ -80,14 +58,6 @@ npm.cmd test
 npm.cmd run build
 ```
 
-Runtime performance and Chinese Novelty Audit baselines:
-
-```bash
-npm.cmd run perf:novelty
-npm.cmd run native:electron
-npm.cmd run perf:ui
-npm.cmd run native:node
-```
 
 真实性能与中文 Novelty Audit 基线：
 
@@ -107,7 +77,7 @@ npm.cmd run dist:win
 
 生成产物位于：
 
-- `release/Novel Director Setup 0.1.6-preview.18.exe`
+- `release/Novel Director Setup 0.1.6-preview.20.exe`
 - `release/win-unpacked/Novel Director.exe`
 
 `release/` 始终只保留当前可分发版本；历史安装包会集中归档到 `releases/archive/`。每次成功打包还会生成 `BUILD_INFO.json` 和 `SHA256SUMS.txt`，用于确认版本、构建时间与安装包校验值。详见 [发行产物说明](docs/RELEASE_ARTIFACTS.md)。
@@ -163,6 +133,12 @@ npm.cmd run smoke:packaged
 4. 模型留空会使用 CLI 默认模型；单次调用超时建议至少设为 300 秒。
 
 CLI 模式由 Electron 主进程在空临时目录中调用 `codex exec`，使用只读沙箱和一次性会话。工作台不读取或保存 Codex 登录令牌，但发送给模型的章节上下文仍会交给 OpenAI；可用计划、额度和速率限制以当前 ChatGPT/Codex 账号为准。详见 [Codex CLI Provider](./docs/CODEX_CLI_PROVIDER.md)。
+
+桌面版和外部写作流程都可以使用个人 API 清单 `~/.config/ai/api-registry.json`。在“AI 模型接入”或各工作环节中填写清单里的 Base URL 和 Model Name。每次请求只取该地址对应的环境变量，因此起草和审稿可以使用不同服务。改动清单对下一次桌面请求或下一次外部任务生效。新增系统环境变量后，重新启动相关客户端。
+
+清单的 `version` 为 `1`，`apis` 下每个服务指定 `baseUrl` 和 `keyEnv`。例如 DeepSeek 使用 `https://api.deepseek.com` 与 `DEEPSEEK_API_KEY`。同一来源的兼容路径可列在 `aliases`。可选的 `desktopSavedKeyFor` 指定哪家服务能沿用旧桌面版留下的无地址密钥，外部流程仍使用对应环境变量。清单不存密钥值。
+
+同一服务可以用 `backupKeyEnv` 指定备用密钥。主密钥未设置时直接使用备用密钥。主密钥收到 HTTP 401 时，工作台在原请求时限内用同一服务的备用密钥尝试一次。限流和额度错误不会触发密钥切换。
 
 API Key 不应持久化到主 AppData JSON。桌面应用通过 Electron 安全存储保存密钥，renderer 进程只应知道“是否已保存密钥”，不应读取完整明文 key。
 
@@ -235,11 +211,9 @@ Novel Director 使用 [MIT License](./LICENSE) 发布。
 
 Novel Director is an experimental, local-first desktop workbench for managing AI-assisted long-form fiction projects. It is designed for authors who need more than a text editor: project bibles, chapter continuity, character state, foreshadowing schedules, prompt context control, generation traces, quality gates, and revision workflows.
 
-This repository is an early `0.1.6-preview.18` local trial candidate, not a claim of a published GitHub release. Preview.18 packages the current Ink Desk UI updates for navigation, pages, manuscript surfaces and interaction feedback; see [release artifacts](./docs/RELEASE_ARTIFACTS.md) for paths, verification and cleanup scope. Author data is not migrated or deleted. Preview.17 reduces measured backend overhead in backup checks, legacy normalization and Novelty matching, and fixes SQLite initialization failure paths without changing generation or persistence contracts; see the [backend review](./docs/BACKEND_PERFORMANCE_REVIEW.md). Preview.16 isolates page-local character drafts and protects newer input from late save receipts; see the [editing record](./docs/UI_HIG_CHARACTER_DRAFTS.md). Preview.15 keeps the official `deepseek-flash` name and legacy aliases on the same non-thinking request path; see the [compatibility record](./docs/DEEPSEEK_FLASH_COMPATIBILITY.md). No paid model comparison was run this round. Preview.14 adds searchable characters and separate profile, ledger and log tabs; see the [character workspace checks](./docs/UI_HIG_CHARACTER_WORKSPACE.md). It builds on the project-first home, tabbed Prompt editor and safer editing feedback from [Preview.13](./docs/UI_HIG_AUTHOR_WORKSPACE.md), the shared [HIG workspaces](./docs/UI_HIG_WORKSPACE.md), and the [draft-acceptance fix](./docs/FIX_DRAFT_ACCEPTANCE_TRACE.md).
+The current version is `0.1.6-preview.20`, an early trial. Back up real manuscripts before use. Source updates do not automatically update installed binaries; check `release/BUILD_INFO.json` for the packaged version.
 
-Four compact Agent entry tools use scoped reads; the measured 500-chapter digest median falls from 397ms to 32ms with identical output. Reconnect an existing repository MCP process to load this change. Desktop refresh and full-detail reads are unchanged. See the [Agent overview measurement](./docs/OPTIMIZATION_AGENT_OVERVIEW_READ.md) and prior [storage/UI measurements](./docs/OPTIMIZATION_W09_W10_MEASUREMENT.md). Synthetic tests do not prove literary quality or provider-cost savings. Agent task/world editing and revocable project grants remain available; see the [authorization guide](./docs/AGENT_PROJECT_AUTHORIZATION.md). Packaging status is recorded separately in the matching `release/BUILD_INFO.json`.
-
-The [W07 trial record](./docs/OPTIMIZATION_W07_TRIAL.md) covers prose-first workspaces; the [task-editing trial record](./docs/OPTIMIZATION_W06_TRIAL.md) covers scoped context reuse. Candidate history and transaction-backed undo remain in the [fifth trial record](./docs/OPTIMIZATION_W03_TRIAL.md), and quick-rewrite candidates and Agent revision in the [fourth trial record](./docs/OPTIMIZATION_W04_W05_W08_TRIAL.md).
+Start with the [beginner tutorial](./docs/BEGINNER_TUTORIAL.md) or [quickstart](./QUICKSTART.md). Agent setup and project grants are in the [authorization guide](./docs/AGENT_PROJECT_AUTHORIZATION.md). See [CHANGELOG](./CHANGELOG.md), [release artifacts](./docs/RELEASE_ARTIFACTS.md) and [ROADMAP](./ROADMAP.md) for changes, binaries and next steps. The [2026-10-31 performance record](./docs/REDUNDANCY_PERFORMANCE.md) covers redundant computation and revision instructions.
 
 ### Status
 
@@ -297,7 +271,7 @@ npm.cmd run dist:win
 
 Generated artifacts are written to:
 
-- `release/Novel Director Setup 0.1.6-preview.18.exe`
+- `release/Novel Director Setup 0.1.6-preview.20.exe`
 - `release/win-unpacked/Novel Director.exe`
 
 `release/` contains only the current distributable build. Historical artifacts are kept under `releases/archive/`. Successful packaging also writes `BUILD_INFO.json` and `SHA256SUMS.txt` for version and integrity checks. See [Release Artifacts](docs/RELEASE_ARTIFACTS.md).

@@ -41,7 +41,7 @@ contains(mainIndex, "import { AIService } from './services/AIService'", 'main pr
 contains(mainIndex, 'aiRateLimiters', 'main process must create AI rate limiters.')
 contains(mainIndex, /openai:\s*new TokenBucketRateLimiter/, 'OpenAI provider must have a limiter.')
 contains(mainIndex, /compatible:\s*new TokenBucketRateLimiter/, 'Compatible provider must have a limiter.')
-contains(mainIndex, 'new AIService(credentialService, aiRateLimiters)', 'main process must instantiate AIService with credentials and rate limiters.')
+contains(mainIndex, 'new AIService(credentialService, aiRateLimiters,', 'main process must instantiate AIService with credentials and rate limiters.')
 contains(mainIndex, 'registerIpcHandlers({', 'main process must register IPC handlers.')
 contains(mainIndex, 'aiService', 'IPC context must receive AIService.')
 
@@ -395,9 +395,9 @@ contains(promptManualForeshadowingPanel, 'effectiveTreatmentMode', 'PromptManual
 assert(!promptBuilderView.includes('function renderManualForeshadowingPanel'), 'PromptBuilderView should not inline the manual foreshadowing panel.')
 assert(!promptBuilderView.includes('new Set(contextNeedPlan.requiredForeshadowingIds)'), 'PromptBuilderView should not directly mutate required/forbidden foreshadowing sets.')
 assert(!promptBuilderView.includes('requiredCharacterCardFields: Object.fromEntries'), 'PromptBuilderView should not directly rebuild need-plan character field maps.')
-contains(storyDirectionView, 'previousProjectIdRef', 'StoryDirectionView must detect project switches.')
-contains(storyDirectionView, 'setStartChapterOrder(nextStartChapterOrder)', 'StoryDirectionView must reset start chapter when switching projects.')
-contains(storyDirectionView, 'setDraftGuide(StoryDirectionService.getActiveGuideForChapter', 'StoryDirectionView must load the active guide for the new project.')
+contains(storyDirectionView, '<StoryDirectionEditor key={props.project.id}', 'Switching projects must reset the direction editor and its unsaved local state.')
+contains(storyDirectionView, 'draftGuide?.startChapterOrder ?? latestChapterOrder + 1', 'The initial range must start at the active guide or the next chapter of this book.')
+contains(storyDirectionView, 'StoryDirectionService.getActiveGuideForChapter(scoped.storyDirectionGuides, project.id, latestChapterOrder + 1)', 'The new editor must find its initial guide only in the current project.')
 
 const bridgePath = 'src/renderer/src/platform/novelDirectorBridge.ts'
 assert(existsSync(join(root, bridgePath)), 'renderer bridge accessor must exist.')

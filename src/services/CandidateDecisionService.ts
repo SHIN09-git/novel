@@ -25,7 +25,8 @@ function stateTargetFact(data: AppData, candidate: CharacterStateChangeCandidate
   return data.characterStateFacts.find((fact) => candidate.targetFactId
     ? fact.id === candidate.targetFactId
     : fact.projectId === candidate.projectId && fact.characterId === candidate.characterId &&
-      fact.key === candidate.proposedFact?.key && fact.status === 'active')
+      fact.key === candidate.proposedFact?.key && fact.category === candidate.proposedFact.category &&
+      fact.unit === candidate.proposedFact.unit && fact.status === 'active')
 }
 
 function candidateFor(data: AppData, projectId: string, selection: CandidateDecisionSelection) {

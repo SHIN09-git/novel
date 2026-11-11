@@ -11,6 +11,8 @@ interface UsePipelinePrimaryActionArgs {
   selectedSteps: ChapterGenerationStep[]
   latestDraft: GeneratedChapterDraft | null
   latestQualityReport: QualityGateReport | null
+  lengthOverflowNotice?: string | null
+  hardCanonBlock?: string | null
   isPipelineRunning: boolean
   onStartPipeline: () => void
   onStartNextChapter: () => void
@@ -24,6 +26,8 @@ export function usePipelinePrimaryAction({
   selectedSteps,
   latestDraft,
   latestQualityReport,
+  lengthOverflowNotice,
+  hardCanonBlock,
   isPipelineRunning,
   onStartPipeline,
   onStartNextChapter,
@@ -41,8 +45,9 @@ export function usePipelinePrimaryAction({
     if (latestDraft?.status === 'accepted') return `生成第 ${selectedJob.targetChapterOrder + 1} 章`
     if (selectedJob.status === 'idle' && selectedJob.taskEdit) return '按此任务生成'
     if (selectedJob.status === 'failed' && firstFailedStep()) return '重试失败步骤'
+    if (latestDraft?.status === 'draft' && hardCanonBlock) return '查看硬设定冲突'
     if (latestQualityReport && latestDraft?.status === 'draft') {
-      return latestQualityReport.pass ? '接受章节草稿' : '审核后接受草稿'
+      return latestQualityReport.pass && !lengthOverflowNotice ? '接受章节草稿' : '审核后接受草稿'
     }
     if (latestDraft && !latestQualityReport) return '查看草稿'
     return selectedJob.status === 'completed' ? '查看结果' : '查看步骤'
@@ -64,6 +69,10 @@ export function usePipelinePrimaryAction({
     const failed = firstFailedStep()
     if (selectedJob.status === 'failed' && failed) {
       onRetryStep(selectedJob, failed.type)
+      return
+    }
+    if (latestDraft?.status === 'draft' && hardCanonBlock) {
+      onActiveArtifactTabChange('draft')
       return
     }
     if (latestQualityReport && latestDraft?.status === 'draft') {

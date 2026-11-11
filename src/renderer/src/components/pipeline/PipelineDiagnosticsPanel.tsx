@@ -1,3 +1,4 @@
+import { useState } from 'react'
 import type {
   ChapterCommitBundle,
   ConsistencyReviewIssue,
@@ -5,11 +6,14 @@ import type {
   EditorialVerdict,
   EditorialVerdictIssue,
   GeneratedChapterDraft,
+  HardCanonAuditResult,
   QualityGateIssue,
   QualityGateReport,
   RevisionCandidate
 } from '../../../../shared/types'
 import { AuthorDecisionPolicyService } from '../../../../services/AuthorDecisionPolicyService'
+import { hardCanonAuditMatchesBody, qualityReportWithoutHardCanon } from '../../../../services/qualityGate/hardCanonQuality'
+import { HardCanonAuditPanel } from '../HardCanonAuditPanel'
 import { StatusBadge } from '../UI'
 import { formatDate } from '../../utils/format'
 
@@ -35,7 +39,10 @@ function severityTone(severity: string) {
 
 export interface PipelineDiagnosticsPanelProps {
   editorialVerdict: EditorialVerdict | null
+  lengthOverflowNotice?: string | null
   qualityReport: QualityGateReport | null
+  /** Fresh check of the selected text, distinct from qualityReport's saved snapshot. */
+  hardCanonAudit?: HardCanonAuditResult | null
   consistencyReports: ConsistencyReviewReport[]
   revisionCandidates: RevisionCandidate[]
   latestDraft: GeneratedChapterDraft | null
@@ -51,7 +58,9 @@ export interface PipelineDiagnosticsPanelProps {
 
 export function PipelineDiagnosticsPanel({
   editorialVerdict,
+  lengthOverflowNotice,
   qualityReport,
+  hardCanonAudit,
   consistencyReports,
   revisionCandidates,
   latestDraft,
@@ -64,8 +73,16 @@ export function PipelineDiagnosticsPanel({
   onStartRevisionFromEditorialIssue,
   onUpdateConsistencyIssueStatus
 }: PipelineDiagnosticsPanelProps) {
+  const [showQualityJson, setShowQualityJson] = useState(false)
   const visibleQualityIssues = qualityReport?.issues.filter((issue) => issue.severity === 'high' || issue.severity === 'medium') ?? []
-  const qualityDecision = AuthorDecisionPolicyService.assessQualityGate(qualityReport)
+  const qualityDecision = AuthorDecisionPolicyService.assessQualityGate(qualityReport && qualityReportWithoutHardCanon(qualityReport))
+  const currentAudit = hardCanonAudit && latestDraft && hardCanonAudit.projectId === latestDraft.projectId &&
+    hardCanonAuditMatchesBody(hardCanonAudit, latestDraft.body) ? hardCanonAudit : null
+  const hardBlock = currentAudit?.findings.some((item) => item.severity === 'block')
+  const hardReview = currentAudit?.findings.some((item) => item.severity === 'review')
+  const missingCheck = Boolean(latestDraft && !currentAudit && hardCanonAudit !== null && (hardCanonAudit || qualityReport?.hardCanonAudit))
+  const holdAcceptance = hardBlock || missingCheck || lengthOverflowNotice
+  const nextActions = editorialVerdict?.actions.filter((action) => !holdAcceptance || action.actionType !== 'accept_draft') ?? []
   const acceptedCommit = latestDraft
     ? chapterCommitBundles.find((bundle) => bundle.generatedDraftId === latestDraft.id && bundle.jobId === latestDraft.jobId) ?? null
     : null
@@ -76,6 +93,14 @@ export function PipelineDiagnosticsPanel({
         <h3>编辑结论</h3>
         {acceptedCommit ? (
           <StatusBadge tone="success">已采纳并提交</StatusBadge>
+        ) : hardBlock ? (
+          <StatusBadge tone="danger">硬设定未通过</StatusBadge>
+        ) : lengthOverflowNotice ? (
+          <StatusBadge tone="warning">篇幅超限，待处理</StatusBadge>
+        ) : missingCheck ? (
+          <StatusBadge tone="warning">硬设定待核对</StatusBadge>
+        ) : hardReview && editorialVerdict?.status === 'approved' ? (
+          <StatusBadge tone="warning">可采纳，有硬设定提示</StatusBadge>
         ) : editorialVerdict ? (
           <StatusBadge tone={editorialVerdict.status === 'blocked' ? 'danger' : editorialVerdict.status === 'approved' ? 'success' : 'warning'}>
             {editorialVerdict.status === 'approved' ? '可以采纳' : editorialVerdict.status === 'advisory' ? '请斟酌' : editorialVerdict.status === 'blocked' ? '需要修订' : '诊断未齐'}
@@ -89,9 +114,14 @@ export function PipelineDiagnosticsPanel({
         <p className="pipeline-editorial-summary">这份正文已经由你采纳并写入章节版本。</p>
       ) : editorialVerdict ? (
         <>
-          <p className="pipeline-editorial-summary">{editorialVerdict.summary}</p>
+          <p className="pipeline-editorial-summary">{hardBlock
+            ? '当前正文有确证违反的硬设定，须先处理。'
+            : missingCheck ? '尚无与这份正文匹配的现行硬设定核查，历史报告仅供参考。'
+            : lengthOverflowNotice || hardReview ? `常规审稿记录：${editorialVerdict.summary}` : editorialVerdict.summary}</p>
           <div className="pipeline-editorial-section">
             <h4>需要先处理</h4>
+            {lengthOverflowNotice ? <p>{lengthOverflowNotice}请先改短正文，或明确确认保留原文。</p> : null}
+            {hardBlock ? <p>请核对下方标为“确证违反”的原文和规则。</p> : null}
             {editorialVerdict.blockers.length ? (
               <ul className="pipeline-editorial-list blockers">
                 {editorialVerdict.blockers.map((issue) => (
@@ -103,7 +133,7 @@ export function PipelineDiagnosticsPanel({
                   </li>
                 ))}
               </ul>
-            ) : <p className="muted">没有必须先修订的问题。</p>}
+            ) : !holdAcceptance ? <p className="muted">没有必须先修订的问题。</p> : null}
           </div>
           <div className="pipeline-editorial-section">
             <h4>可自行取舍</h4>
@@ -118,13 +148,13 @@ export function PipelineDiagnosticsPanel({
                   </li>
                 ))}
               </ul>
-            ) : <p className="muted">没有额外建议项。</p>}
+            ) : <p className="muted">{hardReview ? '下方标为“仅供复核”的提示不阻断采纳。' : '没有额外建议项。'}</p>}
           </div>
-          {editorialVerdict.actions.length ? (
+          {nextActions.length ? (
             <div className="pipeline-editorial-section">
               <h4>接下来</h4>
               <ol className="pipeline-editorial-actions">
-                {editorialVerdict.actions.slice(0, 3).map((action) => (
+                {nextActions.slice(0, 3).map((action) => (
                   <li key={action.actionType}>
                     <strong>{action.label}</strong>
                     <span>{action.reason}</span>
@@ -138,19 +168,23 @@ export function PipelineDiagnosticsPanel({
         <p className="pipeline-editorial-summary muted">当前草稿还没有可用的编辑结论；已生成的诊断报告仍可在下方查看。</p>
       )}
 
+      {currentAudit ? <HardCanonAuditPanel audit={currentAudit} body={latestDraft?.body} /> : hardCanonAudit === null && qualityReport?.hardCanonAudit && latestDraft
+        ? <p className="muted">当前没有适用于本章的可执行硬设定；原报告中的核查仅作历史记录。</p> : null}
       <details className="pipeline-original-reports">
         <summary>查看原始诊断报告</summary>
         <div className="pipeline-original-reports-body">
           {qualityReport ? (
             <section className="pipeline-report-section">
-              <h4>质量报告 · {qualityReport.overallScore} 分</h4>
+              <h4>质量报告 · {qualityReport.overallScore} 分（审稿当时）</h4>
               <p className="muted">
                 {qualityDecision.status === 'passed'
-                  ? '质量门禁已通过。'
+                  ? '常规质量门禁已通过。'
                   : qualityDecision.status === 'needs_review'
                     ? `需要作者确认：${qualityDecision.reasons.join('；') || '存在关键维度风险'}。`
                     : `建议先修订：${qualityDecision.reasons.join('；') || '报告标记为未通过'}。`}
               </p>
+              {qualityReport.hardCanonAudit?.findings.some((finding) => finding.severity === 'block')
+                ? <p>审稿当时另有确证违反的硬设定，综合门禁未通过。证据保存在下方记录中。</p> : null}
               <div className="metric-grid compact-metrics">
                 {Object.entries(qualityReport.dimensions).map(([key, value]) => (
                   <div key={key}>
@@ -175,9 +209,12 @@ export function PipelineDiagnosticsPanel({
                 </ul>
               ) : null}
               {qualityReport.requiredFixes.length ? <p>必修项：{qualityReport.requiredFixes.join('；')}</p> : null}
-              <details>
+              {qualityReport.hardCanonAudit
+                ? <HardCanonAuditPanel audit={qualityReport.hardCanonAudit} scope="report_snapshot" body={latestDraft?.body} />
+                : <p className="muted">这份质量报告没有逐条硬设定核查记录。</p>}
+              <details onToggle={(event) => setShowQualityJson(event.currentTarget.open)}>
                 <summary>质量报告 JSON</summary>
-                <pre>{JSON.stringify(qualityReport, null, 2)}</pre>
+                {showQualityJson && <pre>{JSON.stringify(qualityReport, null, 2)}</pre>}
               </details>
             </section>
           ) : <p className="muted">尚未生成质量报告。</p>}

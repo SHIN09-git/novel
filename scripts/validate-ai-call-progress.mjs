@@ -88,6 +88,38 @@ try {
   })
   const { AIHttpClient, AIService, AiCallProgressStore, MainAIJsonClient } = await import(pathToFileURL(outfile).href)
 
+  await test('official OpenAI reasoning models use the completion-token limit on both JSON attempts', async () => {
+    const cases = [
+      ['https://api.openai.com/v1', 'gpt-6-luna', true],
+      ['https://api.openai.com/v1/', 'gpt-6.1-sol', true],
+      ['https://api.openai.com/v1', 'gpt-5.4-mini', true],
+      ['https://api.openai.com/v1', 'o3', true],
+      ['https://api.openai.com/v1', 'gpt-4.1-mini', false],
+      ['https://api.openai.com.example.com/v1', 'gpt-6-luna', false],
+      ['https://opencode.ai/inference/openai/v1', 'gpt-6-luna', false]
+    ]
+    for (const [baseUrl, modelName, modern] of cases) {
+      const service = serviceWith(AIService, {
+        postWithFallback: async (url, body, _headers, fallback, options) => {
+          assert.equal(url, baseUrl.replace(/\/+$/, '') + '/chat/completions')
+          for (const payload of [body, fallback]) {
+            assert.equal(payload.max_completion_tokens, modern ? 800 : undefined)
+            assert.equal(payload.max_tokens, modern ? undefined : 800)
+            assert.equal(payload.temperature, modern ? undefined : 0.3)
+          }
+          assert.deepEqual(body.response_format, { type: 'json_object' })
+          assert.equal(fallback.response_format, undefined)
+          options.onResponseStarted()
+          return response()
+        }
+      })
+      const result = await service.chatCompletion(request('openai-compatibility', 'call', {
+        settings: { apiProvider: 'openai', baseUrl, modelName, temperature: 0.3, maxTokens: 800 }
+      }))
+      assert.equal(result.ok, true, result.error)
+    }
+  })
+
   await test('disables thinking only for official DeepSeek Flash names and retained V4 aliases', async () => {
     const cases = [
       { label: 'current Flash name', settings: { apiProvider: 'compatible', baseUrl: 'https://api.deepseek.com/v1', modelName: 'deepseek-flash' }, disabled: true },

@@ -1,6 +1,7 @@
 import type { AppData, RevisionCommitBundle } from '../../shared/types'
 import { canAcceptRevisionVersionStatus } from '../../shared/revisionVersionPolicy'
 import { assertRevisionSourceRecordsMatch } from '../RevisionSourceBindingService'
+import { assertRevisionFitsHardCanon } from '../HardCanonPreflight'
 import { validateRevisionActorReferences, validateRevisionCommitActor } from './revisionCommitActor'
 import {
   assertImmutableCommit,
@@ -257,6 +258,7 @@ function validateExistingData(bundle: RevisionCommitBundle, existingData: AppDat
   if (bundle.beforeText !== existingChapter.body) {
     throw new Error('RevisionCommitBundle is stale because beforeText no longer matches the current chapter body.')
   }
+  assertRevisionFitsHardCanon(existingData, existingChapter, bundle.chapter.body, bundle.chapter.order)
 
   const existingChapterVersion = existingData.chapterVersions.find(
     (version) => version.id === bundle.newChapterVersionId

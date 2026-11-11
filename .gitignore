@@ -32,6 +32,7 @@ experiments/
 /QUICKSTART.docx
 
 # Storage safety files and backups
+*.usage/
 *.bak
 *.corrupt.*.json
 *.tmp

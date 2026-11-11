@@ -15,11 +15,43 @@ const source = {
   properties: { kind: { type: 'string', enum: ['agent_director'] }, reason: string, agentRunId: string, requestedAt: string },
   required: ['kind', 'reason']
 }
+const words = { type: 'array', items: string }
+const checkScope = {
+  enforcement: { type: 'string', enum: ['block', 'review'] },
+  fromChapter: { type: 'integer', minimum: 1 }, toChapter: { type: 'integer', minimum: 1 }
+}
+const limit = { type: 'integer', minimum: 0 }
+const hardCanonCheck = {
+  description: 'Explicit author condition for hard_canon only. Omit on create for a writing hint; omit on update to preserve it. Send null on update to remove it. A literal with neither limit forbids occurrences in the chapter; a book-only limit sets no chapter cap.',
+  oneOf: [
+    {
+      type: 'object', additionalProperties: false,
+      properties: { kind: { const: 'literal' }, mode: { enum: ['terms', 'latin'] }, terms: words, exceptions: words,
+        maxPerChapter: limit, maxPerBook: limit, ...checkScope },
+      required: ['kind', 'mode', 'terms', 'enforcement'],
+      allOf: [{ if: { properties: { mode: { const: 'terms' } } }, then: { properties: { terms: { minItems: 1 } } } }]
+    },
+    {
+      type: 'object', additionalProperties: false,
+      properties: { kind: { const: 'actor_action' }, actor: string, characterId: string, aliases: words,
+        actions: { ...words, minItems: 1 }, side: { enum: ['左', '右'] }, objects: words, state: string,
+        effect: { enum: ['forbid', 'allow'] }, ...checkScope },
+      required: ['kind', 'actor', 'actions', 'effect', 'enforcement']
+    },
+    { type: 'null' }
+  ]
+}
 const worldAction = {
   entity, action, operationId: string, id: string,
   patch: {
     type: 'object',
-    description: 'Use only the selected entity fields in x-worldEditableFieldsByEntity; the service rejects cross-entity fields.',
+    description: 'Use only the selected entity fields in x-worldEditableFieldsByEntity. For hard_canon use title, content and optional check. Exact create duplicates reuse the original unchanged; hardCanonDuplicates.possible is advisory.',
+    additionalProperties: true,
+    properties: { title: string, content: string, check: hardCanonCheck,
+      startChapterOrder: { type: 'integer', minimum: 1, description: 'story_direction: first covered chapter (inclusive).' },
+      endChapterOrder: { type: 'integer', minimum: 1, description: 'story_direction: last covered chapter (inclusive); determines length together with startChapterOrder.' },
+      horizonChapters: { type: 'integer', minimum: 1, maximum: WORLD_MANAGEMENT_FIELD_HELP.story_direction.range.maxChapters,
+        description: 'story_direction: optional legacy length. Prefer startChapterOrder and endChapterOrder.' } },
     'x-worldEditableFieldsByEntity': WORLD_MANAGEMENT_FIELD_HELP
   },
   source,
@@ -37,8 +69,9 @@ export const AGENT_WORLD_TOOL_DEFINITIONS: AgentToolDefinition[] = [
   },
   {
     name: 'agent.getWorldRecord', riskLevel: 'read',
-    description: 'Read one project-scoped role, state, foreshadowing, timeline event, HardCanon item, or story direction. Compact is the default; request detail=full only when needed.',
-    inputSchema: schema({ ...read, entity, id: string }, ['entity', 'id'])
+    description: 'Read one project-scoped world record. For a character, cardReview summarizes human review and confirmed facts. detail=full adds short evidence excerpts and chapter locators. Reads do not mark cards reviewed.',
+    inputSchema: schema({ ...read, entity, id: string, asOfChapterOrder: { type: 'integer', minimum: 1,
+      description: 'Character only: inclusive cutoff for cardReview, not a historical reconstruction of the editable profile.' } }, ['entity', 'id'])
   },
   {
     name: 'agent.getWorldActionReceipt', riskLevel: 'read',
