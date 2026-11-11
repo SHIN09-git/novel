@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto'
+import { accessSync, closeSync, constants, openSync, readFileSync, writeFileSync } from 'node:fs'
 import { copyFile, mkdir, readFile, rename, stat, writeFile } from 'node:fs/promises'
 import { dirname } from 'node:path'
 import type { AppData, CandidateDecisionCommand, CandidateDecisionReceipt, CharacterCardReviewCommand, ChapterCommitBundle, ChapterWritebackFailure, GenerationRunBundle, RevisionCommitBundle } from '../shared/types'
@@ -11,6 +12,8 @@ import { applyChapterCommitBundleToAppData } from '../services/ChapterCommitBund
 import { applyGenerationRunBundleToAppData } from '../services/GenerationRunBundleService'
 import { applyRevisionCommitBundleToAppData } from '../services/RevisionCommitBundleService'
 import { withJsonWriteLock } from './jsonWriteLock'
+import { assertReservedLibraryFile } from './libraryFile'
+import { decodeLibraryText, normalizeLibraryData, parseLibraryJsonValue } from './libraryValidation'
 import { jsonTitleVersionIds, readJsonChapterTitles } from './chapterTitleState'
 import { applyTitleReceiptToChapters } from '../shared/chapterTitleHistory'
 import { decideChapterTitleCommit } from '../services/ChapterTitleRenameService'
@@ -23,8 +26,14 @@ import {
   type StorageSnapshot
 } from './StorageService'
 
-function revisionForRaw(raw: string): string {
+function revisionForRaw(raw: string | Buffer): string {
   return createHash('sha256').update(raw).digest('hex')
+}
+
+function checkedJsonSnapshot(bytes: Buffer, initial?: StorageSnapshot): StorageSnapshot {
+  const revision = revisionForRaw(bytes)
+  if (initial?.revision === revision) return initial
+  return { data: normalizeLibraryData(parseLibraryJsonValue(decodeLibraryText(bytes))), revision }
 }
 
 function redactDecisionValue(value: unknown, secrets: string[], field = ''): unknown {
@@ -89,7 +98,24 @@ export function applyCandidateDecisionForStorage(data: AppData, command: Candida
 }
 
 export class JsonStorageService implements StorageService {
-  constructor(private readonly storagePath: string) {}
+  private readonly strict: boolean
+  private initial?: StorageSnapshot
+
+  constructor(private readonly storagePath: string, mode: 'legacy' | 'existing' | 'new' = 'legacy', initialData: AppData = EMPTY_APP_DATA) {
+    this.strict = mode !== 'legacy'
+    if (mode === 'existing') {
+      this.initial = checkedJsonSnapshot(readFileSync(storagePath))
+      closeSync(openSync(storagePath, 'r+'))
+      accessSync(dirname(storagePath), constants.W_OK)
+    } else if (mode === 'new') {
+      const fd = openSync(storagePath, 'r+')
+      try {
+        assertReservedLibraryFile(storagePath, fd)
+        const data = normalizeLibraryData(initialData, sanitizeAppDataForPersistence)
+        writeFileSync(fd, JSON.stringify(data, null, 2), 'utf8')
+      } finally { closeSync(fd) }
+    }
+  }
 
   getStoragePath(): string {
     return this.storagePath
@@ -100,6 +126,11 @@ export class JsonStorageService implements StorageService {
   }
 
   async loadSnapshot(): Promise<StorageSnapshot> {
+    if (this.strict) {
+      const bytes = await readFile(this.storagePath), initial = this.initial
+      this.initial = undefined
+      return checkedJsonSnapshot(bytes, initial)
+    }
     let raw = ''
     try {
       raw = await readFile(this.storagePath, 'utf-8')
@@ -137,16 +168,29 @@ export class JsonStorageService implements StorageService {
   }
 
   async backupTo(targetPath: string): Promise<void> {
+    if (this.strict) {
+      const raw = await readFile(this.storagePath)
+      checkedJsonSnapshot(raw, this.initial)
+      await mkdir(dirname(targetPath), { recursive: true })
+      await writeFile(targetPath, raw)
+      return
+    }
     await mkdir(dirname(targetPath), { recursive: true })
     await copyFile(this.storagePath, targetPath)
   }
 
   async saveIfCurrent(data: AppData, expectedRevision?: string, onWriteStarted?: () => void): Promise<StorageWriteResult> {
-    return withJsonWriteLock(this.storagePath, () => this.writeIfCurrent(data, expectedRevision, onWriteStarted))
+    return this.withWriteLock(revision => this.writeIfCurrent(data, expectedRevision, onWriteStarted, revision))
   }
 
-  private async writeIfCurrent(data: AppData, expectedRevision?: string, onWriteStarted?: () => void): Promise<StorageWriteResult> {
-    const currentRevision = await this.readCurrentRevision()
+  private withWriteLock<T>(write: (validatedRevision?: string) => Promise<T>): Promise<T> {
+    // A file replaced or removed after open must not be recreated, even by an unconditional save.
+    return withJsonWriteLock(this.storagePath, async () =>
+      write(this.strict ? (await this.loadSnapshot()).revision : undefined), !this.strict)
+  }
+
+  private async writeIfCurrent(data: AppData, expectedRevision?: string, onWriteStarted?: () => void, validatedRevision?: string): Promise<StorageWriteResult> {
+    const currentRevision = validatedRevision ?? await this.readCurrentRevision()
     if (expectedRevision !== undefined && currentRevision !== expectedRevision) {
       throw new StorageRevisionConflictError()
     }
@@ -167,19 +211,20 @@ export class JsonStorageService implements StorageService {
       return revisionForRaw(await readFile(this.storagePath, 'utf-8'))
     } catch (error) {
       const code = typeof error === 'object' && error && 'code' in error ? String(error.code) : ''
-      if (code === 'ENOENT') return 'missing'
+      if (code === 'ENOENT' && !this.strict) return 'missing'
       throw error
     }
   }
 
   private async writeData(data: AppData, onWriteStarted?: () => void): Promise<void> {
-    await this.replaceDocument(sanitizeAppDataForPersistence(data), onWriteStarted)
+    await this.replaceDocument(this.strict ? normalizeLibraryData(data, sanitizeAppDataForPersistence)
+      : sanitizeAppDataForPersistence(data), onWriteStarted)
   }
 
   private async replaceDocument(data: Partial<AppData>, onWriteStarted?: () => void): Promise<void> {
     const raw = JSON.stringify(data, null, 2)
     onWriteStarted?.()
-    await mkdir(dirname(this.storagePath), { recursive: true })
+    if (!this.strict) await mkdir(dirname(this.storagePath), { recursive: true })
     const tmpPath = `${this.storagePath}.tmp`
     const backupPath = `${this.storagePath}.bak`
 
@@ -190,7 +235,7 @@ export class JsonStorageService implements StorageService {
       await copyFile(this.storagePath, backupPath)
     } catch (error) {
       const code = typeof error === 'object' && error && 'code' in error ? String(error.code) : ''
-      if (code !== 'ENOENT') {
+      if (this.strict || code !== 'ENOENT') {
         throw error
       }
     }
@@ -298,7 +343,7 @@ export class JsonStorageService implements StorageService {
   }
 
   async recordChapterWritebackFailureIfUncommitted(failure: ChapterWritebackFailure): Promise<void> {
-    await withJsonWriteLock(this.storagePath, async () => {
+    await this.withWriteLock(async () => {
       // A missing/corrupt file is not evidence of absence. Do not initialize it or save a fallback snapshot.
       const data = JSON.parse(await readFile(this.storagePath, 'utf-8')) as Partial<AppData>
       const safe = normalizeChapterWritebackFailure(failure, data.settings?.apiKey)
@@ -329,7 +374,7 @@ export class JsonStorageService implements StorageService {
   }
 
   async reviewCharacterCard(command: CharacterCardReviewCommand, expectedRevision: string): Promise<CharacterCardReviewWriteResult> {
-    return withJsonWriteLock(this.storagePath, async () => {
+    return this.withWriteLock(async () => {
       const raw = await readFile(this.storagePath, 'utf-8')
       if (!expectedRevision || revisionForRaw(raw) !== expectedRevision) throw new StorageRevisionConflictError()
       const original = JSON.parse(raw) as AppData
@@ -344,7 +389,7 @@ export class JsonStorageService implements StorageService {
   }
 
   async renameChapterTitles(commit: ChapterTitleCommit, actor: ChapterTitleActor): Promise<ChapterTitleWriteResult> {
-    return withJsonWriteLock(this.storagePath, async () => {
+    return this.withWriteLock(async () => {
       const { data, state, revision } = await readJsonChapterTitles(this.storagePath, commit.command.projectId)
       const { receipt, replayed } = decideChapterTitleCommit(state, commit, this.storagePath, revision, actor,
         () => jsonTitleVersionIds(data, state.projectId))

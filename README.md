@@ -14,7 +14,7 @@ Novel Director 是一个实验性的、本地优先的 AI 长篇小说工作台�
 
 - 实验性本地优先桌面应用。
 - Windows 是主要开发和验证平台。
-- 项目数据默认保存到本地 SQLite 数据库；JSON 导入、导出和 fallback 仍然保留。
+- 项目默认保存到本地 SQLite。仍可导入、导出 JSON，也可明确选择一份 JSON 作为独立书库。
 - AI 功能是可选的，取决于你配置的模型供应商。
 - 源码仓库不跟踪预构建 `.exe` 或打包产物。
 
@@ -95,7 +95,7 @@ Novel Director 使用 `better-sqlite3` 作为 main process 的 SQLite 后端。�
 - 跑 Agent CLI、验证脚本或 Node.js 侧 SQLite 测试前，运行 `npm.cmd run native:node`，把 `better-sqlite3` 恢复为本机 Node.js ABI。
 - 打包使用 `npm.cmd run dist:win`，脚本会使用仓库内 `.electron-cache` 和 `.electron-builder-cache`，减少 C 盘缓存压力。
 - 打包流程会在生成 `release/win-unpacked/Novel Director.exe` 后运行 `npm.cmd run smoke:packaged`，检查图标、preload API、SQLite 默认路径、导入导出 API 和无 API Key 状态。
-- 如果 `better-sqlite3` rebuild 失败，先安装 Visual Studio C++ Build Tools；应用代码仍保留 JsonStorageService fallback，但正式安装包应优先修复 native 绑定后再发布。
+- 如果 SQLite 组件无法加载，桌面版会显示“书库未打开”，不会自动切换到 JSON。修复安装后点“重试”。明确选择独立 JSON 时，之后的修改只写入该文件。
 
 单独运行打包后烟测：
 
@@ -109,7 +109,7 @@ npm.cmd run smoke:packaged
 
 排查建议：
 
-- 如果 SQLite 数据库损坏，先备份当前 `novel-director-data.sqlite`，再尝试从设置页恢复最近备份或导入旧 JSON。
+- 如果看到“书库未打开”，先核对错误页的路径。外接磁盘断开时，接回原盘并点“重试”。文件损坏时，点“从备份恢复到新文件”，选择 JSON 备份和一个未用过的文件名，原库不会被覆盖。不需要先建空项目。
 - 如果 JSON 导入失败，确认文件来自 Novel Director 导出或旧版 `novel-director-data.json`，不要直接导入章节 TXT/Markdown。
 - 如果迁移或合并失败，不要删除源文件；检查自动生成的 `.bak` 或迁移前备份。
 - 如果备份恢复失败，保留失败文件和日志，通过 Settings 的日志导出或 issue 模板提交脱敏信息。
@@ -219,7 +219,7 @@ Start with the [beginner tutorial](./docs/BEGINNER_TUTORIAL.md) or [quickstart](
 
 - Experimental local-first desktop app.
 - Windows is the primary development target.
-- Data is stored locally in SQLite by default; JSON import, export, and fallback remain available.
+- SQLite is the default local store. JSON import, export, and explicitly selected standalone JSON libraries remain available.
 - AI features are optional and depend on the provider you configure.
 - No prebuilt binaries are tracked in this source repository.
 
@@ -289,7 +289,7 @@ Recommendations:
 - Before running Agent CLI, validation scripts, or Node-side SQLite tests, run `npm.cmd run native:node` to restore the `better-sqlite3` binding for the local Node.js ABI.
 - Use `npm.cmd run dist:win` for packaging. The script uses repository-local `.electron-cache` and `.electron-builder-cache` directories to reduce C drive pressure.
 - The packaging flow runs `npm.cmd run smoke:packaged` after creating `release/win-unpacked/Novel Director.exe`; the smoke test checks the icon, preload API, SQLite default path, import/export API, and no-key state.
-- If `better-sqlite3` rebuild fails, install Visual Studio C++ Build Tools first. The app retains JsonStorageService fallback in code, but release packages should be shipped only after the native binding is healthy.
+- If the SQLite component cannot load, the desktop app shows a recovery screen instead of switching to JSON. Repair the installation and retry. Changes made to an explicitly selected JSON library stay in that file.
 
 Run packaged smoke test separately:
 
@@ -303,7 +303,7 @@ If the project list is empty on first launch, click `导入旧数据 JSON` and s
 
 Troubleshooting:
 
-- If the SQLite database is corrupted, back up `novel-director-data.sqlite` first, then restore a recent backup or import old JSON from Settings.
+- On the library recovery screen, check the displayed path. Reconnect the original disk and retry, or restore a JSON backup to a new filename. Recovery does not overwrite the original library or require an empty project first.
 - If JSON import fails, make sure the file is a Novel Director export or legacy `novel-director-data.json`, not a chapter TXT/Markdown export.
 - If migration or merge fails, do not delete the source file; check the generated `.bak` files or pre-migration backups.
 - If backup restore fails, keep the failed file and logs, then share redacted diagnostics through the security or issue process.

@@ -1,9 +1,7 @@
-import { existsSync } from 'node:fs'
 import { AgentAuthorizationService } from '../../main/services/AgentAuthorizationService'
 import { chapterTitleRows, parseChapterTitleRename, previewChapterTitleRename } from '../../services/ChapterTitleRenameService'
-import { JsonStorageService } from '../../storage/JsonStorageService'
-import { loadChapterTitlesReadonly, SqliteStorageService } from '../../storage/SqliteStorageService'
-import { resolveJsonStoragePath, resolveSqliteStoragePath, StorageRevisionConflictError } from '../../storage/StorageService'
+import { createExistingLibraryStorage, loadChapterTitlesReadonly } from '../../storage/SqliteStorageService'
+import { StorageRevisionConflictError } from '../../storage/StorageService'
 import { resolveAgentRuntimeStoragePath } from '../AgentRuntime'
 import { requiredString, stringArg } from './agentToolArguments'
 import type { AgentToolCallResult, AgentToolDefinition, JsonSchema } from './agentToolTypes'
@@ -29,14 +27,14 @@ export function chapterTitleDefinitions(schema: (properties: JsonSchema, require
 }
 
 export async function runChapterTitleTool(name: string, args: Record<string, unknown>): Promise<AgentToolCallResult> {
-  const projectId = requiredString(args, 'projectId'), explicit = stringArg(args, 'storagePath')
-  const paths = await resolveAgentRuntimeStoragePath({ storagePath: explicit, userDataPath: stringArg(args, 'userDataPath') })
-  const sqlite = resolveSqliteStoragePath(paths.storagePath)
-  // Never switch an explicitly named file to a sibling book or silently fall back at commit.
-  const json = paths.storagePath.toLowerCase().endsWith('.json') || (!explicit && !existsSync(sqlite))
-  const storagePath = json ? resolveJsonStoragePath(paths.storagePath) : sqlite
+  const projectId = requiredString(args, 'projectId')
+  const choice = await resolveAgentRuntimeStoragePath({
+    storagePath: stringArg(args, 'storagePath'), userDataPath: stringArg(args, 'userDataPath')
+  })
+  const { storagePath, userDataPath } = choice
+  if (choice.source === 'empty') throw new Error(`找不到项目书库：${storagePath}`)
   const { state, revision } = await loadChapterTitlesReadonly(storagePath, projectId)
-  const storage = { source: json ? 'json' as const : 'sqlite' as const, storagePath, userDataPath: paths.userDataPath, revision }
+  const storage = { ...choice, revision }
   const { storagePath: _path, userDataPath: _profile, ...input } = args
   if (name === history) {
     if (Object.keys(input).some(k => !['projectId', 'chapterId', 'limit', 'offset'].includes(k))) throw new Error('不支持的改名历史查询参数。')
@@ -52,7 +50,7 @@ export async function runChapterTitleTool(name: string, args: Record<string, unk
   const { expectedRevision, expectedPreviewHash, ...fields } = input
   const command = parseChapterTitleRename(name === preview ? input : fields)
   const previous = state.receipts.find(r => r.operationId === command.operationId)
-  const authority = new AgentAuthorizationService(paths.userDataPath)
+  const authority = new AgentAuthorizationService(userDataPath)
   const scope = () => ({ storagePath, projectId, actions: ['manage_chapters'] as const,
     chapterOrders: (previous?.rows ?? chapterTitleRows(state, command)).map(row => row.chapterOrder) })
   if (name === preview) {
@@ -64,10 +62,10 @@ export async function runChapterTitleTool(name: string, args: Record<string, unk
     throw new Error('请提供上次改名预览的 expectedRevision 和 expectedPreviewHash。')
   if (!previous && revision !== expectedRevision) throw new StorageRevisionConflictError()
   const saved = await authority.withAuthorization(scope(), async grant => {
-    const store = json ? new JsonStorageService(storagePath) : new SqliteStorageService(storagePath)
+    const store = createExistingLibraryStorage(storagePath)
     try {
       return await store.renameChapterTitles({ command, expectedRevision, expectedPreviewHash }, { kind: 'agent', authorizationGrantId: grant.id })
-    } finally { if ('close' in store) store.close() }
+    } finally { store.close?.() }
   })
   return { tool: name, ok: true, storage: { ...storage, revision: saved.revision }, data: saved }
 }

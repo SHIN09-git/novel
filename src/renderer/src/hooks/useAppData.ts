@@ -14,6 +14,7 @@ import {
   type SaveDataOutcome
 } from '../utils/saveDataState'
 import { getNovelDirectorDataApi } from '../platform/novelDirectorBridge'
+import { useLibraryOpen } from './useLibraryOpen'
 
 export type { SaveDataHandler, SaveDataInput, SaveDataOutcome }
 
@@ -29,39 +30,24 @@ export function useAppData() {
   const saveQueueRef = useRef<OperationQueue | null>(null)
   const latestDataRef = useRef<AppData>(EMPTY_APP_DATA)
 
-  useEffect(() => {
-    let dataApi: ReturnType<typeof getNovelDirectorDataApi>
-    try {
-      dataApi = getNovelDirectorDataApi()
-    } catch (error) {
-      latestDataRef.current = EMPTY_APP_DATA
-      setData(EMPTY_APP_DATA)
-      setStatus(`读取数据失败：${getUserFriendlyError(error)}`)
-      return
-    }
-
-    dataApi
-      .load()
-      .then((result) => {
-        latestDataRef.current = result.data
-        setData(result.data)
-        setStoragePath(result.storagePath)
-        setHasStorageConflict(false)
-        if (result.credentialWarning) setStatus(result.credentialWarning)
-      })
-      .catch((error) => {
-        latestDataRef.current = EMPTY_APP_DATA
-        setData(EMPTY_APP_DATA)
-        setStatus(`读取数据失败：${getUserFriendlyError(error)}`)
-      })
-  }, [])
+  const { recovery, recoverLibrary, blockLibrary, assertLibraryAccess } = useLibraryOpen((loaded) => {
+    commitPersistedData(loaded.data)
+    setStoragePath(loaded.storagePath)
+    setNeedsWritebackCheck(false)
+    setStatus(loaded.credentialWarning || '')
+  }, () => setData(null))
 
   useEffect(() => {
     if (!data) return
     applyTheme(data.settings.theme)
   }, [data])
 
-  function enqueueStorageWrite<T>(operation: () => Promise<T>): Promise<T> {
+  async function enqueueStorageWrite<T>(write: () => Promise<T>): Promise<T> {
+    assertLibraryAccess('write')
+    const operation = () => {
+      assertLibraryAccess('write')
+      return write()
+    }
     if (!saveQueueRef.current) {
       saveQueueRef.current = createOperationQueue()
     }
@@ -76,6 +62,11 @@ export function useAppData() {
     latestDataRef.current = next
     setData(next)
     setHasStorageConflict(false)
+  }
+
+  function handleLoadFailure(error: unknown): never {
+    blockLibrary(error)
+    throw error
   }
 
   const saveData: SaveDataHandler = async (nextInput): Promise<SaveDataOutcome> => {
@@ -184,7 +175,7 @@ export function useAppData() {
   const runPersistedStorageOperation: RunPersistedStorageOperation = async (operation, options = {}) => {
     try {
       const result = await enqueueStorageWrite(async () => {
-        const current = latestDataRef.current
+        const current = getCurrentData()
         if (options.persistCurrentFirst) {
           await getNovelDirectorDataApi().save(current)
         }
@@ -210,7 +201,7 @@ export function useAppData() {
         if (api.executeCandidateDecision) {
           const saved = await api.executeCandidateDecision(command)
           // A replay may follow an external write. Reload instead of applying an old response patch.
-          if (saved.replayed) commitPersistedData((await api.load()).data)
+          if (saved.replayed) commitPersistedData((await api.load().catch(handleLoadFailure)).data)
           else commitPersistedData(applyCandidateDecisionChanges(latestDataRef.current, saved.changes, saved.removedRecords ?? []))
           return saved
         }
@@ -256,7 +247,7 @@ export function useAppData() {
     setStatus('正在重新加载最新本地数据...')
     try {
       const result = await enqueueStorageWrite(async () => {
-        const loaded = await getNovelDirectorDataApi().load()
+        const loaded = await getNovelDirectorDataApi().load().catch(handleLoadFailure)
         commitPersistedData(loaded.data)
         return {
           ok: true as const,
@@ -278,6 +269,8 @@ export function useAppData() {
 
   return {
     data,
+    recovery,
+    recoverLibrary,
     storagePath,
     setStoragePath,
     status,
@@ -292,7 +285,10 @@ export function useAppData() {
     runPersistedStorageOperation,
     importData,
     reloadData,
-    getCurrentData
+    getCurrentData: () => {
+      assertLibraryAccess('read')
+      return getCurrentData()
+    }
   }
 }
 

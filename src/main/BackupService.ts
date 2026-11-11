@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto'
 import { mkdir, readdir, readFile, rename, stat, unlink, writeFile } from 'node:fs/promises'
 import { isAbsolute, join, relative, resolve } from 'node:path'
 import { normalizeAppData, sanitizeAppDataForPersistence } from '../shared/defaults'
+import { decodeLibraryText, normalizeLibraryData, parseLibraryJsonValue } from '../storage/libraryValidation'
 import type { AppData } from '../shared/types'
 
 export interface BackupInfo {
@@ -107,8 +108,8 @@ export class BackupService {
 
   async loadBackup(backupPath: string): Promise<AppData> {
     const safePath = this.assertManagedBackupPath(backupPath)
-    const raw = await readFile(safePath, 'utf-8')
-    return sanitizeAppDataForPersistence(normalizeAppData(JSON.parse(raw) as Partial<AppData>))
+    const raw = decodeLibraryText(await readFile(safePath))
+    return normalizeLibraryData(parseLibraryJsonValue(raw), sanitizeAppDataForPersistence)
   }
 
   async deleteBackup(backupPath: string): Promise<void> {

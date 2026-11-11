@@ -3,6 +3,7 @@ import { dirname } from 'node:path'
 import type { AppData } from '../../shared/types'
 import { EMPTY_APP_DATA, normalizeAppData } from '../../shared/defaults'
 import { ensureSqliteSchema } from './sqliteSchema'
+import { dataVersion, initializeReservedSqliteLibrary, openExistingSqliteLibrary, type ValidatedSnapshot } from './sqliteLibrary'
 import type { SqliteDatabase, SqliteDatabaseConstructor } from './sqliteTypes'
 
 function isSqliteOpenFailure(error: unknown): boolean {
@@ -34,16 +35,27 @@ export class SqliteInitialization {
   private initializing: Promise<void> | null = null
   private generation = 0
   private recoveredData: AppData | null = null
+  private initial?: ValidatedSnapshot
 
   constructor(
     private readonly Database: SqliteDatabaseConstructor,
     private readonly storagePath: string,
     private readonly legacyJsonPath: string,
-    private readonly persist: (db: SqliteDatabase, data: AppData) => void
-  ) {}
+    private readonly persist: (db: SqliteDatabase, data: AppData) => void,
+    private readonly mode: 'legacy' | 'existing' | 'new' = 'legacy',
+    initialData?: AppData
+  ) {
+    if (mode === 'existing') {
+      const { db, initial } = openExistingSqliteLibrary(Database, storagePath)
+      this.db = db
+      this.initial = initial
+    }
+    if (mode === 'new') this.db = initializeReservedSqliteLibrary(Database, storagePath, persist, initialData)
+  }
 
   async open(): Promise<SqliteDatabase> {
     if (this.db) return this.db
+    if (this.mode !== 'legacy') throw new Error('SQLite 书库已关闭。')
     const opening = this.opening ??= this.openDatabase(this.generation)
     try {
       const db = await opening
@@ -59,11 +71,19 @@ export class SqliteInitialization {
     this.initializing = null
     this.db?.close()
     this.db = null
+    this.initial = undefined
     // Keep a pending open registered until it exits, so recovery I/O cannot race a reopen.
+  }
+
+  takeInitialSnapshot(db: SqliteDatabase, revision: string) {
+    const initial = this.initial
+    this.initial = undefined
+    if (initial && initial.snapshot.revision === revision && initial.dataVersion === dataVersion(db)) return initial.snapshot
   }
 
   async ensureSnapshot(db: SqliteDatabase): Promise<void> {
     this.assertCurrent(db)
+    if (this.mode !== 'legacy') return
     if (!this.initializing && !isSqliteEmpty(db)) return
     const initializing = this.initializing ??= this.initializeSnapshot(db)
     try {

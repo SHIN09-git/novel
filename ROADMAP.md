@@ -17,11 +17,11 @@
 
 ## 下一步优先事项
 
-执行[书库可靠性与长篇性能施工计划](./docs/LIBRARY_STABILITY_AND_PERFORMANCE_PLAN.md)。**当前只完成核查，尚未开始实施。** 从 S0 的干净主线工作区开始；下一版只需完成 S1、S2，不等所有性能工作做完才交付。
+执行[书库可靠性与长篇性能施工计划](./docs/LIBRARY_STABILITY_AND_PERFORMANCE_PLAN.md)。**S0 已固定旧版样本，S1 已实现书库恢复。下一项是 S2：实际运行 Windows 安装器，验证干净安装和从 preview.20 升级。** 这些更改未包含在已发布的 preview.20 中。
 
 | 优先级 | 工作 | 完成条件 |
 | --- | --- | --- |
-| S1，下一版 | 书库打开失败时不切换到可写空库 | 原路径和文件不变；作者能重试、选择已有库或从备份恢复；正常首次建库不受影响 |
+| S0 / S1，本地完成 | 保留 preview.20 虚构库；区分书库未打开和空书库 | 从错误页重试、选择已有库、恢复至新文件或明确新建；不自动切换独立 JSON |
 | S2，下一版 | 核对运行时依赖，用 Windows 安装器验证升级 | 干净安装、从 preview.20 升级后均能读写 SQLite；重启后作品和版本链仍在 |
 | S3-A / S3-B | 先优化打开项目，再优化采纳与修订 | 更新时间不传整库；提交不读取无关项目历史。用虚构长篇对照耗时，保留并发、回滚和版本恢复能力 |
 | S4，有依据再做 | 历史详情按需读取、减少新副本或压缩自动备份 | 不把局部数据当整库保存；不删除作者采纳来源；旧备份可恢复，不自动删手动备份 |
@@ -58,6 +58,6 @@ npm.cmd run build
 
 Updated 2026-11-12. The [preview.20 prerelease](https://github.com/SHIN09-git/novel/releases/tag/v0.1.6-preview.20) includes the [long-novel fixes](./docs/LONG_NOVEL_COMPLETION_REPAIR_PLAN.md). Provider balances and unrecorded historical usage remain unknown.
 
-Next, follow the [library reliability and performance plan](./docs/LIBRARY_STABILITY_AND_PERFORMANCE_PLAN.md). No implementation is claimed yet. The next release candidate must distinguish an unavailable library from an empty one and pass a real Windows Setup upgrade from preview.20. Then measure and narrow project opening and chapter commits. History compaction and automatic backup compression are conditional, not release blockers.
+The [library reliability and performance plan](./docs/LIBRARY_STABILITY_AND_PERFORMANCE_PLAN.md) now has a synthetic preview.20 library and an explicit desktop recovery flow. Neither changes the existing public release. Next, verify a clean Windows Setup installation and an in-place upgrade from preview.20. Then measure and narrow project opening and chapter commits. History compaction and automatic backup compression are conditional, not release blockers.
 
 Keep project isolation, version conflict checks, idempotent commits, report provenance, rollback, backups, authorization and credential redaction. Full CRUD rewrites, FTS, graphs, cloud sync and generic extension systems remain deferred. Historical plans and measurements are references, not additional mandatory work.

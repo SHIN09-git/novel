@@ -1,17 +1,8 @@
 import { mkdir, stat } from 'node:fs/promises'
 import { dirname } from 'node:path'
 import type { AppData } from '../../shared/types'
-import { JsonStorageService } from '../../storage/JsonStorageService'
-import { SqliteStorageService } from '../../storage/SqliteStorageService'
-import type { StorageService, StorageSnapshot } from '../../storage/StorageService'
-
-function isSqliteDataPath(path: string): boolean {
-  return /\.(sqlite|db)$/i.test(path)
-}
-
-function createDataFileStorage(path: string): StorageService {
-  return isSqliteDataPath(path) ? new SqliteStorageService(path) : new JsonStorageService(path)
-}
+import { createExistingLibraryStorage as createDataFileStorage } from '../../storage/SqliteStorageService'
+import type { StorageSnapshot } from '../../storage/StorageService'
 
 export async function loadDataFileSnapshot(path: string): Promise<StorageSnapshot> {
   const storage = createDataFileStorage(path)

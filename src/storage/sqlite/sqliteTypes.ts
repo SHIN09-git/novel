@@ -6,6 +6,7 @@ export interface SqliteStatement {
   run(...values: SqliteValue[]): unknown
   get(...values: SqliteValue[]): Record<string, unknown> | undefined
   all(...values: SqliteValue[]): Array<Record<string, unknown>>
+  iterate(...values: SqliteValue[]): Iterable<Record<string, unknown>>
 }
 
 export interface SqliteDatabase {

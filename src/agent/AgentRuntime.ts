@@ -1,8 +1,6 @@
-import { loadJsonSnapshotReadonly } from '../storage/jsonReadonly'
-import { existsSync } from 'node:fs'
-import { readFile } from 'node:fs/promises'
-import { homedir } from 'node:os'
-import { dirname, join, resolve } from 'node:path'
+import { constants } from 'node:fs'
+import { access, readFile } from 'node:fs/promises'
+import { resolve } from 'node:path'
 import type { AppData, ChapterCommitBundle, RevisionCommitBundle } from '../shared/types'
 import type { StorageWriteResult } from '../shared/ipc/ipcTypes'
 import type { CandidateDecisionCommand } from '../shared/types/candidateDecision'
@@ -11,16 +9,17 @@ import { previewCandidateDecisionUndo } from '../services/CandidateDecisionUndoS
 import { observeFormalChapterWrites } from '../services/ChapterWritebackFailureService'
 import type { FormalChapterCommitWriter, StorageService } from '../storage/StorageService'
 import { normalizeAppData } from '../shared/defaults'
+import { loadJsonSnapshotReadonly } from '../storage/jsonReadonly'
 import { JsonStorageService } from '../storage/JsonStorageService'
-import { createStorageService, loadSqliteSnapshotReadonly } from '../storage/SqliteStorageService'
-import { JSON_DATA_FILE_NAME, SQLITE_DATA_FILE_NAME, resolveJsonStoragePath, resolveSqliteStoragePath, StorageRevisionConflictError } from '../storage/StorageService'
+import { normalizeLibraryData, parseLibraryJsonValue } from '../storage/libraryValidation'
+import { createExistingLibraryStorage, loadSqliteSnapshotReadonly } from '../storage/SqliteStorageService'
+import { StorageRevisionConflictError } from '../storage/StorageService'
+import { libraryStores, writeNewLibrary } from '../main/libraryFiles'
 import { AgentAuthorizationService } from '../main/services/AgentAuthorizationService'
 import { candidateDecisionChapterOrders } from './agentAuthorizationScope'
+import { resolveAgentRuntimeStoragePath, storageSourceForPath, type AgentLibraryChoice, type AgentRuntimeLoadOptions } from './agentLibraryChoice'
 
-export interface AgentRuntimeLoadOptions {
-  storagePath?: string
-  userDataPath?: string
-}
+export { resolveAgentRuntimeStoragePath, type AgentRuntimeLoadOptions } from './agentLibraryChoice'
 
 export interface AgentRuntimeData {
   data: AppData
@@ -28,16 +27,13 @@ export interface AgentRuntimeData {
   userDataPath: string
   source: 'sqlite' | 'json' | 'empty'
   revision: string
+  namedJsonInput?: true
 }
 
 function isLoadedAgentRuntime(
   runtime: AgentRuntimeData | AgentRuntimeLoadOptions
 ): runtime is AgentRuntimeData {
   return 'source' in runtime && 'revision' in runtime && 'userDataPath' in runtime
-}
-
-function storageSourceForPath(storagePath: string): 'sqlite' | 'json' {
-  return storagePath.toLowerCase().endsWith('.json') ? 'json' : 'sqlite'
 }
 
 function adoptRuntimeWriteResult(
@@ -52,69 +48,54 @@ function adoptRuntimeWriteResult(
   if (data) runtime.data = data
 }
 
-function defaultUserDataPath(): string {
-  if (process.platform === 'win32') {
-    return join(process.env.APPDATA || join(homedir(), 'AppData', 'Roaming'), 'Novel Director')
-  }
-  if (process.platform === 'darwin') {
-    return join(homedir(), 'Library', 'Application Support', 'Novel Director')
-  }
-  return join(process.env.XDG_CONFIG_HOME || join(homedir(), '.config'), 'Novel Director')
-}
-
-async function readConfiguredStoragePath(userDataPath: string): Promise<string | null> {
-  try {
-    const config = JSON.parse(await readFile(join(userDataPath, 'app-config.json'), 'utf-8')) as { storagePath?: unknown }
-    return typeof config.storagePath === 'string' && config.storagePath.trim() ? config.storagePath : null
-  } catch {
-    return null
-  }
-}
-
-export async function resolveAgentRuntimeStoragePath(options: AgentRuntimeLoadOptions = {}): Promise<{
-  storagePath: string
-  userDataPath: string
-}> {
-  const userDataPath = resolve(options.userDataPath ?? defaultUserDataPath())
-  const configuredPath = options.storagePath ?? (await readConfiguredStoragePath(userDataPath))
-  const storagePath = configuredPath ? resolve(configuredPath) : join(userDataPath, SQLITE_DATA_FILE_NAME)
-  return { storagePath, userDataPath }
-}
-
 export async function loadAgentRuntimeData(options: AgentRuntimeLoadOptions = {}): Promise<AgentRuntimeData> {
-  const { storagePath, userDataPath } = await resolveAgentRuntimeStoragePath(options)
-  const sqlitePath = resolveSqliteStoragePath(storagePath)
-  const jsonPath = resolveJsonStoragePath(storagePath)
-
-  if (existsSync(sqlitePath)) {
-    const snapshot = await loadSqliteSnapshotReadonly(sqlitePath)
-    return {
-      data: snapshot.data,
-      storagePath: sqlitePath,
-      userDataPath,
-      source: 'sqlite',
-      revision: snapshot.revision
-    }
+  const choice = await resolveAgentRuntimeStoragePath(options)
+  const runtime = await loadResolvedAgentRuntime(choice)
+  if (choice.source === 'json' && options.storagePath && resolve(options.storagePath) === choice.storagePath) {
+    runtime.namedJsonInput = true
   }
+  return runtime
+}
 
-  const siblingJsonPath = existsSync(jsonPath) ? jsonPath : join(dirname(sqlitePath), JSON_DATA_FILE_NAME)
-  if (existsSync(siblingJsonPath)) {
-    const snapshot = await loadJsonSnapshotReadonly(siblingJsonPath)
-    return {
-      data: snapshot.data,
-      storagePath: siblingJsonPath,
-      userDataPath,
-      source: 'json',
-      revision: snapshot.revision
-    }
-  }
+export async function loadResolvedAgentRuntime(choice: AgentLibraryChoice): Promise<AgentRuntimeData> {
+  if (choice.source === 'empty') return { ...choice, data: normalizeAppData({}), revision: '0' }
+  if (choice.source === 'json') return { ...choice, ...await loadJsonSnapshotReadonly(choice.storagePath) }
+  const sqlitePath = choice.storagePath
+  return { ...choice, ...await loadSqliteSnapshotReadonly(sqlitePath) }
+}
 
-  return {
-    data: normalizeAppData({}),
-    storagePath,
-    userDataPath,
-    source: 'empty',
-    revision: storagePath.toLowerCase().endsWith('.json') ? 'missing' : '0'
+function boundLibrary(runtime: AgentRuntimeData): AgentLibraryChoice {
+  const { storagePath, userDataPath, source } = runtime
+  if (!storagePath || source === 'empty') throw new Error('没有已打开的书库。请先在桌面选择已有书库。')
+  if (source !== storageSourceForPath(storagePath)) throw new Error(`书库路径与已打开的格式不一致：${storagePath}`)
+  return { storagePath, userDataPath, source }
+}
+
+export async function reloadAgentRuntimeData(runtime: AgentRuntimeData): Promise<AgentRuntimeData> {
+  const fresh = await loadResolvedAgentRuntime(boundLibrary(runtime))
+  if (runtime.namedJsonInput) fresh.namedJsonInput = true
+  return fresh
+}
+
+async function openAgentStorage(runtime: AgentRuntimeData | AgentRuntimeLoadOptions) {
+  const choice = isLoadedAgentRuntime(runtime) ? boundLibrary(runtime) : await resolveAgentRuntimeStoragePath(runtime)
+  if (choice.source === 'empty') throw new Error(`没有可写入的书库：${choice.storagePath}`)
+  return createExistingLibraryStorage(choice.storagePath)
+}
+
+async function openSnapshotWriter(runtime: AgentRuntimeData | AgentRuntimeLoadOptions): Promise<Pick<StorageService, 'saveIfCurrent' | 'close'>> {
+  try {
+    return await openAgentStorage(runtime)
+  } catch (error) {
+    if (!isLoadedAgentRuntime(runtime) || !runtime.namedJsonInput || runtime.source !== 'json' ||
+        !runtime.storagePath || storageSourceForPath(runtime.storagePath) !== 'json' || !/^[a-f0-9]{64}$/.test(runtime.revision)) throw error
+    // The explicit CLI accepts older snapshots without storyBibles. Only a full
+    // save with the digest of the exact input can upgrade one; never call its legacy load().
+    const raw = parseLibraryJsonValue(await readFile(runtime.storagePath, 'utf8'))
+    if (!raw || typeof raw !== 'object' || Array.isArray(raw) || 'storyBibles' in raw) throw error
+    normalizeLibraryData({ ...raw, storyBibles: [] })
+    await access(runtime.storagePath, constants.W_OK)
+    return new JsonStorageService(runtime.storagePath)
   }
 }
 
@@ -123,31 +104,18 @@ export async function saveAgentRuntimeData(data: AppData, runtime: AgentRuntimeD
   source: 'sqlite' | 'json'
   revision: string
 }> {
-  const resolved = isLoadedAgentRuntime(runtime)
-    ? {
-        storagePath: runtime.storagePath ?? (await resolveAgentRuntimeStoragePath({ userDataPath: runtime.userDataPath })).storagePath,
-        userDataPath: runtime.userDataPath,
-        source: runtime.source
-      }
-    : {
-        ...(await resolveAgentRuntimeStoragePath(runtime)),
-        source: 'sqlite' as const
-      }
-
-  const rawPath = resolved.storagePath
-  const isJson = resolved.source === 'json' || rawPath.toLowerCase().endsWith('.json')
-  if (isJson) {
-    const jsonPath = resolveJsonStoragePath(rawPath)
-    const result = await new JsonStorageService(jsonPath).saveIfCurrent(
-      data,
-      isLoadedAgentRuntime(runtime) ? runtime.revision : undefined
-    )
-    adoptRuntimeWriteResult(runtime, result, data)
-    return { storagePath: result.storagePath, source: 'json', revision: result.revision }
+  // Legacy programmatic create-only request, never produced by a CLI/MCP read of a missing file.
+  if (isLoadedAgentRuntime(runtime) && runtime.source === 'json' && runtime.storagePath &&
+      storageSourceForPath(runtime.storagePath) === 'json' && runtime.revision === 'missing') {
+    const { storage, snapshot } = await writeNewLibrary(runtime.storagePath, libraryStores, data)
+    try {
+      const result = { storagePath: storage.getStoragePath(), source: 'json' as const, revision: snapshot.revision }
+      adoptRuntimeWriteResult(runtime, result, data)
+      return result
+    } finally { storage.close?.() }
   }
 
-  const sqlitePath = resolveSqliteStoragePath(rawPath)
-  const storage = createStorageService(sqlitePath)
+  const storage = await openSnapshotWriter(runtime)
   try {
     const result = await storage.saveIfCurrent(
       data,
@@ -164,33 +132,11 @@ export async function saveAgentRuntimeData(data: AppData, runtime: AgentRuntimeD
   }
 }
 
-async function resolveAgentRuntimeSaveTarget(runtime: AgentRuntimeData | AgentRuntimeLoadOptions): Promise<{
-  storagePath: string
-  userDataPath: string
-  source: 'sqlite' | 'json' | 'empty'
-}> {
-  if (isLoadedAgentRuntime(runtime)) {
-    return {
-      storagePath: runtime.storagePath ?? (await resolveAgentRuntimeStoragePath({ userDataPath: runtime.userDataPath })).storagePath,
-      userDataPath: runtime.userDataPath,
-      source: runtime.source
-    }
-  }
-  return {
-    ...(await resolveAgentRuntimeStoragePath(runtime)),
-    source: 'sqlite'
-  }
-}
-
 async function saveAgentFormalCommit(
   runtime: AgentRuntimeData | AgentRuntimeLoadOptions,
   write: (storage: FormalChapterCommitWriter, revision?: string) => Promise<StorageWriteResult>
 ): Promise<StorageWriteResult> {
-  const resolved = await resolveAgentRuntimeSaveTarget(runtime)
-  const isJson = resolved.source === 'json' || resolved.storagePath.toLowerCase().endsWith('.json')
-  const storage: StorageService = isJson
-    ? new JsonStorageService(resolveJsonStoragePath(resolved.storagePath))
-    : createStorageService(resolveSqliteStoragePath(resolved.storagePath))
+  const storage = await openAgentStorage(runtime)
   try {
     const result = await write(observeFormalChapterWrites(storage), isLoadedAgentRuntime(runtime) ? runtime.revision : undefined)
     adoptRuntimeWriteResult(runtime, result)
@@ -220,11 +166,7 @@ export async function saveAgentCandidateDecision(
   expectedRevision = runtime.revision
 ) {
   if (command.actor.kind !== 'agent') throw new Error('Agent candidate commands must use the agent actor.')
-  const resolved = await resolveAgentRuntimeSaveTarget(runtime)
-  const isJson = resolved.source === 'json' || resolved.storagePath.toLowerCase().endsWith('.json')
-  const storage = isJson
-    ? new JsonStorageService(resolveJsonStoragePath(resolved.storagePath))
-    : createStorageService(resolveSqliteStoragePath(resolved.storagePath))
+  const storage = await openAgentStorage(runtime)
   try {
     const current = await storage.loadSnapshot()
     const previous = current.data.candidateDecisionReceipts.find((receipt) => receipt.id === command.id)
@@ -270,6 +212,6 @@ export async function saveAgentCandidateDecision(
     }
     return result
   } finally {
-    if ('close' in storage) storage.close?.()
+    storage.close?.()
   }
 }

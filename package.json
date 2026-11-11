@@ -20,6 +20,8 @@
     "typecheck": "tsc --noEmit",
     "preview": "electron-vite preview",
     "qa:hig": "node scripts/qa-hig-workspace.mjs",
+    "qa:library:ui": "node src/renderer/tests/validate-library-recovery.mjs",
+    "qa:library": "node scripts/qa-library-recovery.mjs",
     "preview:sqlite": "npm run build && npm run native:electron && electron-vite preview",
     "native:electron": "node scripts/manage-sqlite-native.mjs electron",
     "native:node": "node scripts/manage-sqlite-native.mjs node",

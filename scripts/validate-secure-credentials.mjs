@@ -146,7 +146,8 @@ async function main() {
   checks.push(
     assert(
       dataIpc.includes('storage.saveIfCurrent(secured.data') &&
-        storageOps.includes('nextStorage.saveIfCurrent(secured.data)') &&
+        storageOps.includes('next.storage.saveIfCurrent(secured.data, revision)') &&
+        storageOps.includes('writeNewLibrary(targetPath, libraryStores, secured.data)') &&
         storageOps.includes('backupFileForOverwrite(targetPath)'),
       'storage migration overwrite path saves sanitized data and backs up target data'
     )

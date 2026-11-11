@@ -13,6 +13,7 @@ export const IPC_CHANNELS = {
   STORAGE_IMPORT: 'storage:import',
 
   APP_GET_STORAGE_PATH: 'app:get-storage-path',
+  APP_RECOVER_LIBRARY: 'app:recover-library',
   APP_GET_RUNTIME_INFO: 'app:get-runtime-info',
   APP_SELECT_STORAGE_PATH: 'app:select-storage-path',
   APP_MIGRATE_STORAGE_PATH: 'app:migrate-storage-path',

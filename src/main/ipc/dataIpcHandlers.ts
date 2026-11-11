@@ -1,13 +1,13 @@
 import { dialog, ipcMain } from 'electron'
 import { readFile, writeFile } from 'node:fs/promises'
-import { safeParseJson } from '../../services/AIJsonParser'
+import { decodeLibraryText, normalizeImportedLibrary, parseLibraryJsonValue } from '../../storage/libraryValidation'
 import { observeFormalChapterWrites } from '../../services/ChapterWritebackFailureService'
 import { parseChapterTitleRename, previewChapterTitleRename } from '../../services/ChapterTitleRenameService'
 import { loadChapterTitlesReadonly } from '../../storage/SqliteStorageService'
 import { StorageRevisionConflictError } from '../../storage/StorageService'
 import type { ChapterTitleCommit, ChapterTitleRename } from '../../shared/types/chapterTitle'
 import { collectionName } from '../../shared/appDataCollections'
-import { normalizeAppData, sanitizeAppDataForPersistence } from '../../shared/defaults'
+import { sanitizeAppDataForPersistence } from '../../shared/defaults'
 import { IPC_CHANNELS } from '../../shared/ipc/ipcChannels'
 import { readProjectUsage } from '../../storage/readProjectUsage'
 import type {
@@ -81,9 +81,10 @@ export function registerDataIpcHandlers(context: StorageDataOperationContext): v
   ipcMain.handle(
     IPC_CHANNELS.STORAGE_GET,
     safeIpcHandler(async (): Promise<StorageGetResult> => {
-      const storage = context.getStorage()
+      const opened = await context.loadLibrary?.()
+      const storage = opened?.storage ?? context.getStorage()
       LogService.info(`Loading storage data from ${storage.getStoragePath()}`)
-      const snapshot = await storage.loadSnapshot()
+      const snapshot = opened?.snapshot ?? await storage.loadSnapshot()
       const loaded = snapshot.data
       const secured = await secureAndSanitizeAppData(context, loaded)
       let revision = snapshot.revision
@@ -164,6 +165,7 @@ export function registerDataIpcHandlers(context: StorageDataOperationContext): v
   ipcMain.handle(
     IPC_CHANNELS.STORAGE_EXPORT,
     safeIpcHandler(async (_event, data: AppData): Promise<ExportDataResult> => {
+      context.getStorage()
       const result = await dialog.showSaveDialog({
         title: '导出 Novel Director 数据',
         defaultPath: 'novel-director-export.json',
@@ -188,14 +190,11 @@ export function registerDataIpcHandlers(context: StorageDataOperationContext): v
       if (result.canceled || !result.filePaths[0]) return { canceled: true }
       const storage = context.getStorage()
       const importPath = result.filePaths[0]
-      const raw = await readFile(importPath, 'utf-8')
-      const parsed = safeParseJson<Partial<AppData>>(raw, '导入数据文件')
-      if (!parsed.ok) throw new Error(parsed.parseError)
-      const imported = normalizeAppData(parsed.data)
+      const strategy = request?.strategy === 'merge' ? 'merge' : 'replace'
+      const imported = normalizeImportedLibrary(parseLibraryJsonValue(decodeLibraryText(await readFile(importPath))), strategy)
       const secured = await secureAndSanitizeAppData(context, imported, {
         migrateLegacyApiKey: false
       })
-      const strategy = request?.strategy === 'merge' ? 'merge' : 'replace'
       const currentSnapshot = await storage.loadSnapshot()
       let importedProjectIds = secured.data.projects.map((project) => project.id)
 

@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto'
 import { mkdir } from 'node:fs/promises'
 import { createRequire } from 'node:module'
-import { dirname } from 'node:path'
+import { dirname, extname, resolve } from 'node:path'
 import type { AppData, CandidateDecisionCommand, Character, CharacterCardReviewCommand, ChapterCommitBundle, ChapterWritebackFailure, GenerationRunBundle, RevisionCommitBundle } from '../shared/types'
 import type { CandidateDecisionWriteResult, CharacterCardReviewWriteResult, StorageWriteResult } from '../shared/ipc/ipcTypes'
 import { EMPTY_APP_DATA, normalizeAppData, sanitizeAppDataForPersistence } from '../shared/defaults'
@@ -11,6 +11,7 @@ import { applyChapterCommitBundleToAppData } from '../services/ChapterCommitBund
 import { validateGenerationRunBundle, type GenerationRunBundleValidationContext } from '../services/GenerationRunBundleService'
 import { applyRevisionCommitBundleToAppData } from '../services/RevisionCommitBundleService'
 import { JsonStorageService } from './JsonStorageService'
+import { normalizeLibraryData } from './libraryValidation'
 import { readSqliteChapterTitles, readJsonChapterTitles, sqliteTitleVersionIds } from './chapterTitleState'
 import { decideChapterTitleCommit } from '../services/ChapterTitleRenameService'
 import type { ChapterTitleActor, ChapterTitleCommit } from '../shared/types/chapterTitle'
@@ -31,7 +32,7 @@ import {
   arrayCollectionKeys,
   entityInsertValues
 } from './sqlite/sqliteEntityMapper'
-import { currentRevisionFromDatabase, readAppDataFromDatabase, readAppDataCollectionsFromDatabase } from './sqlite/sqliteSnapshot'
+import { currentRevisionFromDatabase, readAppDataFromDatabase, readAppDataCollectionsFromDatabase, readLibrarySnapshot } from './sqlite/sqliteSnapshot'
 import { writeSqliteSnapshotEntities } from './sqlite/sqliteSnapshotWriter'
 import { readGenerationBundleValidationContext } from './sqlite/sqliteGenerationContext'
 import { executeSqliteCandidateDecision } from './sqlite/sqliteCandidateDecisions'
@@ -60,6 +61,8 @@ function loadBetterSqlite3(): SqliteDatabaseConstructor {
 }
 
 function nowIso(): string { return new Date().toISOString() }
+
+export function checkSqliteBindingAvailable(): void { loadBetterSqlite3() }
 
 /**
  * Agent read tools must not initialize schemas, change WAL mode, or create files.
@@ -114,13 +117,15 @@ export async function loadSqliteCollectionsReadonly(
 export class SqliteStorageService implements StorageService {
   private readonly initialization: SqliteInitialization
   private readonly storagePath: string
+  private readonly strict: boolean
 
-  constructor(storagePath: string, options: { legacyJsonPath?: string } = {}) {
+  constructor(storagePath: string, options: { legacyJsonPath?: string; mode?: 'existing' | 'new'; initialData?: AppData } = {}) {
     const Database = loadBetterSqlite3()
-    this.storagePath = resolveSqliteStoragePath(storagePath)
+    this.strict = options.mode !== undefined
+    this.storagePath = this.strict ? resolve(storagePath) : resolveSqliteStoragePath(storagePath)
     this.initialization = new SqliteInitialization(
       Database, this.storagePath, options.legacyJsonPath ?? resolveJsonStoragePath(storagePath),
-      (db, data) => this.saveSnapshot(db, data)
+      (db, data) => this.saveSnapshot(db, data), options.mode, options.initialData
     )
   }
 
@@ -135,10 +140,11 @@ export class SqliteStorageService implements StorageService {
   async loadSnapshot(): Promise<StorageSnapshot> {
     const db = await this.open()
 
-    const readTransaction = db.transaction(() => ({
-      data: this.readAppData(db),
-      revision: this.currentRevision(db)
-    }))
+    const readTransaction = db.transaction(() => {
+      const revision = this.currentRevision(db)
+      if (this.strict) return this.initialization.takeInitialSnapshot(db, revision) ?? readLibrarySnapshot(db)
+      return { data: this.readAppData(db), revision }
+    })
     return readTransaction()
   }
 
@@ -159,7 +165,7 @@ export class SqliteStorageService implements StorageService {
   }
 
   private saveSnapshot(db: SqliteDatabase, data: AppData, expectedRevision?: string): StorageWriteResult {
-    const normalized = sanitizeAppDataForPersistence(data)
+    const normalized = this.strict ? normalizeLibraryData(data, sanitizeAppDataForPersistence) : sanitizeAppDataForPersistence(data)
     const collections = arrayCollectionKeys()
     const updatedAt = nowIso()
     const revision = `${updatedAt}-${randomUUID()}`
@@ -371,10 +377,30 @@ export class SqliteStorageService implements StorageService {
   }
 
   private readAppData(db: SqliteDatabase): AppData {
-    return readAppDataFromDatabase(db)
+    return this.strict ? readLibrarySnapshot(db).data : readAppDataFromDatabase(db)
   }
 }
 
+function libraryStorage(filePath: string, mode: 'existing' | 'new', initialData?: AppData): StorageService {
+  const path = resolve(filePath)
+  switch (extname(path).toLowerCase()) {
+    case '.json': return new JsonStorageService(path, mode, initialData)
+    case '.sqlite':
+    case '.db': return new SqliteStorageService(path, { mode, initialData })
+    default: throw new Error('书库文件扩展名必须是 .sqlite、.db 或 .json。')
+  }
+}
+
+export function createExistingLibraryStorage(filePath: string): StorageService {
+  return libraryStorage(filePath, 'existing')
+}
+
+/** The caller owns an exclusively reserved (wx), zero-byte file at this exact path. */
+export function createNewLibraryStorage(filePath: string, initialData?: AppData): StorageService {
+  return libraryStorage(filePath, 'new', initialData)
+}
+
+/** Legacy Agent/migration compatibility. Desktop library selection must use the explicit factories above. */
 export function createStorageService(storagePath: string): StorageService {
   try {
     return new SqliteStorageService(storagePath)

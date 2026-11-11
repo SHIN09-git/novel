@@ -144,6 +144,13 @@ export interface GetStoragePathResult {
   defaultStoragePath: string
 }
 
+export type LibraryRecoveryAction = 'retry' | 'choose' | 'restore' | 'create'
+
+export interface RecoverLibraryResult {
+  ok: true
+  cancelled?: boolean
+}
+
 export type GetRuntimeInfoResult = RuntimeInfo
 
 export interface SelectStoragePathResult {

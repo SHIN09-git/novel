@@ -10,7 +10,8 @@ import { repoRoot } from './utils/repo-root.mjs'
 const tempRoot = join(repoRoot, 'tmp')
 await mkdir(tempRoot, { recursive: true })
 const outDir = await mkdtemp(join(tempRoot, 'agent-candidate-undo-'))
-const nativePaths = new Set(), handles = new Set()
+const jsonPaths = new Set(), nativePaths = new Set(), handles = new Set()
+globalThis.__candidateUndoJsonPaths = jsonPaths
 globalThis.__candidateUndoNativePaths = nativePaths
 globalThis.__candidateUndoHandles = handles
 globalThis.fetch = async () => { throw new Error('Network forbidden in candidate undo fixtures.') }
@@ -59,22 +60,24 @@ try {
         export const executeAgentChapterPipeline = () => { throw new Error('AI forbidden'); };
         export const createHeadlessTransport = () => { throw new Error('AI forbidden'); };
       ` : `
-        import { SqliteStorageService, loadSqliteSnapshotReadonly as readNative,
+        import { createExistingLibraryStorage as openExisting, loadSqliteSnapshotReadonly as readNative,
           loadSqliteCollectionsReadonly as readNativeCollections } from 'real-undo-sqlite';
-        export { SqliteStorageService };
+        export { SqliteStorageService, checkSqliteBindingAvailable } from 'real-undo-sqlite';
+        export const createNewLibraryStorage = () => { throw new Error('Unexpected new library in undo fixture'); };
         export const loadChapterTitlesReadonly = () => { throw new Error('Unexpected title query in undo test'); };
         export const loadSqliteUsageHistoryReadonly = () => { throw new Error('Unexpected usage query in undo test'); };
         function check(path) { if (!globalThis.__candidateUndoNativePaths.has(path)) throw new Error('Unregistered SQLite path forbidden: ' + path); }
-        export const createStorageService = (path) => {
+        export const createExistingLibraryStorage = (path) => {
+          if (globalThis.__candidateUndoJsonPaths.has(path)) return openExisting(path);
           check(path);
-          const storage = new SqliteStorageService(path);
+          const storage = openExisting(path);
           globalThis.__candidateUndoHandles.add(storage);
           const close = storage.close.bind(storage);
           storage.close = () => { close(); globalThis.__candidateUndoHandles.delete(storage); };
           return storage;
         };
         export const loadSqliteSnapshotReadonly = (path) => { check(path); return readNative(path); };
-        export const loadSqliteCollectionsReadonly = (path, collections) => { check(path); return readNativeCollections(path, collections); };
+        export const loadSqliteCollectionsReadonly = (path, collections, selector) => { check(path); return readNativeCollections(path, collections, selector); };
       `, loader: 'js' }))
     } }]
   })
@@ -101,7 +104,8 @@ try {
     const dir = join(outDir, `fixture-${++fixtureId}`)
     await mkdir(dir)
     const storagePath = join(dir, kind === 'json' ? 'data.json' : 'data.sqlite')
-    if (kind !== 'json') nativePaths.add(storagePath)
+    if (kind === 'json') jsonPaths.add(storagePath)
+    else nativePaths.add(storagePath)
     const withStorage = async (fn) => {
       const storage = kind === 'json' ? new api.JsonStorageService(storagePath) : new api.SqliteStorageService(storagePath)
       if (kind !== 'json') handles.add(storage)
@@ -396,6 +400,7 @@ try {
   console.log(NativeDatabase ? `Native Node ${process.version} ABI ${process.versions.modules}; all handles closed.` : `Native SKIP: ${skipReason}`)
 } finally {
   for (const handle of handles) { try { handle.close() } finally { handles.delete(handle) } }
+  delete globalThis.__candidateUndoJsonPaths
   delete globalThis.__candidateUndoNativePaths
   delete globalThis.__candidateUndoHandles
   const child = relative(tempRoot, outDir)

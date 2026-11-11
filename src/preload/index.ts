@@ -43,12 +43,14 @@ import type {
   ImportDataRequest,
   ImportDataStrategy,
   IpcFailure,
+  LibraryRecoveryAction,
   LogsGetPathResult,
   LogsOpenResult,
   ListAiCallProgressResult,
   MigrateStoragePathResult,
   MigrationMergePreviewResult,
   OpenStorageFolderResult,
+  RecoverLibraryResult,
   SaveFileResult,
   StorageWriteResult,
   SelectStoragePathResult,
@@ -153,6 +155,10 @@ const novelDirector = {
   },
   app: {
     getStoragePath: () => invokeOrThrow<GetStoragePathResult>(IPC_CHANNELS.APP_GET_STORAGE_PATH),
+    recoverLibrary: async (action: LibraryRecoveryAction) => {
+      if (!['retry', 'choose', 'restore', 'create'].includes(action)) throw new Error('不支持的书库恢复操作。')
+      return invokeOrThrow<RecoverLibraryResult>(IPC_CHANNELS.APP_RECOVER_LIBRARY, action)
+    },
     getRuntimeInfo: () => invokeOrThrow<GetRuntimeInfoResult>(IPC_CHANNELS.APP_GET_RUNTIME_INFO),
     selectStoragePath: () => invokeOrThrow<SelectStoragePathResult>(IPC_CHANNELS.APP_SELECT_STORAGE_PATH),
     migrateStoragePath: async (storagePath: string, data: AppData, overwrite = false) => {

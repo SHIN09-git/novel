@@ -4,7 +4,7 @@ import { readAgentCharacterCardReview } from '../agentCharacterCardReview'
 import { AgentAuthorizationService } from '../../main/services/AgentAuthorizationService'
 import { redactSensitiveText } from '../../shared/errorUtils'
 import type { AgentRuntimeData } from '../AgentRuntime'
-import { loadAgentRuntimeData, saveAgentRuntimeData } from '../AgentRuntime'
+import { reloadAgentRuntimeData, saveAgentRuntimeData } from '../AgentRuntime'
 import { findProjectId, readOptions, requiredString, stringArg } from './agentToolArguments'
 import type { AgentToolHandlerResult } from './agentToolTypes'
 
@@ -196,7 +196,7 @@ export async function applyAgentWorldAction(
     storagePath, projectId: worldCommand.projectId, actions: ['edit_world']
   }, async (grant) => {
     // The authorization lock covers a fresh snapshot, its validation, and the short CAS save.
-    const current = await loadAgentRuntimeData({ storagePath, userDataPath: runtime.userDataPath })
+    const current = await reloadAgentRuntimeData(runtime)
     const currentCommand = {
       ...worldCommand,
       projectId: findProjectId(current.data, { projectId: worldCommand.projectId })

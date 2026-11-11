@@ -44,13 +44,13 @@ export function registerBackupIpcHandlers(context: BackupIpcContext): void {
     safeIpcHandler(async (_event, input: string | BackupRestoreRequest): Promise<BackupRestoreResult> => {
       const storage = context.getStorage()
       const request = typeof input === 'string' ? { backupPath: input } : input
+      const data = await context.backupService.loadBackup(validateFilePath(request.backupPath, 'Backup path'))
       let preRestoreBackupPath: string | undefined
       try {
         preRestoreBackupPath = await context.backupService.createBackup(await storage.load(), false)
       } catch (error) {
         LogService.warn('Pre-restore backup failed; continuing with selected backup restore.', error)
       }
-      const data = await context.backupService.loadBackup(validateFilePath(request.backupPath, 'Backup path'))
       const saved = await storage.saveIfCurrent(data, request.expectedRevision)
       LogService.info(`Backup restored: ${request.backupPath}`)
       return {
