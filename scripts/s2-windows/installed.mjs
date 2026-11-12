@@ -56,7 +56,7 @@ async function openWindow(profile) {
   await connect(session)
   assert(session.processIds.includes(child.pid))
   const c = session.client
-  await waitFor(c, api + '?.app?.getRuntimeInfo')
+  await waitFor(c, "typeof " + api + "?.app?.getRuntimeInfo === 'function'")
   assert.equal(await evaluate(c, 'location.href'), pathToFileURL(join(archive, 'out', 'renderer', 'index.html')).href)
   report.runtime = await evaluate(c, api + '.app.getRuntimeInfo()')
   assert.equal(report.runtime.mode, 'packaged')
@@ -77,7 +77,7 @@ async function edit(c) {
   await press('[...document.querySelectorAll(".sidebar button")].find(b=>b.textContent.trim()==="章节")')
   await press(button('连贯阅读'))
   await press(button('编辑本章'))
-  await waitFor(c, q('.reader-inline-editor textarea'))
+  await waitFor(c, 'Boolean(' + q('.reader-inline-editor textarea') + ')')
   await fill(c, q('.reader-inline-editor textarea'), editedBody)
   await press(button('保存本章'))
   await waitFor(c, q('.reader-message') + '?.innerText.includes("已保存本章正文")')
@@ -123,7 +123,7 @@ try {
   const c = await openWindow(rollback ? profile : undefined)
   const paths = () => evaluate(c, api + '.app.getStoragePath()')
   if (seed) {
-    await waitFor(c, q('.home-empty'))
+    await waitFor(c, 'Boolean(' + q('.home-empty') + ')')
     const first = await paths()
     profile = dirname(first.defaultStoragePath)
     assert.equal(dirname(profile).toLowerCase(), env.APPDATA.toLowerCase())

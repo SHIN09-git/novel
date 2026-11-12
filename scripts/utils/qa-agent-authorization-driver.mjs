@@ -13,11 +13,14 @@ export class CdpClient {
   }
 
   async open() {
-    await new Promise((resolve, reject) => {
+    // A second CDP socket can finish its handshake while the first one is awaited.
+    if (this.socket.readyState === WebSocket.CONNECTING) await new Promise((resolve, reject) => {
       const timer = setTimeout(() => reject(new Error('CDP connection timed out')), 10000)
       this.socket.addEventListener('open', () => { clearTimeout(timer); resolve() }, { once: true })
       this.socket.addEventListener('error', (error) => { clearTimeout(timer); reject(error) }, { once: true })
+      this.socket.addEventListener('close', () => { clearTimeout(timer); reject(new Error('CDP closed during connection')) }, { once: true })
     })
+    if (this.socket.readyState !== WebSocket.OPEN) throw new Error('CDP connection is not open')
     this.socket.addEventListener('message', (event) => {
       const message = JSON.parse(String(event.data))
       if (!message.id) { this.onEvent?.(message); return }
