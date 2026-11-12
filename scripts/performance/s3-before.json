@@ -1,0 +1,692 @@
+{
+  "schema": 1,
+  "side": "before",
+  "identity": {
+    "asar": "4b235d3221f59c64f69a8dd7182a521f2e12e9eb296fb41053f8f65f0a9614ae",
+    "exe": "4417be7a44ab4f1839e99aa1be27b66f583a86e0945d97101662cdc379930712",
+    "packagedDependencies": "5bdbd914e503693dfbe4214eb807411881be6acecd1b23f1b3d4bb6abf2c9681",
+    "sqliteVersion": "13.0.3",
+    "sqliteBinding": "e21e5efd71fba66578e95b62554d9028064a80dafd7221bf8a8ef155de8d240a",
+    "lock": "73ac3e4bce0081c1bfe9977d27bbc1bcdabad89becec502a099f7782f10f7c84",
+    "canonicalS1": "785b1000108997831132713949eeadd955f0f5468c8dba4f8fd6809695392c2a",
+    "canonicalCurrent": "785b1000108997831132713949eeadd955f0f5468c8dba4f8fd6809695392c2a"
+  },
+  "host": {
+    "os": "10.0.26100",
+    "cpu": "AMD Ryzen 7 7800X3D 8-Core Processor           ",
+    "parallelism": 16,
+    "memory": 33397133312,
+    "node": "v24.14.0"
+  },
+  "app": {
+    "electron": "44.9.1",
+    "app": "0.1.6-preview.20",
+    "built": "2026-11-11T19:53:56.818Z"
+  },
+  "fixture": {
+    "recipe": 1,
+    "compactBytes": 172845159,
+    "compactSha256": "c95cf905974120887423e516ce430d44997823463e244f4cc1682d6041139610",
+    "sqliteBytes": 190050304,
+    "sqliteSha256": "978c6f1da08db48ff3428c0e798e88f1896a1ce781494bb82f319183639a0946",
+    "collections": {
+      "projects": {
+        "count": 2,
+        "bytes": 617
+      },
+      "storyBibles": {
+        "count": 0,
+        "bytes": 2
+      },
+      "chapters": {
+        "count": 720,
+        "bytes": 7101693
+      },
+      "chapterTitleReceipts": {
+        "count": 0,
+        "bytes": 2
+      },
+      "characters": {
+        "count": 24,
+        "bytes": 15809
+      },
+      "characterStateLogs": {
+        "count": 0,
+        "bytes": 2
+      },
+      "characterStateFacts": {
+        "count": 96,
+        "bytes": 47473
+      },
+      "characterStateTransactions": {
+        "count": 0,
+        "bytes": 2
+      },
+      "characterStateChangeCandidates": {
+        "count": 0,
+        "bytes": 2
+      },
+      "foreshadowings": {
+        "count": 360,
+        "bytes": 140117
+      },
+      "timelineEvents": {
+        "count": 720,
+        "bytes": 283825
+      },
+      "stageSummaries": {
+        "count": 144,
+        "bytes": 753697
+      },
+      "promptVersions": {
+        "count": 0,
+        "bytes": 2
+      },
+      "promptContextSnapshots": {
+        "count": 720,
+        "bytes": 13739653
+      },
+      "storyDirectionGuides": {
+        "count": 0,
+        "bytes": 2
+      },
+      "hardCanonPacks": {
+        "count": 2,
+        "bytes": 641
+      },
+      "contextNeedPlans": {
+        "count": 0,
+        "bytes": 2
+      },
+      "chapterContinuityBridges": {
+        "count": 0,
+        "bytes": 2
+      },
+      "chapterGenerationJobs": {
+        "count": 1443,
+        "bytes": 647080
+      },
+      "chapterGenerationSteps": {
+        "count": 20202,
+        "bytes": 74910523
+      },
+      "generatedChapterDrafts": {
+        "count": 1441,
+        "bytes": 13024850
+      },
+      "memoryUpdateCandidates": {
+        "count": 0,
+        "bytes": 2
+      },
+      "candidateDecisionReceipts": {
+        "count": 0,
+        "bytes": 2
+      },
+      "worldManagementReceipts": {
+        "count": 0,
+        "bytes": 2
+      },
+      "consistencyReviewReports": {
+        "count": 721,
+        "bytes": 295516
+      },
+      "contextBudgetProfiles": {
+        "count": 0,
+        "bytes": 2
+      },
+      "qualityGateReports": {
+        "count": 721,
+        "bytes": 480106
+      },
+      "generationRunTraces": {
+        "count": 721,
+        "bytes": 2817267
+      },
+      "runTraceAuthorSummaries": {
+        "count": 0,
+        "bytes": 2
+      },
+      "redundancyReports": {
+        "count": 0,
+        "bytes": 2
+      },
+      "editorialVerdicts": {
+        "count": 1,
+        "bytes": 734
+      },
+      "revisionCandidates": {
+        "count": 0,
+        "bytes": 2
+      },
+      "revisionSessions": {
+        "count": 1,
+        "bytes": 198
+      },
+      "revisionRequests": {
+        "count": 1,
+        "bytes": 138
+      },
+      "revisionVersions": {
+        "count": 1,
+        "bytes": 9120
+      },
+      "quickRewriteDrafts": {
+        "count": 0,
+        "bytes": 2
+      },
+      "chapterVersions": {
+        "count": 1800,
+        "bytes": 16162133
+      },
+      "chapterCommitBundles": {
+        "count": 720,
+        "bytes": 28969153
+      },
+      "revisionCommitBundles": {
+        "count": 360,
+        "bytes": 13442541
+      },
+      "chapterWritebackFailures": {
+        "count": 0,
+        "bytes": 2
+      },
+      "agentRuns": {
+        "count": 0,
+        "bytes": 2
+      },
+      "agentActionPreviews": {
+        "count": 0,
+        "bytes": 2
+      }
+    }
+  },
+  "readback": [
+    {
+      "project": "one-long-novel",
+      "accepted": "one-draft-4",
+      "later": "one-draft-4-later",
+      "unfinished": "one-unfinished",
+      "failedStep": "generate_chapter_draft",
+      "pending": 6,
+      "revisionChain": [
+        "one-chapter-4-revision-1",
+        "one-chapter-4-revision-2"
+      ]
+    },
+    {
+      "project": "two-long-novel",
+      "accepted": "two-draft-4",
+      "later": "two-draft-4-later",
+      "unfinished": "two-unfinished",
+      "failedStep": "generate_chapter_draft",
+      "pending": 6,
+      "revisionChain": [
+        "two-chapter-4-revision-1",
+        "two-chapter-4-revision-2"
+      ]
+    }
+  ],
+  "timedWindow": [
+    {
+      "due": false,
+      "phase": "warmup",
+      "index": 0,
+      "ms": {
+        "startup": 1940.6559000000002,
+        "open": 1397.788,
+        "accept": 865.7409000000007,
+        "revision": 846.9281999999994
+      },
+      "automaticBytes": {
+        "open": 0,
+        "accept": 0,
+        "revision": 0
+      },
+      "remainingProcesses": 0,
+      "recentBackupUnchanged": true,
+      "persisted": true
+    },
+    {
+      "due": false,
+      "phase": "measured",
+      "index": 1,
+      "ms": {
+        "startup": 1865.7000000000007,
+        "open": 1389.1728000000003,
+        "accept": 875.7237999999998,
+        "revision": 874.975699999999
+      },
+      "automaticBytes": {
+        "open": 0,
+        "accept": 0,
+        "revision": 0
+      },
+      "remainingProcesses": 0,
+      "recentBackupUnchanged": true,
+      "persisted": true
+    },
+    {
+      "due": false,
+      "phase": "measured",
+      "index": 2,
+      "ms": {
+        "startup": 1879.9215999999997,
+        "open": 1359.8670000000002,
+        "accept": 862.6392999999989,
+        "revision": 876.5535999999993
+      },
+      "automaticBytes": {
+        "open": 0,
+        "accept": 0,
+        "revision": 0
+      },
+      "remainingProcesses": 0,
+      "recentBackupUnchanged": true,
+      "persisted": true
+    },
+    {
+      "due": false,
+      "phase": "measured",
+      "index": 3,
+      "ms": {
+        "startup": 1989.2404000000024,
+        "open": 1394.7493000000031,
+        "accept": 844.5977999999996,
+        "revision": 859.951299999997
+      },
+      "automaticBytes": {
+        "open": 0,
+        "accept": 0,
+        "revision": 0
+      },
+      "remainingProcesses": 0,
+      "recentBackupUnchanged": true,
+      "persisted": true
+    },
+    {
+      "due": false,
+      "phase": "measured",
+      "index": 4,
+      "ms": {
+        "startup": 1882.4612000000016,
+        "open": 1439.9598000000005,
+        "accept": 877.6026999999995,
+        "revision": 857.8417000000009
+      },
+      "automaticBytes": {
+        "open": 0,
+        "accept": 0,
+        "revision": 0
+      },
+      "remainingProcesses": 0,
+      "recentBackupUnchanged": true,
+      "persisted": true
+    },
+    {
+      "due": false,
+      "phase": "measured",
+      "index": 5,
+      "ms": {
+        "startup": 1901.6747000000032,
+        "open": 1368.6584999999977,
+        "accept": 846.4462000000058,
+        "revision": 851.1191000000035
+      },
+      "automaticBytes": {
+        "open": 0,
+        "accept": 0,
+        "revision": 0
+      },
+      "remainingProcesses": 0,
+      "recentBackupUnchanged": true,
+      "persisted": true
+    },
+    {
+      "due": true,
+      "phase": "warmup",
+      "index": 0,
+      "ms": {
+        "startup": 1913.7225000000035,
+        "open": 2680.1552999999985,
+        "accept": 2285.426900000006,
+        "revision": 2238.523399999998
+      },
+      "automaticBytes": {
+        "open": 179005905,
+        "accept": 179005927,
+        "revision": 179048496
+      },
+      "rollbackBytes": {
+        "open": 0,
+        "accept": 0,
+        "revision": 0
+      },
+      "remainingProcesses": 0,
+      "persisted": true
+    },
+    {
+      "due": true,
+      "phase": "measured",
+      "index": 1,
+      "ms": {
+        "startup": 1874.6682999999975,
+        "open": 2663.285300000003,
+        "accept": 2250.6511000000028,
+        "revision": 2463.570200000002
+      },
+      "automaticBytes": {
+        "open": 179005905,
+        "accept": 179005927,
+        "revision": 179048496
+      },
+      "rollbackBytes": {
+        "open": 0,
+        "accept": 0,
+        "revision": 0
+      },
+      "remainingProcesses": 0,
+      "persisted": true
+    },
+    {
+      "due": true,
+      "phase": "measured",
+      "index": 2,
+      "ms": {
+        "startup": 2061.3087000000014,
+        "open": 2785.7237999999925,
+        "accept": 2303.7697000000044,
+        "revision": 2236.820700000011
+      },
+      "automaticBytes": {
+        "open": 179005905,
+        "accept": 179005927,
+        "revision": 179048496
+      },
+      "rollbackBytes": {
+        "open": 0,
+        "accept": 0,
+        "revision": 0
+      },
+      "remainingProcesses": 0,
+      "persisted": true
+    },
+    {
+      "due": true,
+      "phase": "measured",
+      "index": 3,
+      "ms": {
+        "startup": 1918.477199999994,
+        "open": 2666.5907000000007,
+        "accept": 2329.5158999999985,
+        "revision": 2456.3784999999916
+      },
+      "automaticBytes": {
+        "open": 179005905,
+        "accept": 179005927,
+        "revision": 179048496
+      },
+      "rollbackBytes": {
+        "open": 0,
+        "accept": 0,
+        "revision": 0
+      },
+      "remainingProcesses": 0,
+      "persisted": true
+    },
+    {
+      "due": true,
+      "phase": "measured",
+      "index": 4,
+      "ms": {
+        "startup": 1923.560599999997,
+        "open": 2660.0657000000065,
+        "accept": 2539.8102999999974,
+        "revision": 2468.999100000001
+      },
+      "automaticBytes": {
+        "open": 179005905,
+        "accept": 179005927,
+        "revision": 179048496
+      },
+      "rollbackBytes": {
+        "open": 0,
+        "accept": 0,
+        "revision": 0
+      },
+      "remainingProcesses": 0,
+      "persisted": true
+    },
+    {
+      "due": true,
+      "phase": "measured",
+      "index": 5,
+      "ms": {
+        "startup": 2381.9726999999984,
+        "open": 3010.2102000000014,
+        "accept": 3085.9905,
+        "revision": 2624.371800000008
+      },
+      "automaticBytes": {
+        "open": 179005905,
+        "accept": 179005927,
+        "revision": 179048496
+      },
+      "rollbackBytes": {
+        "open": 0,
+        "accept": 0,
+        "revision": 0
+      },
+      "remainingProcesses": 0,
+      "persisted": true
+    }
+  ],
+  "summaries": {
+    "recent": {
+      "startup": {
+        "n": 5,
+        "medianMs": 1882.4612000000016,
+        "maxMs": 1989.2404000000024
+      },
+      "open": {
+        "n": 5,
+        "medianMs": 1389.1728000000003,
+        "maxMs": 1439.9598000000005
+      },
+      "accept": {
+        "n": 5,
+        "medianMs": 862.6392999999989,
+        "maxMs": 877.6026999999995
+      },
+      "revision": {
+        "n": 5,
+        "medianMs": 859.951299999997,
+        "maxMs": 876.5535999999993
+      }
+    },
+    "due": {
+      "startup": {
+        "n": 5,
+        "medianMs": 1923.560599999997,
+        "maxMs": 2381.9726999999984
+      },
+      "open": {
+        "n": 5,
+        "medianMs": 2666.5907000000007,
+        "maxMs": 3010.2102000000014
+      },
+      "accept": {
+        "n": 5,
+        "medianMs": 2329.5158999999985,
+        "maxMs": 3085.9905
+      },
+      "revision": {
+        "n": 5,
+        "medianMs": 2463.570200000002,
+        "maxMs": 2624.371800000008
+      }
+    }
+  },
+  "diagnostic": {
+    "recent": {
+      "startup": {
+        "fullReads": 1,
+        "requestJsonBytes": 0,
+        "responseJsonBytes": 172845392,
+        "entityRows": 30921,
+        "entityJsonBytes": 172811941,
+        "secondBookRows": 9470,
+        "otherResultRows": 0,
+        "changed": {},
+        "ipc": [
+          "storage:get"
+        ],
+        "sql": {
+          "SELECT collection, id, json FROM entities ORDER BY collection, id": 1
+        }
+      },
+      "open": {
+        "fullReads": 0,
+        "requestJsonBytes": 172845273,
+        "responseJsonBytes": 235,
+        "entityRows": 0,
+        "entityJsonBytes": 0,
+        "secondBookRows": 0,
+        "otherResultRows": 30921,
+        "changed": {
+          "projects": 1
+        },
+        "ipc": [
+          "storage:save"
+        ],
+        "sql": {
+          "SELECT collection, id FROM entities": 1
+        }
+      },
+      "accept": {
+        "fullReads": 1,
+        "requestJsonBytes": 31944,
+        "responseJsonBytes": 419,
+        "entityRows": 30921,
+        "entityJsonBytes": 172811963,
+        "secondBookRows": 9470,
+        "otherResultRows": 0,
+        "changed": {
+          "chapters": 1,
+          "generatedChapterDrafts": 1,
+          "generationRunTraces": 1,
+          "chapterCommitBundles": 1,
+          "chapterVersions": 1
+        },
+        "ipc": [
+          "data:save-chapter-commit-bundle"
+        ],
+        "sql": {
+          "SELECT collection, id, json FROM entities ORDER BY collection, id": 1
+        }
+      },
+      "revision": {
+        "fullReads": 1,
+        "requestJsonBytes": 46922,
+        "responseJsonBytes": 363,
+        "entityRows": 30923,
+        "entityJsonBytes": 172852424,
+        "secondBookRows": 9470,
+        "otherResultRows": 0,
+        "changed": {
+          "chapters": 1,
+          "revisionSessions": 1,
+          "revisionVersions": 1,
+          "chapterVersions": 1,
+          "revisionCommitBundles": 1
+        },
+        "ipc": [
+          "data:save-revision-commit-bundle"
+        ],
+        "sql": {
+          "SELECT collection, id, json FROM entities ORDER BY collection, id": 1
+        }
+      }
+    },
+    "due": {
+      "startup": {
+        "fullReads": 1,
+        "requestJsonBytes": 0,
+        "responseJsonBytes": 172845392,
+        "entityRows": 30921,
+        "entityJsonBytes": 172811941,
+        "secondBookRows": 9470,
+        "otherResultRows": 0,
+        "changed": {},
+        "ipc": [
+          "storage:get"
+        ],
+        "sql": {
+          "SELECT collection, id, json FROM entities ORDER BY collection, id": 1
+        }
+      },
+      "open": {
+        "fullReads": 1,
+        "requestJsonBytes": 172845273,
+        "responseJsonBytes": 235,
+        "entityRows": 30921,
+        "entityJsonBytes": 172811941,
+        "secondBookRows": 9470,
+        "otherResultRows": 30921,
+        "changed": {
+          "projects": 1
+        },
+        "ipc": [
+          "storage:save"
+        ],
+        "sql": {
+          "SELECT collection, id, json FROM entities ORDER BY collection, id": 1,
+          "SELECT collection, id FROM entities": 1
+        }
+      },
+      "accept": {
+        "fullReads": 2,
+        "requestJsonBytes": 31944,
+        "responseJsonBytes": 419,
+        "entityRows": 61842,
+        "entityJsonBytes": 345623926,
+        "secondBookRows": 18940,
+        "otherResultRows": 0,
+        "changed": {
+          "chapters": 1,
+          "generatedChapterDrafts": 1,
+          "generationRunTraces": 1,
+          "chapterCommitBundles": 1,
+          "chapterVersions": 1
+        },
+        "ipc": [
+          "data:save-chapter-commit-bundle"
+        ],
+        "sql": {
+          "SELECT collection, id, json FROM entities ORDER BY collection, id": 2
+        }
+      },
+      "revision": {
+        "fullReads": 2,
+        "requestJsonBytes": 46922,
+        "responseJsonBytes": 363,
+        "entityRows": 61846,
+        "entityJsonBytes": 345704848,
+        "secondBookRows": 18940,
+        "otherResultRows": 0,
+        "changed": {
+          "chapters": 1,
+          "revisionSessions": 1,
+          "revisionVersions": 1,
+          "chapterVersions": 1,
+          "revisionCommitBundles": 1
+        },
+        "ipc": [
+          "data:save-revision-commit-bundle"
+        ],
+        "sql": {
+          "SELECT collection, id, json FROM entities ORDER BY collection, id": 2
+        }
+      }
+    }
+  }
+}

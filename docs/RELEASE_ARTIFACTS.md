@@ -101,7 +101,11 @@ Rebuilding the same version replaces generated output. Building a newer version 
 
 Novel projects and the SQLite user database are stored elsewhere. Organizing release artifacts does not move or delete user data.
 
-### Current Local Release (2026-11-11)
+### Preview.21 Qualification Candidate
+
+This unsigned Windows x64 candidate is qualified separately from public releases. Both Windows jobs must use the same Setup from the same workflow run and attempt. See the [qualification procedure](./S2_WINDOWS_QUALIFICATION.md). Do not mix a locally built installer and the checksum from CI.
+
+### Previous Public Release (2026-11-11)
 
 Preview.20 ships the [P0–P2 long-manuscript repairs](./LONG_NOVEL_COMPLETION_REPAIR_PLAN.md). Install `release/Novel Director Setup 0.1.6-preview.20.exe` or start `release/win-unpacked/Novel Director.exe`. In an open project, Settings → Runtime information shows the application version, packaged mode and executable path. An installed older copy is not automatically updated by a new repository build.
 
