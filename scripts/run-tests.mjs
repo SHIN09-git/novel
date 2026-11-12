@@ -120,6 +120,8 @@ const tests = [
   ['validate-storage-migration-merge.mjs'],
   ['validate-import-safety.mjs'],
   ['validate-sqlite-storage.mjs'],
+  ['validate-sqlite-commit-scoped-read.mjs'],
+  ['s2-windows/readback.test.mjs'],
   ['validate-backend-backup-laziness.mjs'],
   ['validate-sqlite-initialization.mjs'],
   ['validate-sqlite-differential-save.mjs'],
