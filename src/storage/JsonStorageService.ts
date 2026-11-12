@@ -167,6 +167,30 @@ export class JsonStorageService implements StorageService {
     await this.saveIfCurrent(data)
   }
 
+  async touchProject(projectId: string, expectedRevision: string): Promise<StorageWriteResult> {
+    if (!expectedRevision) throw new StorageRevisionConflictError()
+    return withJsonWriteLock(this.storagePath, async () => {
+      const bytes = await readFile(this.storagePath)
+      if (revisionForRaw(bytes) !== expectedRevision) throw new StorageRevisionConflictError()
+      const original = parseLibraryJsonValue(decodeLibraryText(bytes)) as AppData
+      // Its digest matches the loaded snapshot. Validate shape without normalizing unrelated rows.
+      if (this.strict) normalizeLibraryData(original, data => data)
+      const project = original.projects.find(row => row.id === projectId)
+      if (!project) throw new Error('项目不存在。')
+      // Write the original document, not its normalized view: keep unknown fields and old records.
+      let cleanBackup: string | undefined
+      if (original.settings?.apiKey) {
+        original.settings.apiKey = ''
+        cleanBackup = JSON.stringify(original, null, 2)
+      }
+      const updatedAt = new Date().toISOString()
+      project.lastOpenedAt = updatedAt
+      const written = await this.replaceDocument(original, undefined, cleanBackup)
+      return { ok: true, storagePath: this.storagePath, revision: revisionForRaw(written),
+        updatedAt, savedCollections: ['projects'] }
+    }, false)
+  }
+
   async backupTo(targetPath: string): Promise<void> {
     if (this.strict) {
       const raw = await readFile(this.storagePath)
@@ -221,7 +245,7 @@ export class JsonStorageService implements StorageService {
       : sanitizeAppDataForPersistence(data), onWriteStarted)
   }
 
-  private async replaceDocument(data: Partial<AppData>, onWriteStarted?: () => void): Promise<void> {
+  private async replaceDocument(data: Partial<AppData>, onWriteStarted?: () => void, cleanBackup?: string): Promise<string> {
     const raw = JSON.stringify(data, null, 2)
     onWriteStarted?.()
     if (!this.strict) await mkdir(dirname(this.storagePath), { recursive: true })
@@ -232,7 +256,8 @@ export class JsonStorageService implements StorageService {
 
     try {
       await stat(this.storagePath)
-      await copyFile(this.storagePath, backupPath)
+      if (cleanBackup !== undefined) await writeFile(backupPath, cleanBackup, 'utf-8')
+      else await copyFile(this.storagePath, backupPath)
     } catch (error) {
       const code = typeof error === 'object' && error && 'code' in error ? String(error.code) : ''
       if (this.strict || code !== 'ENOENT') {
@@ -241,6 +266,7 @@ export class JsonStorageService implements StorageService {
     }
 
     await rename(tmpPath, this.storagePath)
+    return raw
   }
 
   async saveGenerationRunBundle(bundle: GenerationRunBundle, expectedRevision?: string): Promise<StorageWriteResult> {

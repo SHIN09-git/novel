@@ -116,6 +116,12 @@ const novelDirector = {
     getProjectUsage: (projectId: string) => invokeOrThrow<ProjectUsageReport>(IPC_CHANNELS.DATA_GET_PROJECT_USAGE, assertText(projectId, 'projectId')),
     load: loadStorageData,
     save: saveStorageData,
+    touchProject: async (projectId: string, expectedStoragePath: string) => {
+      const result = await invokeOrThrow<StorageWriteResult>(IPC_CHANNELS.DATA_TOUCH_PROJECT,
+        { projectId: assertText(projectId, 'projectId'), expectedStoragePath, expectedRevision: storageRevision })
+      storageRevision = result.revision
+      return result
+    },
     previewChapterTitleRename: (command: ChapterTitleRename) =>
       invokeOrThrow<ChapterTitlePreview>(IPC_CHANNELS.DATA_PREVIEW_CHAPTER_TITLES, { command, expectedRevision: storageRevision }),
     applyChapterTitleRename: async (commit: ChapterTitleCommit) => {
@@ -149,7 +155,8 @@ const novelDirector = {
     import: async (strategy: ImportDataStrategy = 'replace') => {
       const request: ImportDataRequest = { expectedRevision: storageRevision, strategy }
       const result = await invokeOrThrow<ImportDataResult>(IPC_CHANNELS.STORAGE_IMPORT, request)
-      rememberStorageRevision(result)
+      // A blocked merge may report an external writer's revision without updating renderer data.
+      if (result.data) rememberStorageRevision(result)
       return result
     }
   },

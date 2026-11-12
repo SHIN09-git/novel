@@ -2,6 +2,9 @@ import { dirname, extname, join, relative } from 'node:path'
 import { JSON_DATA_FILE_NAME, resolveSqliteStoragePath, type StorageService } from '../storage/StorageService'
 import type { AppData } from '../shared/types'
 import type { AppConfigService } from './AppConfigService'
+import { readBackupJson } from './backupFileFormat'
+import { normalizeLibraryData } from '../storage/libraryValidation'
+import { sanitizeAppDataForPersistence } from '../shared/defaults'
 import { backupLegacyJson, exists, hasLibraryTraces, libraryFile, libraryStores,
   openExistingLibrary, writeNewLibrary, type LibraryStores, type OpenLibrary } from './libraryFiles'
 
@@ -77,9 +80,7 @@ export class LibrarySession {
         if (action === 'restore' && !backup) throw new Error('尚未选择备份。')
         let data: AppData | undefined
         if (backup) {
-          if (extname(backup).toLowerCase() !== '.json') throw new Error('请选择 JSON 书库备份。')
-          const source = await openExistingLibrary(backup, this.stores)
-          try { data = source.snapshot.data } finally { source.storage.close?.() }
+          data = normalizeLibraryData(await readBackupJson(backup), sanitizeAppDataForPersistence)
         }
         opened = await writeNewLibrary(target, this.stores, data)
       }

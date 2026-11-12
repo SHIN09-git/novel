@@ -242,7 +242,7 @@ function normalizeHardCanonItem(value: HardCanonItem | Record<string, unknown>, 
   }
 }
 
-function normalizeHardCanonPack(value: HardCanonPack | Record<string, unknown>, characters?: Character[]): HardCanonPack {
+export function normalizeHardCanonPack(value: HardCanonPack | Record<string, unknown>, characters?: Character[]): HardCanonPack {
   const pack = objectOrEmpty(value)
   const timestamp = new Date().toISOString()
   const projectId = stringValue(pack.projectId)

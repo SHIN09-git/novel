@@ -9,10 +9,11 @@ import { StorageRevisionConflictError } from '../../shared/storageRevisionConfli
 const labels = { retry: '重试', choose: '选择已有书库', restore: '从备份恢复到新文件', create: '新建书库' }
 const original = '无法打开书库：Z:\\离线磁盘\\' + '长路径'.repeat(20) + '\\原库.sqlite\n磁盘未连接。'
 const failure = (error) => ({ ok: false, code: 'LIBRARY_UNAVAILABLE', error })
-const loads = [], actions = [], saves = [], unexpected = []
+const loads = [], actions = [], touches = [], imports = [], saves = [], unexpected = []
 for (const channel of Object.values(channels)) {
   ipcMain.handle(channel, (_event, ...args) => {
     const records = channel === channels.STORAGE_GET ? loads : channel === channels.APP_RECOVER_LIBRARY ? actions
+      : channel === channels.DATA_TOUCH_PROJECT ? touches : channel === channels.STORAGE_IMPORT ? imports
       : channel === channels.STORAGE_SAVE ? saves : null
     if (records) return new Promise((resolve) => records.push({ args, resolve }))
     unexpected.push(channel)
@@ -102,11 +103,10 @@ async function verify() {
     settings: { hasApiKey: true } }), storagePath: 'Z:\\测试\\选择的书库.json', revision: 'selected-revision' }
   opened.resolve(book)
   await until(() => run("document.querySelector('.home')?.textContent.includes('测试书稿')"), 'recovered project')
-  const save = await next(saves, () => press('进入'))
-  assert.equal(save.args[0].expectedRevision, book.revision)
-  assert.equal(save.args[0].data.settings.hasApiKey, true)
+  const touch = await next(touches, () => press('进入'))
+  assert.deepEqual(touch.args, [{ projectId: 'fixture', expectedStoragePath: book.storagePath, expectedRevision: book.revision }])
   const conflict = new StorageRevisionConflictError()
-  save.resolve({ ok: false, code: conflict.code, error: conflict.message })
+  touch.resolve({ ok: false, code: conflict.code, error: conflict.message })
   await until(() => run("Boolean(document.querySelector('.storage-conflict-notice'))"), 'revision conflict')
   await press('重新加载最新数据')
   await until(() => run("Boolean(document.querySelector('[role=dialog]'))"), 'confirm reload')
@@ -117,7 +117,7 @@ async function verify() {
   expectedError = '无法打开书库：' + book.storagePath + '\n磁盘未连接。'
   reload.resolve(failure(expectedError))
   await recoveryPage(false, '')
-  assert.equal(saves.length, 1, 'a write queued behind the failed reload never reaches IPC')
+  assert.equal(touches.length, 1, 'a touch queued behind the failed reload never reaches IPC')
 
   // A new renderer must perform its own read, even if an earlier recovery dialog completes late.
   const abandoned = await attempt('restore')
@@ -145,9 +145,47 @@ async function verify() {
     await until(() => run(`document.querySelector('.home')?.textContent.includes(${JSON.stringify(title)})`), title)
   }
   assert.equal(loads.length, 11)
-  assert.equal(saves.length, 1)
+  assert.equal(saves.length, 0)
   assert.deepEqual(unexpected, [])
-  console.log('PASS library recovery: loading, failure, four actions, cancellation, double click, reread, revision, credentials and restart')
+
+  const blocked = await next(imports, () => press('导入 JSON'))
+  blocked.resolve({ canceled: false, mergeBlocked: true, revision: 'newer-agent-revision' })
+  await until(() => run("document.querySelector('.home-operation-notice')?.textContent.includes('合并已停止')"), 'blocked import')
+  assert.equal(touches.length, 1)
+  const imported = await next(imports, () => press('导入 JSON'))
+  assert.equal(imported.args[0].expectedRevision, 'restore-revision', 'a blocked import cannot adopt an unseen revision')
+  const importPath = 'Z:\\测试\\备份副本.sqlite'
+  const importedData = { ...book.data, projects: [...book.data.projects, { ...book.data.projects[0], id: 'second', name: '导入样书' }] }
+  const afterImport = await next(touches, () => imported.resolve({ storagePath: importPath, canceled: false, revision: 'imported',
+    importedProjectIds: ['second'], data: importedData }))
+  assert.deepEqual(afterImport.args, [{ projectId: 'second', expectedStoragePath: importPath, expectedRevision: 'imported' }])
+  assert.equal(await run("Boolean(document.querySelector('.home'))"), true, 'navigation waits for persistence')
+  afterImport.resolve({ ok: false, code: conflict.code, error: conflict.message })
+  await until(() => run("document.querySelector('.home-operation-notice')?.textContent.includes('导入后的打开项目失败')"), 'import succeeded but open conflicted')
+  await press('重新加载最新数据')
+  await until(() => run("Boolean(document.querySelector('[role=dialog]'))"), 'confirm Agent reload')
+  const agentReload = await next(loads, () => press('重新加载'))
+  await until(() => run("!document.querySelector('[role=dialog]')"), 'reload pending')
+  await run("[...document.querySelectorAll('.project-row')].find(r => r.querySelector('h3').textContent === '导入样书').querySelector('.primary-button').click()")
+  await until(() => run("document.querySelector('.home')?.textContent.includes('正在打开...')"), 'touch queued behind Agent reload')
+  assert.equal(touches.length, 2)
+  const queued = await next(touches, () => agentReload.resolve({ storagePath: importPath, revision: 'agent-edit',
+    data: { ...importedData, projects: importedData.projects.map(p => ({ ...p, description: 'Agent 已更新' })) } }))
+  assert.deepEqual(queued.args, [{ projectId: 'second', expectedStoragePath: importPath, expectedRevision: 'agent-edit' }])
+  const updatedAt = '2099-01-02T03:04:05.123Z'
+  queued.resolve({ ok: true, storagePath: importPath, revision: 'touched', updatedAt, savedCollections: ['projects'] })
+  await until(() => run("document.querySelector('.project-badge strong')?.textContent === '导入样书'"), 'entered imported project')
+  await press('返回项目列表')
+  await until(() => run("document.querySelector('.project-row h3')?.textContent === '导入样书'"), 'recently opened project first')
+  await run("document.querySelector('.project-row [title=编辑项目资料]').click()")
+  assert.equal(saves.length, 0, 'neither project open transmitted AppData')
+  const save = await next(saves, () => press('保存资料'))
+  assert.equal(save.args[0].expectedRevision, 'touched')
+  assert.equal(save.args[0].data.projects.find(p => p.id === 'second').lastOpenedAt, updatedAt)
+  assert(save.args[0].data.projects.every(p => p.description === 'Agent 已更新'))
+  assert.equal(save.args[0].data.settings.hasApiKey, true)
+  save.resolve({ ok: true, storagePath: importPath, revision: 'edited' })
+  console.log('PASS library recovery: four actions, restart, revision conflicts, queued project open, import and credentials')
 }
 
 app.disableHardwareAcceleration()

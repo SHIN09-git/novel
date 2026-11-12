@@ -162,8 +162,8 @@ try {
     } }
     const storage = Object.create(api.SqliteStorageService.prototype)
     Object.assign(storage, {
-      storagePath, open: async () => db, isEmpty: () => false,
-      readAppData: () => copy(state.data), currentRevision: () => state.revision,
+      storagePath, open: async () => db,
+      readRevisionCommitContext: () => copy(state.data), currentRevision: () => state.revision,
       writeEntityEntries: (_db, entries) => {
         assert.ok(inTransaction)
         for (const { collection, value } of entries) {

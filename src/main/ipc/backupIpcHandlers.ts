@@ -45,12 +45,8 @@ export function registerBackupIpcHandlers(context: BackupIpcContext): void {
       const storage = context.getStorage()
       const request = typeof input === 'string' ? { backupPath: input } : input
       const data = await context.backupService.loadBackup(validateFilePath(request.backupPath, 'Backup path'))
-      let preRestoreBackupPath: string | undefined
-      try {
-        preRestoreBackupPath = await context.backupService.createBackup(await storage.load(), false)
-      } catch (error) {
-        LogService.warn('Pre-restore backup failed; continuing with selected backup restore.', error)
-      }
+      // Overwriting the current library requires a usable rollback, including on a full disk.
+      const preRestoreBackupPath = await context.backupService.createBackup(await storage.load(), false)
       const saved = await storage.saveIfCurrent(data, request.expectedRevision)
       LogService.info(`Backup restored: ${request.backupPath}`)
       return {

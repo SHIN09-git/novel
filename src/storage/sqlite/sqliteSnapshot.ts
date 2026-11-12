@@ -32,8 +32,7 @@ export function currentRevisionFromDatabase(db: SqliteDatabase): string {
   return typeof value === 'string' && value ? value : '0'
 }
 
-/** Read under the caller's snapshot transaction; never substitute defaults for damaged rows. */
-export function readLibrarySnapshot(db: SqliteDatabase): StorageSnapshot {
+export function readLibraryHeader(db: SqliteDatabase) {
   assertLibrarySchema(db)
   const version = db.prepare("SELECT value FROM meta WHERE key = 'schemaVersion'").get()?.value
   const revision = db.prepare("SELECT value FROM meta WHERE key = 'revision'").get()?.value
@@ -42,6 +41,16 @@ export function readLibrarySnapshot(db: SqliteDatabase): StorageSnapshot {
     !revision.trim() || settings.length !== 1 || settings[0].id !== SETTINGS_ROW_ID || typeof settings[0].json !== 'string') {
     throw new Error('SQLite 书库缺少有效的数据版本、修订号或设置。')
   }
+  const value = parseLibraryJsonValue(settings[0].json)
+  if (Number(version) > EMPTY_APP_DATA.schemaVersion || !value || typeof value !== 'object' || Array.isArray(value)) {
+    throw new Error('SQLite 书库的数据版本或设置无效。')
+  }
+  return { schemaVersion: Number(version), settings: value, revision }
+}
+
+/** Read under the caller's snapshot transaction; never substitute defaults for damaged rows. */
+export function readLibrarySnapshot(db: SqliteDatabase): StorageSnapshot {
+  const { schemaVersion, settings, revision } = readLibraryHeader(db)
   const collections = new Map<string, unknown[]>(ALL_ENTITY_COLLECTIONS.map(key => [key, []]))
   const rows = db.prepare('SELECT collection, id, json FROM entities ORDER BY collection, id').iterate()
   for (const row of rows) {
@@ -54,8 +63,7 @@ export function readLibrarySnapshot(db: SqliteDatabase): StorageSnapshot {
     }
     target.push(value)
   }
-  return { revision, data: normalizeLibraryData({ ...Object.fromEntries(collections), schemaVersion: Number(version),
-    settings: parseLibraryJsonValue(settings[0].json) }) }
+  return { revision, data: normalizeLibraryData({ ...Object.fromEntries(collections), schemaVersion, settings }) }
 }
 
 export function readAppDataFromDatabase(db: SqliteDatabase): AppData {

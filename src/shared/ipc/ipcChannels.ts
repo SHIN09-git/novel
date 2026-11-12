@@ -1,4 +1,5 @@
 export const IPC_CHANNELS = {
+  DATA_TOUCH_PROJECT: 'data:touch-project',
   DATA_GET_PROJECT_USAGE: 'data:get-project-usage',
   DATA_EXECUTE_CANDIDATE_DECISION: 'data:execute-candidate-decision',
   DATA_REVIEW_CHARACTER_CARD: 'data:review-character-card',

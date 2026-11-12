@@ -1,6 +1,6 @@
 # 路线图 / Roadmap
 
-更新日期：2026-11-12。这里只保留当前方向和下一步，不再重复各版本的施工日志、源码行数和已完成待办。历史变更见 [CHANGELOG](./CHANGELOG.md)，包的实际状态见 [发行产物说明](./docs/RELEASE_ARTIFACTS.md)。
+更新日期：2026-11-13。这里只保留当前方向和下一步，不再重复各版本的施工日志、源码行数和已完成待办。历史变更见 [CHANGELOG](./CHANGELOG.md)，包的实际状态见 [发行产物说明](./docs/RELEASE_ARTIFACTS.md)。
 
 ## 当前方向
 
@@ -17,14 +17,14 @@
 
 ## 下一步优先事项
 
-执行[书库可靠性与长篇性能施工计划](./docs/LIBRARY_STABILITY_AND_PERFORMANCE_PLAN.md)。**S0 已固定旧版样本，S1 已实现书库恢复。下一项是 S2：实际运行 Windows 安装器，验证干净安装和从 preview.20 升级。** 这些更改未包含在已发布的 preview.20 中。
+见[书库可靠性与长篇性能施工计划](./docs/LIBRARY_STABILITY_AND_PERFORMANCE_PLAN.md)。本轮候选为 **preview.21**；候选测试与公开发布分开，未替换已发布的 preview.20。
 
 | 优先级 | 工作 | 完成条件 |
 | --- | --- | --- |
 | S0 / S1，本地完成 | 保留 preview.20 虚构库；区分书库未打开和空书库 | 从错误页重试、选择已有库、恢复至新文件或明确新建；不自动切换独立 JSON |
-| S2，下一版 | 核对运行时依赖，用 Windows 安装器验证升级 | 干净安装、从 preview.20 升级后均能读写 SQLite；重启后作品和版本链仍在 |
-| S3-A / S3-B | 先优化打开项目，再优化采纳与修订 | 更新时间不传整库；提交不读取无关项目历史。用虚构长篇对照耗时，保留并发、回滚和版本恢复能力 |
-| S4，有依据再做 | 历史详情按需读取、减少新副本或压缩自动备份 | 不把局部数据当整库保存；不删除作者采纳来源；旧备份可恢复，不自动删手动备份 |
+| S2 | 用两台独立 Windows 虚拟机测试同一安装包 | 全新安装、从 preview.20 原地升级、重启、卸载及回退；以对应提交的验收报告为准 |
+| S3-A / S3-B | 打开项目只写最近打开时间；SQLite 按本次采纳或修订所需的记录校验 | 继续检查版本、项目归属、报告与正文；使用同一份虚构长篇书库对照 |
+| S4 | 压缩新自动备份，保留可供旧版恢复的普通 JSON；手动备份不轮替 | 两种格式均可恢复；不删除历史步骤或改写现有提交回执。首屏历史按需加载继续暂缓 |
 
 具体的修订质量、Novelty 误报和未保存输入仍按作者反馈跟进，不阻塞上述交付。本轮性能验收不消耗模型额度，也不替代成文质量评估。
 
@@ -56,8 +56,8 @@ npm.cmd run build
 
 ## English
 
-Updated 2026-11-12. The [preview.20 prerelease](https://github.com/SHIN09-git/novel/releases/tag/v0.1.6-preview.20) includes the [long-novel fixes](./docs/LONG_NOVEL_COMPLETION_REPAIR_PLAN.md). Provider balances and unrecorded historical usage remain unknown.
+Updated 2026-11-13. The [preview.20 prerelease](https://github.com/SHIN09-git/novel/releases/tag/v0.1.6-preview.20) includes the [long-novel fixes](./docs/LONG_NOVEL_COMPLETION_REPAIR_PLAN.md). Provider balances and unrecorded historical usage remain unknown.
 
-The [library reliability and performance plan](./docs/LIBRARY_STABILITY_AND_PERFORMANCE_PLAN.md) now has a synthetic preview.20 library and an explicit desktop recovery flow. Neither changes the existing public release. Next, verify a clean Windows Setup installation and an in-place upgrade from preview.20. Then measure and narrow project opening and chapter commits. History compaction and automatic backup compression are conditional, not release blockers.
+The [library plan](./docs/LIBRARY_STABILITY_AND_PERFORMANCE_PLAN.md) qualifies preview.21 separately from public releases. Project opening no longer sends a full snapshot; SQLite commits load their validation inputs by scope. New automatic backups use compression where the file can be restored safely. Existing receipts and manual backups are retained. Full-library startup reads are a separate, deferred optimization.
 
 Keep project isolation, version conflict checks, idempotent commits, report provenance, rollback, backups, authorization and credential redaction. Full CRUD rewrites, FTS, graphs, cloud sync and generic extension systems remain deferred. Historical plans and measurements are references, not additional mandatory work.

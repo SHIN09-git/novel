@@ -2,6 +2,7 @@ import { dialog, ipcMain } from 'electron'
 import { join } from 'node:path'
 import { IPC_CHANNELS } from '../../shared/ipc/ipcChannels'
 import type { LibrarySession } from '../LibrarySession'
+import { backupFileFilter } from '../backupFileFormat'
 import { safeIpcHandler } from './safeIpcHandler'
 import { assertSafeDataStoragePath, isPathInsideOrSame } from './storagePath'
 
@@ -22,7 +23,7 @@ export function registerLibraryRecoveryIpc(session: LibrarySession, userData: st
         const chosen = await dialog.showOpenDialog({
           title: action === 'restore' ? '选择要恢复的 JSON 备份' : '选择已有书库',
           defaultPath: action === 'restore' ? backups : undefined, properties: ['openFile'],
-          filters: [{ name: action === 'restore' ? 'JSON 书库备份' : '书库文件', extensions: action === 'restore' ? ['json'] : ['sqlite', 'db', 'json'] }]
+          filters: [action === 'restore' ? backupFileFilter : { name: '书库文件', extensions: ['sqlite', 'db', 'json'] }]
         })
         if (chosen.canceled || !chosen.filePaths[0]) return { ok: true, cancelled: true }
         if (action === 'choose') target = chosen.filePaths[0]

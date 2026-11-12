@@ -65,6 +65,7 @@ export default function App() {
     needsWritebackCheck,
     setStatus,
     saveData,
+    touchProject,
     saveGenerationRunBundle,
     saveChapterCommitBundle,
     saveRevisionCommitBundle,
@@ -275,7 +276,7 @@ export default function App() {
           <Suspense fallback={<div className="view-loading">正在加载页面...</div>}>{renderCurrentView(data, currentProject)}</Suspense>
         </ErrorBoundary>
       </Shell> : <Suspense fallback={<div className="view-loading">正在加载项目列表...</div>}>
-        <HomeView data={data} saveData={saveData} importData={importStoredData} setProjectId={setCurrentProjectId} setView={setView} />
+        <HomeView data={data} saveData={saveData} touchProject={touchProject} importData={importStoredData} setProjectId={setCurrentProjectId} setView={setView} />
       </Suspense>}
       {hasStorageConflict || needsWritebackCheck
         ? <StorageConflictNotice onReload={reloadAfterStorageConflict} writeback={needsWritebackCheck && !hasStorageConflict} /> : null}

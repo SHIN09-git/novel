@@ -12,6 +12,7 @@ import { hasCurrentChapterFragment } from '../../shared/chapterStepFragment'
 import { draftContentHash, noveltyAuditMatchesDraft } from '../DraftDiagnosticBindingService'
 import { isChapterArchived } from '../ChapterLifecycleService'
 import { assertImmutableCommit, requireCommitText } from './commitBundleUtils'
+import { validateDiagnosticBindings } from './chapterDiagnosticBindings'
 
 export function validateAcceptanceReviewShape(bundle: ChapterCommitBundle): void {
   const review = bundle.acceptanceReview
@@ -43,6 +44,7 @@ export function validateAcceptanceReviewShape(bundle: ChapterCommitBundle): void
 
 /** Re-evaluate new commits inside the storage transaction; historical replay is checked elsewhere. */
 export function validateCurrentAcceptanceReview(bundle: ChapterCommitBundle, data: AppData): void {
+  validateDiagnosticBindings(bundle, data)
   const review = bundle.acceptanceReview
   const draft = data.generatedChapterDrafts.find((item) => item.id === bundle.generatedDraftId && item.projectId === bundle.projectId)
   const jobId = bundle.jobId ?? draft?.jobId ?? bundle.generatedDraft?.jobId

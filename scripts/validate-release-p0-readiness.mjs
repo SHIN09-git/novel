@@ -65,7 +65,7 @@ check('preview smoke script uses isolated userData path', /NOVEL_DIRECTOR_SMOKE_
 check('preview smoke script switches better-sqlite3 to Electron and restores Node binding', /manage-sqlite-native\.mjs/.test(smokePreview) && /'electron'/.test(smokePreview) && /'node'/.test(smokePreview))
 check('preview smoke script verifies SQLite backend creation', /novel-director-data\.sqlite/.test(smokePreview) && /smoke userData did not create novel-director-data\.sqlite/.test(smokePreview))
 check('preview smoke failure path throws so native binding restore still runs', /function fail\(message\)[\s\S]*throw error/.test(smokePreview) && !/function fail\(message\)[\s\S]*process\.exit\(1\)/.test(smokePreview))
-check('Windows dist flow runs packaged smoke before rebuilding Node binding', /smoke-packaged-app\.mjs/.test(runDist) && /rebuild', 'better-sqlite3'/.test(runDist))
+check('Windows dist verifies the packaged app and checks the Node binding on exit', /smoke-packaged-app\.mjs/.test(runDist) && /finally\s*\{[\s\S]*nativeManager, 'node'/.test(runDist))
 check('HomeView exposes a queued JSON import path', /导入 JSON/.test(homeView) && /importData\(strategy\)/.test(homeView) && !/window\.novelDirector/.test(homeView))
 check('HomeView merges into non-empty workspaces instead of receiving destructive replaceData', /data\.projects\.length > 0 \? 'merge' : 'replace'/.test(homeView) && /<HomeView[^>]*importData=\{importStoredData\}/s.test(appView) && !/<HomeView[^>]*replaceData=/s.test(appView))
 check('README documents better-sqlite3 native setup', /better-sqlite3/.test(readme) && /Visual Studio C\+\+ Build Tools/.test(readme) && /native:electron/.test(readme) && /native:node/.test(readme))

@@ -55,6 +55,7 @@ const tests = [
   ['validate-batch-writeback-order.mjs'],
   ['validate-chapter-writeback-failures.mjs'],
   ['validate-project-list-recent-open-order.mjs'],
+  ['validate-project-touch.mjs'],
   ['validate-appdata-project-boundaries.mjs'],
   ['validate-p0-stability.mjs'],
   ['validate-renderer-save-consistency.mjs'],

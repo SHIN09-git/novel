@@ -33,7 +33,7 @@ function BackupRow({
   return (
     <article className="settings-backup-row">
       <div>
-        <strong>{backup.isAutomatic ? '自动备份' : '手动备份'} · {formatBackupTime(backup.timestamp)}</strong>
+        <strong>{backup.isRollback ? '旧版回退副本' : backup.isAutomatic ? '自动备份' : '手动备份'} · {formatBackupTime(backup.timestamp)}</strong>
         <small>{formatBytes(backup.size)}</small>
       </div>
       <code title={backup.path}>{backup.path}</code>
@@ -168,7 +168,7 @@ export function SettingsDataPanels({ storagePath, storage, backupAndLogs }: Sett
         </div>
         {backupAndLogs.backups.length ? (
           <div className="compact-list backup-list">
-            {backupAndLogs.backups.slice(0, 8).map((backup) => (
+            {backupAndLogs.backups.map((backup) => (
               <BackupRow
                 key={backup.path}
                 backup={backup}

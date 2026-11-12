@@ -9,6 +9,7 @@ import { createRequire } from 'node:module'
 import { basename, dirname, join, relative, resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { parseArgs, promisify } from 'node:util'
+import { gzipSync } from 'node:zlib'
 import { repoRoot } from './utils/repo-root.mjs'
 import { button, click, closeElectron, fill, waitFor } from './utils/qa-agent-authorization-driver.mjs'
 import { connect, evaluate, launch, sha256, within } from './utils/long-novel-ui-driver.mjs'
@@ -652,14 +653,17 @@ async function picker(s, p, title, action, file) {
 async function explicitRecovery(t) {
   const open = '选择已有书库', src = '选择要恢复的 JSON 备份', dest = '将备份恢复到新文件（不覆盖原书库）'
   const independent = '使用独立 JSON 书库'
-  for (const mode of ['choose', 'restore', 'explicit-json', 'create']) {
+  for (const mode of ['choose', 'restore', 'restore-gzip', 'explicit-json', 'create']) {
     const p = await fault('corrupt', mode)
-    const name = mode === 'restore' ? 'restored.sqlite' : mode === 'explicit-json' ? 'independent.json' : mode + '.sqlite'
+    const restore = mode === 'restore' || mode === 'restore-gzip'
+    const name = restore ? 'restored.sqlite' : mode === 'explicit-json' ? 'independent.json' : mode + '.sqlite'
     const alternative = join(p.dir, name), bad = join(p.dir, 'invalid.sqlite')
-    const manual = join(p.user, 'backups', 'novel-director-100-manual-s0.json')
-    if (mode === 'restore') {
-      await mkdir(dirname(manual))
-      await copyNew(join(fixtureDir, 'backup.json'), manual)
+    const backup = join(p.user, 'backups', mode === 'restore-gzip' ? 'novel-director-100-auto.json.gz' : 'novel-director-100-manual-s0.json')
+    if (restore) {
+      await mkdir(dirname(backup))
+      const fixture = join(fixtureDir, 'backup.json')
+      if (mode === 'restore-gzip') await writeFile(backup, gzipSync(await readFile(fixture)), { flag: 'wx' })
+      else await copyNew(fixture, backup)
     } else if (mode !== 'create') await copyNew(join(fixtureDir, mode === 'choose' ? 'library.sqlite' : 'backup.json'), alternative)
     if (mode === 'choose') await writeFile(bad, 'Invalid synthetic library.\n', { flag: 'wx' })
     const entry = { name: mode, before: await inventory(p) }
@@ -676,7 +680,7 @@ async function explicitRecovery(t) {
     }
     await windowRun(t, p, 'explicit-' + mode, async (c, s) => {
       entry.blocked = await blocked(c, p)
-      const choice = mode === 'explicit-json' ? 'choose' : mode
+      const choice = restore ? 'restore' : mode === 'explicit-json' ? 'choose' : mode
       const operate = async cancel => {
         await recover(c, choice)
         if (mode === 'choose') await picker(s, p, open, cancel ? 'cancel' : 'select', cancel ? undefined : alternative)
@@ -684,8 +688,8 @@ async function explicitRecovery(t) {
           await picker(s, p, open, 'select', alternative)
           await picker(s, p, independent, cancel ? 'cancel-json' : 'confirm-json')
         }
-        if (mode === 'restore') {
-          await picker(s, p, src, 'select', manual)
+        if (restore) {
+          await picker(s, p, src, 'select', backup)
           await picker(s, p, dest, cancel ? 'cancel' : 'save', cancel ? undefined : alternative)
         }
         if (mode === 'create') await picker(s, p, '新建独立书库', cancel ? 'cancel' : 'save', cancel ? undefined : alternative)
@@ -696,7 +700,7 @@ async function explicitRecovery(t) {
       entry.afterCancel = await inventory(p)
       assert.deepEqual(entry.afterCancel, entry.before)
       assert(!await exists(p.defaultDb))
-      if (mode === 'restore' || mode === 'create') assert(!await exists(alternative))
+      if (restore || mode === 'create') assert(!await exists(alternative))
       await screen(c, mode + '-cancelled')
       if (mode === 'choose') {
         const badHash = await sha256(bad)
@@ -727,7 +731,7 @@ async function explicitRecovery(t) {
     assert.deepEqual(entry.afterRestart.volume, entry.before.volume)
     assert.deepEqual(entry.afterRestart.parked, entry.before.parked)
     assert(!await exists(p.defaultDb))
-    if (mode === 'restore') assert.equal(await sha256(manual), manifest.backupSha256)
+    if (restore) assert.deepEqual(entry.afterRestart.backups, entry.before.backups)
     entry.status = 'passed'
   }
 }

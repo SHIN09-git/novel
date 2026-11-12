@@ -200,6 +200,7 @@ export interface BackupInfo {
   timestamp: number
   size: number
   isAutomatic: boolean
+  isRollback?: boolean
 }
 
 export interface BackupCreateResult {

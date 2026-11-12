@@ -23,6 +23,7 @@ export interface StorageService extends FormalChapterCommitWriter {
   load(): Promise<AppData>
   loadSnapshot(): Promise<StorageSnapshot>
   save(data: AppData): Promise<void>
+  touchProject(projectId: string, expectedRevision: string): Promise<StorageWriteResult>
   saveIfCurrent(data: AppData, expectedRevision?: string): Promise<StorageWriteResult>
   saveGenerationRunBundle(bundle: GenerationRunBundle, expectedRevision?: string): Promise<StorageWriteResult>
   saveChapterCommitBundle(bundle: ChapterCommitBundle, expectedRevision?: string, onWriteStarted?: () => void): Promise<StorageWriteResult>

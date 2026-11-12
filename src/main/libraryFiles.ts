@@ -1,4 +1,5 @@
 import { constants } from 'node:fs'
+import { isBackupFile } from './backupFileFormat'
 import { copyFile, lstat, open, readdir, unlink } from 'node:fs/promises'
 import { extname, isAbsolute, join, resolve } from 'node:path'
 import type { AppData } from '../shared/types'
@@ -30,7 +31,7 @@ export async function hasLibraryTraces(directory: string, kind: 'config' | 'sqli
   if (kind === 'sqlite') return false
   if (entries.some(name => /^(secure-credentials\.json|agent-authorizations\.json)$|^novel-director-data\.json\./i.test(name))) return true
   const backups = join(directory, 'backups')
-  return await exists(backups) && (await readdir(backups)).some(name => /\.json(?:\.gz)?$/i.test(name))
+  return await exists(backups) && (await readdir(backups)).some(isBackupFile)
 }
 
 export async function openExistingLibrary(path: string, stores: LibraryStores): Promise<OpenLibrary> {

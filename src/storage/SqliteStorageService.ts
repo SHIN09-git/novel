@@ -4,7 +4,7 @@ import { createRequire } from 'node:module'
 import { dirname, extname, resolve } from 'node:path'
 import type { AppData, CandidateDecisionCommand, Character, CharacterCardReviewCommand, ChapterCommitBundle, ChapterWritebackFailure, GenerationRunBundle, RevisionCommitBundle } from '../shared/types'
 import type { CandidateDecisionWriteResult, CharacterCardReviewWriteResult, StorageWriteResult } from '../shared/ipc/ipcTypes'
-import { EMPTY_APP_DATA, normalizeAppData, sanitizeAppDataForPersistence } from '../shared/defaults'
+import { normalizeAppData, sanitizeAppDataForPersistence } from '../shared/defaults'
 import { normalizeChapterWritebackFailure } from '../shared/normalizers/chapterWritebackFailures'
 import { applyCharacterCardReview, CHARACTER_CARD_REVIEW_COLLECTIONS } from '../services/characterState/cardReview'
 import { applyChapterCommitBundleToAppData } from '../services/ChapterCommitBundleService'
@@ -35,10 +35,12 @@ import {
 import { currentRevisionFromDatabase, readAppDataFromDatabase, readAppDataCollectionsFromDatabase, readLibrarySnapshot } from './sqlite/sqliteSnapshot'
 import { writeSqliteSnapshotEntities } from './sqlite/sqliteSnapshotWriter'
 import { readGenerationBundleValidationContext } from './sqlite/sqliteGenerationContext'
+import { readChapterCommitContext, readRevisionCommitContext } from './sqlite/sqliteCommitContext'
+import { ensureReceiptIndexes } from './sqlite/sqliteReceiptAliases'
 import { executeSqliteCandidateDecision } from './sqlite/sqliteCandidateDecisions'
 import { SETTINGS_ROW_ID } from './sqlite/sqliteSchema'
 import { sqliteUsageHistory } from './sqlite/sqliteProjectUsage'
-import { isSqliteEmpty, SqliteInitialization } from './sqlite/sqliteInitialization'
+import { SqliteInitialization } from './sqlite/sqliteInitialization'
 import type {
   AppDataArrayKey,
   SqliteDatabase,
@@ -143,13 +145,32 @@ export class SqliteStorageService implements StorageService {
     const readTransaction = db.transaction(() => {
       const revision = this.currentRevision(db)
       if (this.strict) return this.initialization.takeInitialSnapshot(db, revision) ?? readLibrarySnapshot(db)
-      return { data: this.readAppData(db), revision }
+      return { data: readAppDataFromDatabase(db), revision }
     })
     return readTransaction()
   }
 
   async save(data: AppData): Promise<void> {
     await this.saveIfCurrent(data)
+  }
+
+  async touchProject(projectId: string, expectedRevision: string): Promise<StorageWriteResult> {
+    if (!expectedRevision) throw new StorageRevisionConflictError()
+    const db = await this.open()
+    return db.transaction((): StorageWriteResult => {
+      const updatedAt = nowIso()
+      // Compare and update in the first write statement, including across Agent connections.
+      const { changes } = db.prepare(`UPDATE entities SET json = json_set(json, '$.lastOpenedAt', ?)
+        WHERE collection = 'projects' AND id = ? AND (SELECT value FROM meta WHERE key = 'revision') = ?`)
+        .run(updatedAt, projectId, expectedRevision) as { changes: number }
+      if (!changes) {
+        this.assertExpectedRevision(db, expectedRevision)
+        throw new Error('项目不存在。')
+      }
+      const revision = `${updatedAt}-${randomUUID()}`
+      this.writeRevisionMeta(db, revision, updatedAt)
+      return { ok: true, storagePath: this.storagePath, revision, updatedAt, savedCollections: ['projects'] }
+    })()
   }
 
   async backupTo(targetPath: string): Promise<void> {
@@ -191,6 +212,7 @@ export class SqliteStorageService implements StorageService {
       this.writeRevisionMeta(db, revision, updatedAt)
       // Keep full-save deletion/import semantics without rewriting unchanged history and prose.
       writeSqliteSnapshotEntities(db, entries, updatedAt)
+      ensureReceiptIndexes(db)
     })
 
     writeTransaction(normalized)
@@ -214,14 +236,14 @@ export class SqliteStorageService implements StorageService {
     return this.saveEntityBundle<AppData>(expectedRevision, (existing) => {
       const nextData = applyChapterCommitBundleToAppData(existing, bundle)
       return nextData === existing ? [] : chapterCommitEntityEntries(bundle, nextData)
-    }, (db) => this.isEmpty(db) ? EMPTY_APP_DATA : this.readAppData(db), onWriteStarted)
+    }, (db) => this.readChapterCommitContext(db, bundle, this.strict), onWriteStarted)
   }
 
   async saveRevisionCommitBundle(bundle: RevisionCommitBundle, expectedRevision?: string, onWriteStarted?: () => void): Promise<StorageWriteResult> {
     return this.saveEntityBundle<AppData>(expectedRevision, (existing) => {
       const nextData = applyRevisionCommitBundleToAppData(existing, bundle)
       return nextData === existing ? [] : revisionCommitEntityEntries(bundle, nextData)
-    }, (db) => this.isEmpty(db) ? EMPTY_APP_DATA : this.readAppData(db), onWriteStarted)
+    }, (db) => this.readRevisionCommitContext(db, bundle, this.strict), onWriteStarted)
   }
 
   async recordChapterWritebackFailureIfUncommitted(row: ChapterWritebackFailure): Promise<void> {
@@ -326,6 +348,9 @@ export class SqliteStorageService implements StorageService {
     updatedAt: string,
     replace: boolean
   ): void {
+    if (entries[0]?.collection === 'chapterCommitBundles' || entries[0]?.collection === 'revisionCommitBundles') {
+      ensureReceiptIndexes(db)
+    }
     const insertSql = replace
       ? `INSERT OR REPLACE INTO entities (
           collection, id, project_id, chapter_id, job_id, character_id,
@@ -372,13 +397,8 @@ export class SqliteStorageService implements StorageService {
     return db
   }
 
-  private isEmpty(db: SqliteDatabase): boolean {
-    return isSqliteEmpty(db)
-  }
-
-  private readAppData(db: SqliteDatabase): AppData {
-    return this.strict ? readLibrarySnapshot(db).data : readAppDataFromDatabase(db)
-  }
+  private readonly readChapterCommitContext = readChapterCommitContext
+  private readonly readRevisionCommitContext = readRevisionCommitContext
 }
 
 function libraryStorage(filePath: string, mode: 'existing' | 'new', initialData?: AppData): StorageService {

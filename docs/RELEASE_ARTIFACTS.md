@@ -13,13 +13,17 @@ Novel Director 的本地目录按用途分为三层：
 - `Novel Director Setup <版本号>.exe`：给普通用户安装的文件。
 - `win-unpacked/Novel Director.exe`：无需安装的本地测试版本。
 - `SHA256SUMS.txt`：安装包 SHA-256 校验值。
-- `BUILD_INFO.json`：版本、构建时间、Electron 版本和打包烟雾测试状态。
+- `BUILD_INFO.json`：版本、构建时间、Electron 与 SQLite 绑定版本、安装包及 app.asar 的 SHA-256、烟雾测试结果；干净检出还会记录源码提交号。
 
 同一版本重新打包时，旧的同版本构建产物会被替换。升级版本时，上一版本会自动归档。因此请始终从 `release/` 上传当前 GitHub Release，不要从 `releases/archive/` 选择安装包。
 
 小说项目和 SQLite 用户数据库不存放在这些目录中，整理发行产物不会移动或删除用户数据。
 
-### 当前本地发行（2026-11-11）
+### Preview.21 验收候选
+
+`0.1.6-preview.21` 是书库恢复、项目打开、正式提交与自动备份的 Windows 验收版本，使用 Electron 44.9.1 与 better-sqlite3 13.0.3。专用分支的 [Setup 验收工作流](../.github/workflows/library-s2-installer.yml)让两台临时 Windows 机器使用同一安装包和校验文件；验收附件不等于公开 Release。下载和核对时使用同一构建的 SHA256SUMS.txt，不混用不同机器生成的未签名安装包。
+
+### 上一公开发行（2026-11-11）
 
 `0.1.6-preview.20` 合并了[长篇完稿修复 P0–P2](./LONG_NOVEL_COMPLETION_REPAIR_PLAN.md)。安装请用 `release/Novel Director Setup 0.1.6-preview.20.exe`；不安装可直接打开 `release/win-unpacked/Novel Director.exe`。打开项目，在**设置 → 运行信息**中核对应用版本、运行方式和程序位置。已安装的旧版不会因更新仓库目录而自动升级。
 

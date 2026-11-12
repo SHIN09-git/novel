@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { EMPTY_APP_DATA } from '../../../shared/defaults'
+import { markProjectOpened } from '../../../services/ProjectLifecycleService'
 import type { AppData, CandidateDecisionCommand, ChapterCommitBundle, GenerationRunBundle, RevisionCommitBundle } from '../../../shared/types'
 import { getUserFriendlyError } from '../../../shared/errorUtils'
 import { isStorageRevisionConflict } from '../../../shared/storageRevisionConflict'
@@ -192,6 +193,14 @@ export function useAppData() {
     }
   }
 
+  async function touchProject(projectId: string): Promise<void> {
+    await runPersistedStorageOperation(async (current) => {
+      if (!current.projects.some(project => project.id === projectId)) throw new Error('项目不存在。')
+      const saved = await getNovelDirectorDataApi().touchProject(projectId, storagePath)
+      return { ...saved, data: markProjectOpened(current, projectId, saved.updatedAt) }
+    })
+  }
+
   async function executeCandidateDecision(command: CandidateDecisionCommand): Promise<void> {
     setStatus('正在保存候选决定...')
     try {
@@ -278,6 +287,7 @@ export function useAppData() {
     needsWritebackCheck,
     setStatus,
     saveData,
+    touchProject,
     saveGenerationRunBundle,
     saveChapterCommitBundle,
     saveRevisionCommitBundle,

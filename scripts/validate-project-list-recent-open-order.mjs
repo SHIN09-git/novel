@@ -28,7 +28,8 @@ const checks = [
   },
   {
     ok:
-      /markProjectOpened/.test(homeView) &&
+      /await touchProject\(projectId\)/.test(homeView) &&
+      /markProjectOpened\(current, projectId, saved.updatedAt\)/.test(read('src/renderer/src/hooks/useAppData.ts')) &&
       /lastOpenedAt:\s*openedAt/.test(projectLifecycle),
     message: 'Opening a project records lastOpenedAt'
   },
