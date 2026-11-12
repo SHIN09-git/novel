@@ -78,10 +78,24 @@ jobs:
             Start-Sleep -Seconds 12
           }
       - name: Download the same immutable candidate
-        uses: actions/download-artifact@v4
-        with:
-          name: ${{ env.SETUP_ARTIFACT }}
-          path: ${{ runner.temp }}/s2-input
+        env:
+          GH_TOKEN: ${{ github.token }}
+        timeout-minutes: 6
+        run: |
+          # The artifact can be indexed for this run before its download endpoint is ready.
+          $PSNativeCommandUseErrorActionPreference = $false
+          $inputDir = Join-Path $env:RUNNER_TEMP 's2-input'
+          for ($i=1; $i -le 8; $i++) {
+            $attemptDir = Join-Path $env:RUNNER_TEMP "s2-download-$i"
+            gh run download $env:GITHUB_RUN_ID --name $env:SETUP_ARTIFACT --dir $attemptDir
+            if ($LASTEXITCODE -eq 0) {
+              New-Item -ItemType Directory -Path $inputDir -ErrorAction Stop | Out-Null
+              Get-ChildItem -LiteralPath $attemptDir -File | Copy-Item -Destination $inputDir -ErrorAction Stop
+              exit 0
+            }
+            if ($i -lt 8) { Start-Sleep -Seconds 8 }
+          }
+          throw 'Unable to download this attempt''s immutable Setup'
       - name: Exercise installed product
         run: ./scripts/s2-windows/qualify.ps1
       - name: Record job outcome

@@ -10,6 +10,7 @@ import { cleanup, connect, evaluate, sha256 } from '../utils/long-novel-ui-drive
 import { button, click, fill, freePort, waitFor } from '../utils/qa-agent-authorization-driver.mjs'
 import { repoRoot } from '../utils/repo-root.mjs'
 import { agentRead, checkedState, closedHash, copyClosed, editedBody, fixture, readJson } from './readback.mjs'
+import { closeInstalledWindow } from './close-window.mjs'
 
 const env = process.env
 assert(process.platform === 'win32' && process.arch === 'x64' && env.RUNNER_ENVIRONMENT === 'github-hosted' &&
@@ -155,8 +156,8 @@ try {
   assert.equal(await evaluate(c, api + '.ai.getCallProgress({})'), null)
   assert.deepEqual(session.networkRequests, [])
   assert.deepEqual(session.exceptions, [])
+  report.windowExit = await closeInstalledWindow(session)
   await cleanup(session)
-  assert.equal(session.child.exitCode, 0, 'Installed application did not close cleanly')
   report.closedSha256 = await closedHash(database)
   if (stage === 'old-reopen') await copyClosed(database, join(work, 'before-upgrade.sqlite'))
   if (stage.endsWith('reopen') || rollback) {
