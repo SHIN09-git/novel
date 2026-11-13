@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 import { copyFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
+import { createRequire } from 'node:module'
 import { spawnSync } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
 
@@ -9,7 +10,7 @@ const mode = process.argv[2] ?? 'help'
 const electronPackage = JSON.parse(readFileSync(join(root, 'node_modules', 'electron', 'package.json'), 'utf8'))
 const npmCli = process.env.npm_execpath || join(dirname(process.execPath), 'node_modules', 'npm', 'bin', 'npm-cli.js')
 const electronRebuildCli = join(root, 'node_modules', '@electron', 'rebuild', 'lib', 'cli.js')
-const electronCli = join(root, 'node_modules', 'electron', 'cli.js')
+const require = createRequire(import.meta.url)
 const nodeBinding = join(root, 'node_modules', 'better-sqlite3', 'build', 'Release', 'better_sqlite3.node')
 const packagedBinding = join(
   root,
@@ -34,7 +35,8 @@ const env = {
 function run(command, args, options = {}) {
   const result = spawnSync(command, args, {
     cwd: root,
-    env,
+    env: options.env ?? env,
+    timeout: options.timeout,
     stdio: options.stdio ?? 'inherit',
     shell: false
   })
@@ -60,7 +62,7 @@ function probeScript(kind) {
       "db.prepare('select 1 as ok').get()",
       'db.close()',
       "console.log('better-sqlite3 probe ok')",
-      "if (process.versions.electron) require('electron').app.quit()"
+      ...(kind === 'electron' ? ["if (!process.versions.electron) throw new Error('Expected Electron runtime')"] : [])
     ].join('\n'),
     'utf8'
   )
@@ -72,7 +74,9 @@ function checkNode() {
 }
 
 function checkElectron() {
-  run(process.execPath, [electronCli, probeScript('electron')])
+  // Electron 44 downloads its locked binary on first use, not during npm ci.
+  const electronExe = require('electron')
+  run(electronExe, [probeScript('electron')], { env: { ...env, ELECTRON_RUN_AS_NODE: '1' }, timeout: 30_000 })
 }
 
 function rebuildElectron() {
@@ -92,6 +96,7 @@ function copyPackagedElectronBinding() {
 }
 
 function ensureElectron() {
+  try { checkElectron(); return } catch { /* Try rebuilding only if the installed binding cannot execute SQL. */ }
   try {
     rebuildElectron()
   } catch (error) {
@@ -104,6 +109,7 @@ function ensureElectron() {
 }
 
 function ensureNode() {
+  try { checkNode(); return } catch { /* Restore a runtime-specific binding only when necessary. */ }
   console.log('Rebuilding better-sqlite3 for local Node.js scripts...')
   run(process.execPath, [npmCli, 'rebuild', 'better-sqlite3'])
   checkNode()

@@ -1,13 +1,14 @@
 import { dialog, ipcMain } from 'electron'
-import { readFile, writeFile } from 'node:fs/promises'
-import { safeParseJson } from '../../services/AIJsonParser'
+import { writeFile } from 'node:fs/promises'
+import { normalizeImportedLibrary } from '../../storage/libraryValidation'
+import { backupFileFilter, readBackupJson } from '../backupFileFormat'
 import { observeFormalChapterWrites } from '../../services/ChapterWritebackFailureService'
 import { parseChapterTitleRename, previewChapterTitleRename } from '../../services/ChapterTitleRenameService'
 import { loadChapterTitlesReadonly } from '../../storage/SqliteStorageService'
 import { StorageRevisionConflictError } from '../../storage/StorageService'
 import type { ChapterTitleCommit, ChapterTitleRename } from '../../shared/types/chapterTitle'
-import { collectionName } from '../../shared/appDataCollections'
-import { normalizeAppData, sanitizeAppDataForPersistence } from '../../shared/defaults'
+import { ALL_ENTITY_COLLECTIONS, collectionName } from '../../shared/appDataCollections'
+import { sanitizeAppDataForPersistence } from '../../shared/defaults'
 import { IPC_CHANNELS } from '../../shared/ipc/ipcChannels'
 import { readProjectUsage } from '../../storage/readProjectUsage'
 import type {
@@ -35,6 +36,16 @@ import { secureAndSanitizeAppData } from './appDataCredentialSanitizer'
 import { assertCurrentStorage, maybeCreateAutomaticBackup } from './storageDataOperations'
 
 export function registerDataIpcHandlers(context: StorageDataOperationContext): void {
+  ipcMain.handle(IPC_CHANNELS.DATA_TOUCH_PROJECT, safeIpcHandler(async (_event,
+    request: { projectId: string; expectedRevision: string; expectedStoragePath: string }): Promise<StorageWriteResult> => {
+    if (typeof request?.projectId !== 'string' || !request.projectId.trim()) throw new Error('请选择要打开的项目。')
+    if (typeof request.expectedRevision !== 'string' || !request.expectedRevision) throw new StorageRevisionConflictError()
+    const storage = context.getStorage()
+    if (request.expectedStoragePath !== storage.getStoragePath()) throw new StorageRevisionConflictError()
+    await maybeCreateAutomaticBackup(context, 'project open', storage)
+    assertCurrentStorage(context, storage)
+    return storage.touchProject(request.projectId, request.expectedRevision)
+  }))
   ipcMain.handle(IPC_CHANNELS.DATA_PREVIEW_CHAPTER_TITLES, safeIpcHandler(async (_event,
     request: { command: ChapterTitleRename; expectedRevision: string }) => {
     const command = parseChapterTitleRename(request?.command), storage = context.getStorage()
@@ -81,9 +92,10 @@ export function registerDataIpcHandlers(context: StorageDataOperationContext): v
   ipcMain.handle(
     IPC_CHANNELS.STORAGE_GET,
     safeIpcHandler(async (): Promise<StorageGetResult> => {
-      const storage = context.getStorage()
+      const opened = await context.loadLibrary?.()
+      const storage = opened?.storage ?? context.getStorage()
       LogService.info(`Loading storage data from ${storage.getStoragePath()}`)
-      const snapshot = await storage.loadSnapshot()
+      const snapshot = opened?.snapshot ?? await storage.loadSnapshot()
       const loaded = snapshot.data
       const secured = await secureAndSanitizeAppData(context, loaded)
       let revision = snapshot.revision
@@ -110,6 +122,11 @@ export function registerDataIpcHandlers(context: StorageDataOperationContext): v
         ? (input as StorageSaveRequest)
         : { data: input as AppData, expectedRevision: undefined }
       const data = request.data
+      // Only the desktop's complete snapshot can express deletions. Imports validate legacy formats separately.
+      if (!data?.settings || !Number.isInteger(data.schemaVersion) ||
+          ALL_ENTITY_COLLECTIONS.some(key => !Object.hasOwn(data, key) || !Array.isArray(data[key]))) {
+        throw new Error('此操作需要完整书库，不能用局部查询结果覆盖已有数据。请重新加载。')
+      }
       const secured = await secureAndSanitizeAppData(context, data)
       await maybeCreateAutomaticBackup(context, 'full AppData save', storage)
       assertCurrentStorage(context, storage)
@@ -164,6 +181,7 @@ export function registerDataIpcHandlers(context: StorageDataOperationContext): v
   ipcMain.handle(
     IPC_CHANNELS.STORAGE_EXPORT,
     safeIpcHandler(async (_event, data: AppData): Promise<ExportDataResult> => {
+      context.getStorage()
       const result = await dialog.showSaveDialog({
         title: '导出 Novel Director 数据',
         defaultPath: 'novel-director-export.json',
@@ -182,20 +200,17 @@ export function registerDataIpcHandlers(context: StorageDataOperationContext): v
       const result = await dialog.showOpenDialog({
         title: '导入 Novel Director 数据',
         properties: ['openFile'],
-        filters: [{ name: 'JSON', extensions: ['json'] }]
+        filters: [backupFileFilter]
       })
 
       if (result.canceled || !result.filePaths[0]) return { canceled: true }
       const storage = context.getStorage()
       const importPath = result.filePaths[0]
-      const raw = await readFile(importPath, 'utf-8')
-      const parsed = safeParseJson<Partial<AppData>>(raw, '导入数据文件')
-      if (!parsed.ok) throw new Error(parsed.parseError)
-      const imported = normalizeAppData(parsed.data)
+      const strategy = request?.strategy === 'merge' ? 'merge' : 'replace'
+      const imported = normalizeImportedLibrary(await readBackupJson(importPath), strategy)
       const secured = await secureAndSanitizeAppData(context, imported, {
         migrateLegacyApiKey: false
       })
-      const strategy = request?.strategy === 'merge' ? 'merge' : 'replace'
       const currentSnapshot = await storage.loadSnapshot()
       let importedProjectIds = secured.data.projects.map((project) => project.id)
 

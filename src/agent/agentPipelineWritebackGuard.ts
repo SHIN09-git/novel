@@ -3,14 +3,11 @@ import { normalizeAppData } from '../shared/defaults'
 import { BOOK_PROGRESS_COLLECTIONS } from '../services/BookProgressService'
 import { loadSqliteCollectionsReadonly } from '../storage/SqliteStorageService'
 import { StorageRevisionConflictError } from '../storage/StorageService'
-import { loadAgentRuntimeData, saveAgentRuntimeData, type AgentRuntimeData } from './AgentRuntime'
+import { reloadAgentRuntimeData, saveAgentRuntimeData, type AgentRuntimeData } from './AgentRuntime'
 import { checkPipelineRunTarget, isMultiChapterRun } from './agentBatchWriteback'
 
 export async function reopenPipelineRuntime(runtime: AgentRuntimeData) {
-  if (!runtime.storagePath) throw new Error('没有可重读的书库，无法核对章节任务。')
-  const fresh = await loadAgentRuntimeData({ storagePath: runtime.storagePath, userDataPath: runtime.userDataPath })
-  if (fresh.source === 'empty' || fresh.storagePath !== runtime.storagePath) throw new Error('原书库已不存在或位置已变化，请重新打开任务。')
-  return fresh
+  return reloadAgentRuntimeData(runtime)
 }
 
 export function batchModelRequestGuard(runtime: AgentRuntimeData, run: AgentRun, jobId: ID) {

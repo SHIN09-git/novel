@@ -357,7 +357,7 @@ async function main() {
         storageServiceSource.includes('backupTo(targetPath: string): Promise<void>') &&
         sqliteSource.includes('await db.backup(targetPath)') &&
         sqliteSource.includes('close(): void') &&
-        mainIndexSource.includes('storage.close?.()'),
+        mainIndexSource.includes('library.adopt(nextStorage)'),
       'storage switching closes stale SQLite connections and exposes WAL-safe backup support'
     )
   )

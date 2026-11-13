@@ -1,10 +1,8 @@
-import { existsSync } from 'node:fs'
 import { normalizeAppData } from '../shared/defaults'
 import type { AppData } from '../shared/types'
 import { loadSqliteCollectionsReadonly } from '../storage/SqliteStorageService'
-import { resolveSqliteStoragePath } from '../storage/StorageService'
 import {
-  loadAgentRuntimeData, resolveAgentRuntimeStoragePath,
+  loadResolvedAgentRuntime, resolveAgentRuntimeStoragePath,
   type AgentRuntimeData, type AgentRuntimeLoadOptions
 } from './AgentRuntime'
 import { AGENT_PROJECT_OVERVIEW_COLLECTIONS, type AgentProjectOverviewData } from './agentProjectOverviewData'
@@ -20,17 +18,15 @@ function pickOverview(data: AppData): AgentProjectOverviewData {
 export async function loadAgentProjectOverview(
   options: AgentRuntimeLoadOptions = {}
 ): Promise<AgentProjectOverviewRuntime> {
-  const { storagePath, userDataPath } = await resolveAgentRuntimeStoragePath(options)
-  const sqlitePath = resolveSqliteStoragePath(storagePath)
-  if (existsSync(sqlitePath)) {
-    const snapshot = await loadSqliteCollectionsReadonly(sqlitePath, AGENT_PROJECT_OVERVIEW_COLLECTIONS)
+  const choice = await resolveAgentRuntimeStoragePath(options, 'overview')
+  if (choice.source === 'sqlite') {
+    const snapshot = await loadSqliteCollectionsReadonly(choice.storagePath, AGENT_PROJECT_OVERVIEW_COLLECTIONS)
     return {
-      data: pickOverview(normalizeAppData(snapshot.data)),
-      source: 'sqlite', storagePath: sqlitePath, userDataPath, revision: snapshot.revision
+      ...choice, data: pickOverview(normalizeAppData(snapshot.data)), revision: snapshot.revision
     }
   }
   // JSON has no indexed collections. Preserve the legacy reader's parsing, path,
   // revision and empty-directory behavior, but return only the overview shape.
-  const runtime = await loadAgentRuntimeData({ storagePath, userDataPath })
+  const runtime = await loadResolvedAgentRuntime(choice)
   return { ...runtime, data: pickOverview(runtime.data) }
 }

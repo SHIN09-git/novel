@@ -43,12 +43,14 @@ import type {
   ImportDataRequest,
   ImportDataStrategy,
   IpcFailure,
+  LibraryRecoveryAction,
   LogsGetPathResult,
   LogsOpenResult,
   ListAiCallProgressResult,
   MigrateStoragePathResult,
   MigrationMergePreviewResult,
   OpenStorageFolderResult,
+  RecoverLibraryResult,
   SaveFileResult,
   StorageWriteResult,
   SelectStoragePathResult,
@@ -114,6 +116,12 @@ const novelDirector = {
     getProjectUsage: (projectId: string) => invokeOrThrow<ProjectUsageReport>(IPC_CHANNELS.DATA_GET_PROJECT_USAGE, assertText(projectId, 'projectId')),
     load: loadStorageData,
     save: saveStorageData,
+    touchProject: async (projectId: string, expectedStoragePath: string) => {
+      const result = await invokeOrThrow<StorageWriteResult>(IPC_CHANNELS.DATA_TOUCH_PROJECT,
+        { projectId: assertText(projectId, 'projectId'), expectedStoragePath, expectedRevision: storageRevision })
+      storageRevision = result.revision
+      return result
+    },
     previewChapterTitleRename: (command: ChapterTitleRename) =>
       invokeOrThrow<ChapterTitlePreview>(IPC_CHANNELS.DATA_PREVIEW_CHAPTER_TITLES, { command, expectedRevision: storageRevision }),
     applyChapterTitleRename: async (commit: ChapterTitleCommit) => {
@@ -147,12 +155,17 @@ const novelDirector = {
     import: async (strategy: ImportDataStrategy = 'replace') => {
       const request: ImportDataRequest = { expectedRevision: storageRevision, strategy }
       const result = await invokeOrThrow<ImportDataResult>(IPC_CHANNELS.STORAGE_IMPORT, request)
-      rememberStorageRevision(result)
+      // A blocked merge may report an external writer's revision without updating renderer data.
+      if (result.data) rememberStorageRevision(result)
       return result
     }
   },
   app: {
     getStoragePath: () => invokeOrThrow<GetStoragePathResult>(IPC_CHANNELS.APP_GET_STORAGE_PATH),
+    recoverLibrary: async (action: LibraryRecoveryAction) => {
+      if (!['retry', 'choose', 'restore', 'create'].includes(action)) throw new Error('不支持的书库恢复操作。')
+      return invokeOrThrow<RecoverLibraryResult>(IPC_CHANNELS.APP_RECOVER_LIBRARY, action)
+    },
     getRuntimeInfo: () => invokeOrThrow<GetRuntimeInfoResult>(IPC_CHANNELS.APP_GET_RUNTIME_INFO),
     selectStoragePath: () => invokeOrThrow<SelectStoragePathResult>(IPC_CHANNELS.APP_SELECT_STORAGE_PATH),
     migrateStoragePath: async (storagePath: string, data: AppData, overwrite = false) => {

@@ -1,0 +1,114 @@
+name: S2 Windows Setup
+on:
+  push:
+    branches: [codex/library-s2-installer-qa]
+    paths-ignore:
+      - 'docs/**'
+      - 'ROADMAP.md'
+      - 'scripts/benchmark-*.mjs'
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  qualify:
+    if: github.repository == 'SHIN09-git/novel' && !github.event.deleted
+    runs-on: windows-2025
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        route: [clean, upgrade]
+    name: S2 ${{ matrix.route }}
+    env:
+      ROUTE: ${{ matrix.route }}
+      SETUP_ARTIFACT: s2-setup-${{ github.sha }}-${{ github.run_attempt }}
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - name: Start evidence record
+        run: |
+          $dir = New-Item -ItemType Directory -Path (Join-Path $env:RUNNER_TEMP 's2-evidence')
+          @{ route=$env:ROUTE; commit=$env:GITHUB_SHA; run=$env:GITHUB_RUN_ID; attempt=$env:GITHUB_RUN_ATTEMPT } |
+            ConvertTo-Json | Set-Content (Join-Path $dir.FullName 'job.json')
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - name: Install locked dependencies
+        run: npm.cmd ci
+      - name: Require a newer candidate version from this commit
+        run: node -e "const v=require('./package.json').version,l=require('./package-lock.json');if(!require('semver').gt(v,'0.1.6-preview.20')||v!==l.version||v!==l.packages[''].version)throw Error('Set and lock the candidate version before pushing')"
+      - name: Build the single candidate (no publishing)
+        if: matrix.route == 'clean'
+        run: npm.cmd run dist:win
+      - name: Retain candidate Setup and build records
+        if: matrix.route == 'clean'
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ env.SETUP_ARTIFACT }}
+          path: |
+            release/Novel Director Setup *.exe
+            release/SHA256SUMS.txt
+            release/BUILD_INFO.json
+          compression-level: 0
+          if-no-files-found: error
+          retention-days: 14
+      # Both VMs consume the uploaded artifact. No third Windows build VM.
+      - name: Wait for this run's candidate
+        if: matrix.route == 'upgrade'
+        timeout-minutes: 40
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $run = "repos/$env:GITHUB_REPOSITORY/actions/runs/$env:GITHUB_RUN_ID"
+          while ($true) {
+            $assets = gh api "$run/artifacts?name=$env:SETUP_ARTIFACT" | ConvertFrom-Json
+            if ($LASTEXITCODE) { throw 'Cannot read run artifacts' }
+            if (@($assets.artifacts | Where-Object { $_.name -ceq $env:SETUP_ARTIFACT -and !$_.expired }).Count -eq 1) { break }
+            $jobs = gh api "$run/attempts/$env:GITHUB_RUN_ATTEMPT/jobs" | ConvertFrom-Json
+            if ($LASTEXITCODE) { throw 'Cannot read packaging job status' }
+            if ($jobs.jobs | Where-Object { $_.name -eq 'S2 clean' -and $_.status -eq 'completed' -and $_.conclusion -ne 'success' }) {
+              throw 'Packaging job ended without handing over the Setup'
+            }
+            Start-Sleep -Seconds 12
+          }
+      - name: Download the same immutable candidate
+        env:
+          GH_TOKEN: ${{ github.token }}
+        timeout-minutes: 6
+        run: |
+          # The artifact can be indexed for this run before its download endpoint is ready.
+          $PSNativeCommandUseErrorActionPreference = $false
+          $inputDir = Join-Path $env:RUNNER_TEMP 's2-input'
+          for ($i=1; $i -le 8; $i++) {
+            $attemptDir = Join-Path $env:RUNNER_TEMP "s2-download-$i"
+            gh run download $env:GITHUB_RUN_ID --name $env:SETUP_ARTIFACT --dir $attemptDir
+            if ($LASTEXITCODE -eq 0) {
+              New-Item -ItemType Directory -Path $inputDir -ErrorAction Stop | Out-Null
+              Get-ChildItem -LiteralPath $attemptDir -File | Copy-Item -Destination $inputDir -ErrorAction Stop
+              exit 0
+            }
+            if ($i -lt 8) { Start-Sleep -Seconds 8 }
+          }
+          throw 'Unable to download this attempt''s immutable Setup'
+      - name: Exercise installed product
+        run: ./scripts/s2-windows/qualify.ps1
+      - name: Record job outcome
+        if: always()
+        env:
+          RESULT: ${{ job.status }}
+        run: |
+          $env:RESULT | Set-Content (Join-Path $env:RUNNER_TEMP 's2-evidence/job-result.txt')
+      - name: Retain qualification evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: s2-${{ matrix.route }}-report-${{ github.sha }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/s2-evidence/
+          if-no-files-found: warn
+          retention-days: 14

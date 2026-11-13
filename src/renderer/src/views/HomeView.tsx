@@ -5,7 +5,6 @@ import type { ID, Project } from '../../../shared/types'
 import {
   formatProjectDeletionImpact,
   getProjectDeletionSummary,
-  markProjectOpened,
   removeProjectFromAppData
 } from '../../../services/ProjectLifecycleService'
 import { useConfirm } from '../components/ConfirmDialog'
@@ -30,11 +29,13 @@ type BusyAction = 'create' | 'import' | 'open' | 'edit' | 'delete'
 export function HomeView({
   data,
   saveData,
+  touchProject,
   importData,
   setProjectId,
   setView
 }: PersistProps & {
   importData: ImportDataHandler
+  touchProject: (id: ID) => Promise<void>
   setProjectId: (id: ID) => void
   setView: (view: View) => void
 }) {
@@ -95,17 +96,17 @@ export function HomeView({
     })
   }
 
+  async function enterStoredProject(projectId: ID) {
+    await touchProject(projectId)
+    setProjectId(projectId)
+    setView('dashboard')
+  }
+
   async function openProject(projectId: ID) {
     if (!beginAction('open')) return
     setOperationError(null)
     try {
-      const saved = await saveData((current) => markProjectOpened(current, projectId, now()))
-      if (!saved.ok) {
-        reportSaveFailure('打开项目', saved.errorMessage)
-        return
-      }
-      setProjectId(projectId)
-      setView('dashboard')
+      await enterStoredProject(projectId)
     } catch (error) {
       reportUnexpectedFailure('打开项目', error)
     } finally {
@@ -163,13 +164,11 @@ export function HomeView({
       if (!result.data) return
       const openedProjectId = result.importedProjectIds?.[0] ?? result.data.projects[0]?.id
       if (openedProjectId) {
-        const saved = await saveData((current) => markProjectOpened(current, openedProjectId, now()))
-        if (!saved.ok) {
-          reportSaveFailure('导入后的打开项目', saved.errorMessage)
-          return
+        try {
+          await enterStoredProject(openedProjectId)
+        } catch (error) {
+          reportUnexpectedFailure('导入后的打开项目', error)
         }
-        setProjectId(openedProjectId)
-        setView('dashboard')
       }
     } catch (error) {
       reportUnexpectedFailure('导入', error)

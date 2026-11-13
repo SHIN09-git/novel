@@ -77,6 +77,11 @@ function installBridge(seed) {
   const qa = window.progressQA
   window.novelDirector = {
     data: { load: async () => ({ data: qa.data, storagePath: 'synthetic-progress' }),
+      touchProject: async (id) => {
+        const updatedAt = new Date().toISOString()
+        qa.data = { ...qa.data, projects: qa.data.projects.map(p => p.id === id ? { ...p, lastOpenedAt: updatedAt } : p) }
+        return { updatedAt, storagePath: 'synthetic-progress' }
+      },
       save: async (data) => {
         qa.writes++
         if (qa.fail) throw new Error('合成保存失败')

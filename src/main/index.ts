@@ -9,12 +9,13 @@ import { TokenBucketRateLimiter } from './RateLimiter'
 import { AIService } from './services/AIService'
 import { AIHttpClient } from './services/AIHttpClient'
 import { appendProjectUsageAttempts } from '../storage/projectUsageJournal'
-import type { StorageService } from '../storage/StorageService'
-import { createStorageService } from '../storage/SqliteStorageService'
+import { LibrarySession } from './LibrarySession'
+import { registerLibraryRecoveryIpc } from './ipc/libraryRecoveryIpc'
+import { secureAndSanitizeAppData } from './ipc/appDataCredentialSanitizer'
 import { registerIpcHandlers } from './ipc/registerIpcHandlers'
 import type { ApiProvider } from '../shared/types'
 
-let storage: StorageService
+let library: LibrarySession
 let appConfig: AppConfigService
 let credentialService: SecureCredentialService
 let backupService: BackupService
@@ -261,34 +262,34 @@ if (!hasSingleInstanceLock) {
   })
 
   app.whenReady().then(async () => {
+    // preview.20 did not always record the default path. Check before this launch writes its first log.
+    const previousDesktopLaunch = existsSync(join(app.getPath('userData'), 'logs', 'main.log'))
     LogService.initialize()
     app.setAppUserModelId('com.novel-director.mvp')
     registerContentSecurityPolicy()
     appConfig = new AppConfigService(app.getPath('userData'))
     credentialService = new SecureCredentialService(app.getPath('userData'))
     backupService = new BackupService(app.getPath('userData'))
+    library = new LibrarySession(appConfig, undefined, async data => (await secureAndSanitizeAppData({ credentialService }, data)).data,
+      previousDesktopLaunch)
     const aiService = new AIService(credentialService, aiRateLimiters, {
       httpClient: new AIHttpClient({ fetch: (url, options) => net.fetch(url, options), transport: 'electron-net' }),
-      usageJournal: { getStoragePath: () => storage.getStoragePath(), append: appendProjectUsageAttempts }
+      usageJournal: { getStoragePath: () => library.getStorage().getStoragePath(), append: appendProjectUsageAttempts }
     })
     aiService.setLogger({
       info: (message) => LogService.info(message),
       warn: (message) => LogService.warn(message)
     })
-    const configuredStoragePath = await appConfig.getStoragePath()
-    storage = createStorageService(configuredStoragePath)
-    if (storage.getStoragePath() !== configuredStoragePath) {
-      await appConfig.setStoragePath(storage.getStoragePath())
-    }
+    registerLibraryRecoveryIpc(library, app.getPath('userData'), backupService.getBackupDir())
+    app.on('will-quit', () => library.close())
     registerIpcHandlers({
       appConfig,
       credentialService,
       backupService,
-      getStorage: () => storage,
-      setStorage: (nextStorage) => {
-        if (storage !== nextStorage) storage.close?.()
-        storage = nextStorage
-      },
+      getStorage: () => library.getStorage(),
+      setStorage: (nextStorage) => library.adopt(nextStorage),
+      loadLibrary: () => library.load(),
+      getLibraryPath: () => library.path,
       aiService
     })
 

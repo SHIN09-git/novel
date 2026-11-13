@@ -17,7 +17,7 @@ import {
   confirmMigrationMerge,
   createMigrationMergePreview
 } from '../DataMergeService'
-import { createStorageService } from '../../storage/SqliteStorageService'
+import { createExistingLibraryStorage } from '../../storage/SqliteStorageService'
 import { safeIpcHandler } from './safeIpcHandler'
 import { resolveDataStoragePath } from './storagePath'
 import type { StorageDataOperationContext } from './storageDataOperations'
@@ -27,7 +27,7 @@ export function registerStorageManagementIpcHandlers(context: StorageDataOperati
   ipcMain.handle(
     IPC_CHANNELS.APP_GET_STORAGE_PATH,
     safeIpcHandler(async (): Promise<GetStoragePathResult> => ({
-      storagePath: context.getStorage().getStoragePath(),
+      storagePath: context.getLibraryPath?.() ?? context.getStorage().getStoragePath(),
       defaultStoragePath: context.appConfig.getDefaultStoragePath()
     }))
   )
@@ -66,6 +66,7 @@ export function registerStorageManagementIpcHandlers(context: StorageDataOperati
     IPC_CHANNELS.APP_CREATE_MIGRATION_MERGE_PREVIEW,
     safeIpcHandler(
       async (_event, request: MigrationMergePreviewRequest): Promise<MigrationMergePreviewResult> => {
+        context.getStorage()
         const sourcePath = await resolveDataStoragePath(request.sourcePath)
         const targetPath = await resolveDataStoragePath(request.targetPath)
         return {
@@ -79,12 +80,13 @@ export function registerStorageManagementIpcHandlers(context: StorageDataOperati
   ipcMain.handle(
     IPC_CHANNELS.APP_CONFIRM_MIGRATION_MERGE,
     safeIpcHandler(async (_event, request: ConfirmMigrationMergeRequest): Promise<ConfirmMigrationMergeResult> => {
+      context.getStorage()
       const sourcePath = await resolveDataStoragePath(request.sourcePath)
       const targetPath = await resolveDataStoragePath(request.targetPath)
       const result = await confirmMigrationMerge(sourcePath, targetPath, request.expectedRevision)
-      const nextStorage = createStorageService(targetPath)
+      const nextStorage = createExistingLibraryStorage(targetPath)
       const activeStoragePath = nextStorage.getStoragePath()
-      await context.appConfig.setStoragePath(activeStoragePath)
+      await context.appConfig.setStoragePath(activeStoragePath, /\.json$/i.test(activeStoragePath))
       context.setStorage(nextStorage)
       return {
         ok: true,

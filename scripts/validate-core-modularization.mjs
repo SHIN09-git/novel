@@ -247,7 +247,7 @@ assertLineLimit('src/renderer/src/views/revision/revisionGenerationActions.ts', 
 assertLineLimit('src/renderer/src/views/revision/revisionVersionActions.ts', 300)
 assertLineLimit('src/main/DataMergeService.ts', 380)
 assertLineLimit('src/main/ipc/appDataCredentialSanitizer.ts', 90)
-assertLineLimit('src/storage/SqliteStorageService.ts', 420)
+assertIncludes('src/storage/SqliteStorageService.ts', "from './sqlite/sqliteCommitContext'")
 assertLineLimit('src/agent/AgentReadableSummaryService.ts', 180)
 assertLineLimit('src/agent/tools/AgentToolService.ts', 80)
 assertLineLimit('src/services/NoveltyDetector.ts', 340)

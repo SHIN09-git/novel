@@ -1,9 +1,10 @@
-import { lazy, Suspense, useRef, useState } from 'react'
+import { lazy, Suspense, useEffect, useRef, useState } from 'react'
 import type { AppData, ID, Project } from '../../shared/types'
 import { ErrorBoundary } from './components/ErrorBoundary'
 import { useConfirm } from './components/ConfirmDialog'
 import { Shell, type View } from './components/Layout'
 import { useAppData } from './hooks/useAppData'
+import { LibraryRecoveryView } from './views/LibraryRecoveryView'
 import { QuickRewriteDraftProvider } from './components/QuickRewriteDraftProvider'
 import type { BookProgressLocation } from './views/bookProgress/navigation'
 
@@ -55,6 +56,8 @@ function StorageConflictNotice({ onReload, writeback }: { onReload: () => Promis
 export default function App() {
   const {
     data,
+    recovery,
+    recoverLibrary,
     storagePath,
     setStoragePath,
     status,
@@ -62,6 +65,7 @@ export default function App() {
     needsWritebackCheck,
     setStatus,
     saveData,
+    touchProject,
     saveGenerationRunBundle,
     saveChapterCommitBundle,
     saveRevisionCommitBundle,
@@ -81,6 +85,17 @@ export default function App() {
   const [bookLocation, setBookLocation] = useState<BookProgressLocation | null>(null)
   const [readerInitialChapterId, setReaderInitialChapterId] = useState<ID | null>(null)
 
+  const needsRecovery = recovery !== null
+  useEffect(() => {
+    if (!needsRecovery) return
+    setCurrentProjectId(null)
+    setView('dashboard')
+    setRevisionPrefill(null)
+    setPipelineSnapshotId(null)
+    setBookLocation(null)
+    setReaderInitialChapterId(null)
+  }, [needsRecovery])
+
   async function reloadAfterStorageConflict(): Promise<{ ok: boolean; errorMessage?: string }> {
     const confirmed = await confirmAction({
       title: '重新加载最新数据',
@@ -93,8 +108,9 @@ export default function App() {
   }
 
   if (!data) {
+    if (recovery) return <LibraryRecoveryView recovery={recovery} onRecover={recoverLibrary} />
     return (
-      <div className="loading-screen">
+      <div className="loading-screen" role="status">
         <strong>Novel Director</strong>
         <span>正在读取本地数据...</span>
       </div>
@@ -260,7 +276,7 @@ export default function App() {
           <Suspense fallback={<div className="view-loading">正在加载页面...</div>}>{renderCurrentView(data, currentProject)}</Suspense>
         </ErrorBoundary>
       </Shell> : <Suspense fallback={<div className="view-loading">正在加载项目列表...</div>}>
-        <HomeView data={data} saveData={saveData} importData={importStoredData} setProjectId={setCurrentProjectId} setView={setView} />
+        <HomeView data={data} saveData={saveData} touchProject={touchProject} importData={importStoredData} setProjectId={setCurrentProjectId} setView={setView} />
       </Suspense>}
       {hasStorageConflict || needsWritebackCheck
         ? <StorageConflictNotice onReload={reloadAfterStorageConflict} writeback={needsWritebackCheck && !hasStorageConflict} /> : null}

@@ -1,25 +1,20 @@
 import { randomUUID } from 'node:crypto'
-import { mkdir, readdir, readFile, rename, stat, unlink, writeFile } from 'node:fs/promises'
-import { isAbsolute, join, relative, resolve } from 'node:path'
-import { normalizeAppData, sanitizeAppDataForPersistence } from '../shared/defaults'
+import { createReadStream, createWriteStream } from 'node:fs'
+import { lstat, mkdir, readdir, rename, unlink, writeFile } from 'node:fs/promises'
+import { dirname, join, resolve } from 'node:path'
+import { pipeline } from 'node:stream/promises'
+import { constants, createGzip } from 'node:zlib'
+import { sanitizeAppDataForPersistence } from '../shared/defaults'
+import type { BackupInfo } from '../shared/ipc/ipcTypes'
+import { normalizeLibraryData } from '../storage/libraryValidation'
+import { MAX_GZIP_JSON_BYTES, isBackupFile, readBackupJson } from './backupFileFormat'
 import type { AppData } from '../shared/types'
-
-export interface BackupInfo {
-  path: string
-  timestamp: number
-  size: number
-  isAutomatic: boolean
-}
 
 const BACKUP_INTERVAL_MS = 24 * 60 * 60 * 1000
 const MAX_AUTOMATIC_BACKUPS = 7
 
-function isInsideOrSame(childPath: string, parentPath: string): boolean {
-  const parent = resolve(parentPath)
-  const child = resolve(childPath)
-  const relationship = relative(parent, child)
-  return relationship === '' || (!!relationship && !relationship.startsWith('..') && !isAbsolute(relationship))
-}
+const autoName = /^novel-director-\d+-auto(?:-[\da-f]{8}(?:-[\da-f]{4}){3}-[\da-f]{12})?\.json(?:\.gz)?$/i
+const rollbackName = /^novel-director-\d+-rollback-[\da-f]{8}(?:-[\da-f]{4}){3}-[\da-f]{12}\.json$/i
 
 function backupTimestamp(fileName: string, fallback: number): number {
   const match = fileName.match(/novel-director-(\d+)/)
@@ -29,8 +24,9 @@ function backupTimestamp(fileName: string, fallback: number): number {
 export class BackupService {
   private readonly backupDir: string
   private readonly automaticBackupsPending = new Map<object, Promise<string | null>>()
+  private publication = Promise.resolve()
 
-  constructor(userDataPath: string) {
+  constructor(userDataPath: string, private readonly gzipLimit = MAX_GZIP_JSON_BYTES) {
     this.backupDir = join(userDataPath, 'backups')
   }
 
@@ -43,23 +39,41 @@ export class BackupService {
   }
 
   async createBackup(data: AppData, isAutomatic = true): Promise<string> {
+    if (!isAutomatic) return this.publishBackup(data, false)
+    // Concurrent saves of different libraries must not rotate a half-published pair.
+    const next = this.publication.then(() => this.publishBackup(data, true))
+    this.publication = next.then(() => {}, () => {})
+    return next
+  }
+
+  private async publishBackup(data: AppData, isAutomatic: boolean): Promise<string> {
     await this.ensureBackupDir()
-    const timestamp = Date.now()
-    const backupName = `novel-director-${timestamp}${isAutomatic ? '-auto' : '-manual'}-${randomUUID()}.json`
-    const backupPath = join(this.backupDir, backupName)
-    const safeData = sanitizeAppDataForPersistence(normalizeAppData(data))
-    const temporaryPath = `${backupPath}.tmp`
-    // Publish only complete JSON; partial writes must not satisfy the daily schedule.
+    const prefix = join(this.backupDir, `novel-director-${Date.now()}`), id = randomUUID()
+    const safe = normalizeLibraryData(data, sanitizeAppDataForPersistence)
+    const raw = JSON.stringify(safe, null, 2)
+    const compress = isAutomatic && Buffer.byteLength(raw) <= this.gzipLimit
+    const plain = `${prefix}-${compress ? 'rollback' : isAutomatic ? 'auto' : 'manual'}-${id}.json`
+    const gzip = `${prefix}-auto-${id}.json.gz`
+    let publishedPlain = false
     try {
-      await writeFile(temporaryPath, JSON.stringify(safeData, null, 2), { encoding: 'utf-8', flag: 'wx' })
-      await rename(temporaryPath, backupPath)
+      await writeFile(plain + '.tmp', raw, { encoding: 'utf8', flag: 'wx' })
+      if (compress) {
+        await pipeline(createReadStream(plain + '.tmp'), createGzip({ level: constants.Z_BEST_SPEED }),
+          createWriteStream(gzip + '.tmp', { flags: 'wx' }))
+      }
+      await rename(plain + '.tmp', plain)
+      publishedPlain = true
+      if (compress) await rename(gzip + '.tmp', gzip)
+    } catch (error) {
+      if (publishedPlain) await unlink(plain)
+      throw error
     } finally {
-      await unlink(temporaryPath).catch(() => undefined)
+      await unlink(plain + '.tmp').catch(() => undefined)
+      if (compress) await unlink(gzip + '.tmp').catch(() => undefined)
     }
-    if (isAutomatic) {
-      await this.cleanupOldAutomaticBackups()
-    }
-    return backupPath
+    const path = compress ? gzip : plain
+    if (isAutomatic) await this.cleanupOldAutomaticBackups(path, plain)
+    return path
   }
 
   async maybeCreateAutomaticBackup(data: AppData | (() => Promise<AppData>), source: object = this): Promise<string | null> {
@@ -87,18 +101,23 @@ export class BackupService {
 
   async listBackups(): Promise<BackupInfo[]> {
     await this.ensureBackupDir()
-    const files = await readdir(this.backupDir)
+    const files = await readdir(this.backupDir, { withFileTypes: true })
     const backups: BackupInfo[] = []
 
-    for (const file of files) {
-      if (!file.endsWith('.json')) continue
+    for (const entry of files) {
+      const file = entry.name
+      if (!entry.isFile() || !isBackupFile(file)) continue
       const path = join(this.backupDir, file)
-      const info = await stat(path)
+      const info = await lstat(path).catch(error => {
+        if (error.code !== 'ENOENT') throw error
+      })
+      if (!info?.isFile()) continue
       backups.push({
         path,
         timestamp: backupTimestamp(file, info.mtimeMs),
         size: info.size,
-        isAutomatic: file.includes('-auto')
+        isAutomatic: autoName.test(file),
+        isRollback: rollbackName.test(file)
       })
     }
 
@@ -107,8 +126,8 @@ export class BackupService {
 
   async loadBackup(backupPath: string): Promise<AppData> {
     const safePath = this.assertManagedBackupPath(backupPath)
-    const raw = await readFile(safePath, 'utf-8')
-    return sanitizeAppDataForPersistence(normalizeAppData(JSON.parse(raw) as Partial<AppData>))
+    if (!(await lstat(safePath)).isFile()) throw new Error('请选择备份目录中的文件。')
+    return normalizeLibraryData(await readBackupJson(safePath, this.gzipLimit), sanitizeAppDataForPersistence)
   }
 
   async deleteBackup(backupPath: string): Promise<void> {
@@ -118,15 +137,16 @@ export class BackupService {
 
   private assertManagedBackupPath(backupPath: string): string {
     const resolved = resolve(backupPath)
-    if (!isInsideOrSame(resolved, this.backupDir) || !resolved.endsWith('.json')) {
+    if (dirname(resolved) !== resolve(this.backupDir) || !isBackupFile(resolved)) {
       throw new Error('Backup path is outside the managed backup folder.')
     }
     return resolved
   }
 
-  private async cleanupOldAutomaticBackups(): Promise<void> {
-    const automaticBackups = (await this.listBackups()).filter((backup) => backup.isAutomatic)
-    const toDelete = automaticBackups.slice(MAX_AUTOMATIC_BACKUPS)
+  private async cleanupOldAutomaticBackups(current: string, plain: string): Promise<void> {
+    const backups = await this.listBackups()
+    const toDelete = [...backups.filter(backup => backup.isAutomatic && backup.path !== current).slice(MAX_AUTOMATIC_BACKUPS - 1),
+      ...backups.filter(backup => backup.isRollback && backup.path !== plain)]
     for (const backup of toDelete) {
       try {
         await this.deleteBackup(backup.path)

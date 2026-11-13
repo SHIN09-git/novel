@@ -4,9 +4,9 @@ import { getUserFriendlyError, redactSensitiveText } from '../../shared/errorUti
 import type { MigrateStoragePathResult } from '../../shared/ipc/ipcTypes'
 import type { AppData } from '../../shared/types'
 import type { StorageService } from '../../storage/StorageService'
-import { createStorageService } from '../../storage/SqliteStorageService'
 import type { AppConfigService } from '../AppConfigService'
 import type { BackupService } from '../BackupService'
+import { libraryStores, openExistingLibrary, writeNewLibrary, type OpenLibrary } from '../libraryFiles'
 import {
   backupFileForOverwrite,
   createMigrationMergePreview
@@ -20,6 +20,8 @@ export interface StorageDataOperationContext {
   credentialService: SecureCredentialService
   backupService: BackupService
   getStorage: () => StorageService
+  loadLibrary?: () => Promise<OpenLibrary>
+  getLibraryPath?: () => string
   setStorage: (storage: StorageService) => void
 }
 
@@ -84,6 +86,7 @@ export async function migrateStoragePath(
   try {
     const secured = await secureAndSanitizeAppData(context, data)
     const currentSave = await storage.saveIfCurrent(secured.data, expectedRevision)
+    if (oldPath === targetPath) return { ok: true, storagePath: oldPath, revision: currentSave.revision }
 
     const targetAlreadyExists = oldPath !== targetPath && (await pathExists(targetPath))
     if (targetAlreadyExists && !overwrite) {
@@ -103,18 +106,26 @@ export async function migrateStoragePath(
     await mkdir(dirname(targetPath), { recursive: true })
     const backupPath = await backupExistingSourceData(storage, oldPath)
     const targetBackupPath = targetAlreadyExists ? await backupFileForOverwrite(targetPath) : null
-    const nextStorage = createStorageService(targetPath)
-    const nextSave = await nextStorage.saveIfCurrent(secured.data)
-    const activeStoragePath = nextStorage.getStoragePath()
-    await context.appConfig.setStoragePath(activeStoragePath)
-    context.setStorage(nextStorage)
+    const next = targetAlreadyExists
+      ? await openExistingLibrary(targetPath, libraryStores)
+      : await writeNewLibrary(targetPath, libraryStores, secured.data)
+    let revision = next.snapshot.revision
+    const activeStoragePath = next.storage.getStoragePath()
+    try {
+      if (targetAlreadyExists) revision = (await next.storage.saveIfCurrent(secured.data, revision)).revision
+      await context.appConfig.setStoragePath(activeStoragePath, /\.json$/i.test(activeStoragePath))
+      context.setStorage(next.storage)
+    } catch (error) {
+      next.storage.close?.()
+      throw error
+    }
 
     return {
       ok: true,
       storagePath: activeStoragePath,
       backupPath: backupPath ?? undefined,
       targetBackupPath: targetBackupPath ?? undefined,
-      revision: nextSave.revision
+      revision
     }
   } catch (error) {
     return {

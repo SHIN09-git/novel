@@ -17,9 +17,11 @@ const routedRegistry = join(outDir, 'routed-api-registry.json')
 const revisionRoute = { baseUrl: 'https://revision.invalid/v1', keyEnv: 'NOVEL_REVISION_TEST_API_KEY',
   backupKeyEnv: 'NOVEL_REVISION_TEST_BACKUP_API_KEY' }
 const databases = new Map()
+const jsonPaths = new Set()
 const nativePaths = new Set()
 const nativeHandles = new Set()
 globalThis.__agentRevisionDatabases = databases
+globalThis.__agentRevisionJsonPaths = jsonPaths
 globalThis.__agentRevisionNativePaths = nativePaths
 globalThis.__agentRevisionNativeHandles = nativeHandles
 let networkAttempts = 0
@@ -85,29 +87,34 @@ try {
         export const executeAgentChapterPipeline = () => { throw new Error('Pipeline forbidden in revision fixture'); };
         export const createHeadlessTransport = () => ({ transport: { chatCompletion: (request) => globalThis.__agentRevisionAI(request) } });
       ` : `
-        import { SqliteStorageService, loadSqliteSnapshotReadonly as readNative,
+        import { createExistingLibraryStorage as openExisting, loadSqliteSnapshotReadonly as readNative,
           loadSqliteCollectionsReadonly as readNativeCollections } from 'real-revision-sqlite';
-        export { SqliteStorageService };
+        export { SqliteStorageService, checkSqliteBindingAvailable } from 'real-revision-sqlite';
+        export const createNewLibraryStorage = () => { throw new Error('Unexpected new library in revision fixture'); };
         export const loadChapterTitlesReadonly = () => { throw new Error('Unexpected title query in revision test'); };
         export const loadSqliteUsageHistoryReadonly = () => { throw new Error('Unexpected usage query in revision test'); };
-        export const createStorageService = (path) => {
+        function simulated(path) {
+          const storage = globalThis.__agentRevisionDatabases.get(path);
+          if (!storage) throw new Error('Unregistered simulated SQLite path: ' + path);
+          return storage;
+        }
+        export const createExistingLibraryStorage = (path) => {
+          if (globalThis.__agentRevisionJsonPaths.has(path)) return openExisting(path);
           if (globalThis.__agentRevisionNativePaths.has(path)) {
-            // No JSON fallback: this branch must construct and use the real native service.
-            const storage = new SqliteStorageService(path);
+            const storage = openExisting(path);
             globalThis.__agentRevisionNativeHandles.add(storage);
             const close = storage.close.bind(storage);
             storage.close = () => { close(); globalThis.__agentRevisionNativeHandles.delete(storage); };
             return storage;
           }
-          const storage = globalThis.__agentRevisionDatabases.get(path);
-          if (!storage) throw new Error('Native/unregistered SQLite path forbidden: ' + path);
-          return storage;
+          return simulated(path);
         };
         export const loadSqliteSnapshotReadonly = (path) => globalThis.__agentRevisionNativePaths.has(path)
-          ? readNative(path) : createStorageService(path).loadSnapshot();
-        export const loadSqliteCollectionsReadonly = async (path, collections) => {
-          if (globalThis.__agentRevisionNativePaths.has(path)) return readNativeCollections(path, collections);
-          const snapshot = await createStorageService(path).loadSnapshot();
+          ? readNative(path) : simulated(path).loadSnapshot();
+        export const loadSqliteCollectionsReadonly = async (path, collections, selector) => {
+          if (globalThis.__agentRevisionNativePaths.has(path)) return readNativeCollections(path, collections, selector);
+          if (selector !== undefined) throw new Error('Unexpected project-scoped query in revision fixture');
+          const snapshot = await simulated(path).loadSnapshot();
           return { revision: snapshot.revision,
             data: Object.fromEntries(collections.map(key => [key, snapshot.data[key]])) };
         };
@@ -155,8 +162,8 @@ try {
     } }
     const storage = Object.create(api.SqliteStorageService.prototype)
     Object.assign(storage, {
-      storagePath, open: async () => db, isEmpty: () => false,
-      readAppData: () => copy(state.data), currentRevision: () => state.revision,
+      storagePath, open: async () => db,
+      readRevisionCommitContext: () => copy(state.data), currentRevision: () => state.revision,
       writeEntityEntries: (_db, entries) => {
         assert.ok(inTransaction)
         for (const { collection, value } of entries) {
@@ -184,6 +191,7 @@ try {
     let boundary
     let storage
     if (kind === 'json') {
+      jsonPaths.add(storagePath)
       storage = new api.JsonStorageService(storagePath)
       await storage.save(initial)
     } else if (kind === 'sqlite-native') {
@@ -735,6 +743,7 @@ try {
   mock.restoreAll()
   for (const handle of nativeHandles) { try { handle.close() } finally { nativeHandles.delete(handle) } }
   delete globalThis.__agentRevisionDatabases
+  delete globalThis.__agentRevisionJsonPaths
   delete globalThis.__agentRevisionNativePaths
   delete globalThis.__agentRevisionNativeHandles
   delete globalThis.__agentRevisionAI

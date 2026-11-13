@@ -1,9 +1,16 @@
-import { copyFile, mkdir, open, readFile, rename, stat, writeFile } from 'node:fs/promises'
-import { dirname, join } from 'node:path'
+import { constants } from 'node:fs'
+import { copyFile, mkdir, open, readFile, rename, writeFile } from 'node:fs/promises'
+import { dirname, isAbsolute, join } from 'node:path'
 import { SQLITE_DATA_FILE_NAME } from '../storage/StorageService'
 
 interface AppConfig {
   storagePath?: string
+  explicitJson?: boolean
+}
+
+function libraryConfig(value: unknown): value is AppConfig & { storagePath: string } {
+  return !!value && typeof value === 'object' && 'storagePath' in value &&
+    typeof value.storagePath === 'string' && isAbsolute(value.storagePath) && /\.(sqlite|db|json)$/i.test(value.storagePath)
 }
 
 export class AppConfigService {
@@ -22,8 +29,28 @@ export class AppConfigService {
     return config.storagePath || this.getDefaultStoragePath()
   }
 
-  async setStoragePath(storagePath: string): Promise<void> {
-    await this.writeConfig({ ...(await this.readConfig()), storagePath })
+  // Starting a library is different from displaying a suggested default path.
+  // A broken config must not be interpreted as consent to create a new library.
+  async readLibrarySelection(): Promise<{ storagePath: string; explicitJson: boolean } | null> {
+    let raw: string
+    try {
+      raw = await readFile(this.configPath, 'utf-8')
+    } catch (error) {
+      if (errorCode(error) === 'ENOENT') return null
+      throw error
+    }
+    try {
+      const config: unknown = JSON.parse(raw)
+      if (libraryConfig(config)) {
+        return { storagePath: config.storagePath, explicitJson: config.explicitJson === true }
+      }
+    } catch { /* Never use a guessed path when the saved choice cannot be read. */ }
+    throw new Error('无法确定上次选择的书库。请选择已有书库，或明确新建。')
+  }
+
+  async setStoragePath(storagePath: string, explicitJson = false): Promise<void> {
+    const config = await this.readConfig()
+    await this.writeConfig({ ...config, storagePath, explicitJson: explicitJson || undefined }, libraryConfig(config))
   }
 
   async resetStoragePath(): Promise<string> {
@@ -56,7 +83,7 @@ export class AppConfigService {
     }
   }
 
-  private async writeConfig(config: AppConfig): Promise<void> {
+  private async writeConfig(config: AppConfig, previousIsValid = true): Promise<void> {
     await mkdir(dirname(this.configPath), { recursive: true })
     const tmpPath = `${this.configPath}.tmp`
     const backupPath = `${this.configPath}.bak`
@@ -65,11 +92,11 @@ export class AppConfigService {
     await syncFile(tmpPath)
 
     try {
-      await stat(this.configPath)
-      await copyFile(this.configPath, backupPath)
+      // A successful recovery from a broken config must not overwrite the last good .bak.
+      await copyFile(this.configPath, backupPath, previousIsValid ? 0 : constants.COPYFILE_EXCL)
     } catch (error) {
       const code = errorCode(error)
-      if (code !== 'ENOENT') {
+      if (code !== 'ENOENT' && (previousIsValid || code !== 'EEXIST')) {
         throw error
       }
     }

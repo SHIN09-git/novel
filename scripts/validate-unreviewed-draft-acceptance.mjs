@@ -642,8 +642,7 @@ function sqliteBoundary(initial) {
   const storage = Object.create(modules.sqlite.SqliteStorageService.prototype)
   storage.storagePath = join(outDir, 'not-opened.sqlite')
   storage.open = async () => db
-  storage.isEmpty = () => false
-  storage.readAppData = () => copy(state.data)
+  storage.readChapterCommitContext = () => copy(state.data)
   storage.currentRevision = () => state.revision
   storage.writeEntityEntries = (_db, entries) => {
     assert.ok(inTransaction, 'Entry writes must stay inside the transaction boundary')

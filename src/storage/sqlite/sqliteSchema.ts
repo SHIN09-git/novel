@@ -61,3 +61,31 @@ export function ensureSqliteSchema(db: SqliteDatabase, appliedAt: string): void 
      VALUES (?, ?)`
   ).run(SQLITE_SCHEMA_VERSION, appliedAt)
 }
+
+const coreTables = {
+  meta: { pk: ['key'], fields: ['value'] },
+  app_settings: { pk: ['id'], fields: ['json', 'updated_at'] },
+  entities: { pk: ['collection', 'id'], fields: [
+    'project_id', 'chapter_id', 'job_id', 'character_id', 'chapter_order', 'title', 'updated_at', 'json'
+  ] },
+  schema_migrations: { pk: ['version'], fields: ['applied_at'] }
+}
+
+export function assertLibrarySchema(db: SqliteDatabase): void {
+  const table = db.prepare("SELECT type FROM pragma_table_list WHERE schema = 'main' AND name = ? COLLATE NOCASE")
+  const columns = db.prepare('SELECT lower(name) AS name, pk, hidden, "notnull" AS required, dflt_value FROM pragma_table_xinfo(?)')
+  for (const [name, { pk, fields }] of Object.entries(coreTables)) {
+    const required = [...pk, ...fields]
+    const actual = columns.all(name)
+    const hasCore = required.every(key => actual.some(row => row.name === key && row.pk === pk.indexOf(key) + 1 && !row.hidden))
+    const blocksInsert = actual.some(row => !required.includes(String(row.name)) &&
+      (row.pk || (!row.hidden && row.required && row.dflt_value === null)))
+    if (table.get(name)?.type !== 'table' || !hasCore || blocksInsert) {
+      throw new Error(`SQLite 书库缺少兼容的表结构：${name}。`)
+    }
+  }
+  const versions = db.prepare('SELECT version FROM schema_migrations ORDER BY version LIMIT 2').all()
+  if (versions.length !== 1 || versions[0].version !== SQLITE_SCHEMA_VERSION) {
+    throw new Error('SQLite 书库的结构版本不受支持。')
+  }
+}

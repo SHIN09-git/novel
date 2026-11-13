@@ -1,0 +1,43 @@
+{
+  "format": "novel-director-library-s0-v1",
+  "version": "0.1.6-preview.20",
+  "appAsarSha256": "ee65587c7164fae65824446c691f9998c2841203fe4bb36378439df766d63ba5",
+  "baseUrl": "http://127.0.0.1:57760/v1",
+  "signature": {
+    "projectIds": [
+      "s0-quay",
+      "s0-tide"
+    ],
+    "chapterId": "4c78e007-7e23-47c5-81f1-dcabb412eb90",
+    "chapterSha256": "fd97c8004ef5f16c0f9a6ec9003a48dd3f0d5b9873c8f0032525abda41b3a73b",
+    "acceptedDraftId": "s0-quay-draft",
+    "acceptanceId": "323c8ce2-dc7f-4e7a-9f86-507d17c5aed4",
+    "revisionId": "a2593e36-1d20-4f02-95c9-a310c2b7ed4f",
+    "versions": [
+      {
+        "id": "8886a2a2-65ae-439b-a395-bb888ce8e6c9",
+        "base": null,
+        "source": "generated_draft",
+        "bodySha256": "dfd65f8576a9bf3d17cbeac8ed5a3e16251f99827ee15982ee536c18c6ce3733"
+      },
+      {
+        "id": "4675cd2a-c41b-4b9d-9d98-fca0daa2aaa2",
+        "base": "8886a2a2-65ae-439b-a395-bb888ce8e6c9",
+        "source": "manual_revision",
+        "bodySha256": "fd97c8004ef5f16c0f9a6ec9003a48dd3f0d5b9873c8f0032525abda41b3a73b"
+      }
+    ],
+    "unfinished": {
+      "jobId": "s0-tide-job",
+      "projectId": "s0-tide",
+      "status": "failed",
+      "stepId": "s0-tide-job-await_user_confirmation",
+      "stepType": "await_user_confirmation",
+      "draftId": "s0-tide-draft",
+      "draftSha256": "66b718adc99e94490ba2504579675146fdd05b79dc1e5066530b360c55369205",
+      "checkpointSha256": "c24261671cdc7b3a41ea25c7f30eb917b8b33e2121a1a0bc371eac11557b3f38"
+    }
+  },
+  "sqliteSha256": "6e1b99178daeb837fcbd20e31e981cb74fc5fc01fc72f1116aeae239a001bcc6",
+  "backupSha256": "c436210de250b5aff90f4e1bff209aabc7ca10329dc39ae9840f40ef7e5b6050"
+}

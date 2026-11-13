@@ -147,6 +147,10 @@ async function verifyBrowser() {
         data: { load: async () => ({ data: window.__demo, storagePath: 'isolated-demo' }), save: async (data) => {
           window.__writes++; await new Promise(r => setTimeout(r, 120));
           if(window.__failSave) throw new Error('QA 模拟保存失败'); window.__demo = data; return { storagePath: 'isolated-demo' };
+        }, touchProject: async (id) => {
+          const updatedAt = new Date().toISOString();
+          window.__demo.projects = window.__demo.projects.map(p => p.id === id ? { ...p, lastOpenedAt: updatedAt } : p);
+          return { updatedAt, storagePath: 'isolated-demo' };
         } },
         ai: { chatCompletion: async () => { throw new Error('No provider calls in dashboard QA') }, cancelRun: async () => ({ ok: true }) }
       };` })

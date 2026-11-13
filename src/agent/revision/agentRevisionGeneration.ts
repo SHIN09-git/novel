@@ -8,7 +8,7 @@ import { findRewriteRange } from '../../renderer/src/components/aiRewriteResultM
 import { looksLikeFullChapterRevision } from '../../renderer/src/utils/revisionMerge'
 import { createHeadlessTransport } from '../AgentPipelineExecutor'
 import { agentApiKey, apiEndpoint, readApiRegistry } from '../../main/services/ApiRegistry'
-import { loadAgentRuntimeData, saveAgentRuntimeData, type AgentRuntimeData } from '../AgentRuntime'
+import { reloadAgentRuntimeData, saveAgentRuntimeData, type AgentRuntimeData } from '../AgentRuntime'
 import { findProjectId, requiredString } from '../tools/agentToolArguments'
 import { readRevisionVersion } from './agentRevisionReads'
 import {
@@ -85,7 +85,7 @@ export async function generateAgentRevisionVersion(
     aiRunId, modelConfigHash: revisionFingerprint(normalizePipelineAIModelOverride(settings))
   }
   // Reload after the asynchronous model call. Never save the pre-request AppData snapshot.
-  const current = await loadAgentRuntimeData({ storagePath: runtime.storagePath ?? undefined, userDataPath: runtime.userDataPath })
+  const current = await reloadAgentRuntimeData(runtime)
   const replay = replayRevisionOperation(current.data, projectId, identity)
   if (replay?.versionId) return { ...readRevisionVersion(current.data, projectId, replay.versionId), replayed: true }
   const currentSession = revisionSession(current.data, projectId, session.id)

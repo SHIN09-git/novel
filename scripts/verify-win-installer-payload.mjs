@@ -57,8 +57,10 @@ try {
   const members = await files(unpacked)
   assert.deepEqual(await files(payload), members, 'Installer and unpacked program have different file lists')
   assert(members.includes('Novel Director.exe'))
-  const native = members.find(path => basename(path) === 'better_sqlite3.node')
-  assert(native, 'SQLite native binding missing')
+  const sqliteDir = join('resources', 'app.asar.unpacked', 'node_modules', 'better-sqlite3')
+  const native = [join(sqliteDir, 'prebuilds', 'win32-x64.node'),
+    join(sqliteDir, 'build', 'Release', 'better_sqlite3.node')].find(path => members.includes(path))
+  assert(native, 'Windows x64 SQLite native binding missing')
   for (const member of members) {
     assert.equal(await hash(join(payload, member)), await hash(join(unpacked, member)), `File differs: ${member}`)
   }

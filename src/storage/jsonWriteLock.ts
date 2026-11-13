@@ -3,8 +3,8 @@ import { dirname } from 'node:path'
 
 // Covers every JSON writer, including separate desktop and Agent processes.
 // We never steal an existing lock: a timed-out writer may still be committing.
-export async function withJsonWriteLock<T>(storagePath: string, operation: () => Promise<T>): Promise<T> {
-  await mkdir(dirname(storagePath), { recursive: true })
+export async function withJsonWriteLock<T>(storagePath: string, operation: () => Promise<T>, createParent = true): Promise<T> {
+  if (createParent) await mkdir(dirname(storagePath), { recursive: true })
   const lockPath = `${storagePath}.write-lock`
   const deadline = Date.now() + 5_000
   let handle: Awaited<ReturnType<typeof open>>

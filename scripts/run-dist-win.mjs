@@ -84,6 +84,9 @@ function writeReleaseMetadata() {
   }
 
   const installerHash = sha256(installerPath)
+  // Source archives may not include Git. Do not attribute a dirty build to an exact commit.
+  const git = args => spawnSync('git', args, { cwd: root, encoding: 'utf8', windowsHide: true })
+  const head = git(['rev-parse', 'HEAD']), status = git(['status', '--porcelain'])
   writeFileSync(join(releaseDir, 'SHA256SUMS.txt'), `${installerHash}  ${installerName}\n`, 'utf8')
   writeFileSync(
     join(releaseDir, 'BUILD_INFO.json'),
@@ -91,6 +94,9 @@ function writeReleaseMetadata() {
       version: packageJson.version,
       builtAt: new Date().toISOString(),
       electronVersion: electronPackage.version,
+      sqliteBindingVersion: JSON.parse(readFileSync(join(root, 'node_modules', 'better-sqlite3', 'package.json'), 'utf8')).version,
+      sourceCommit: head.status === 0 && status.status === 0 && !status.stdout.trim() ? head.stdout.trim() : null,
+      appAsarSha256: sha256(join(releaseDir, 'win-unpacked', 'resources', 'app.asar')),
       installer: installerName,
       installerSha256: installerHash,
       unpackedExecutable: 'win-unpacked/Novel Director.exe',
@@ -145,7 +151,7 @@ console.log(`Using ELECTRON_CACHE=${env.ELECTRON_CACHE}`)
 console.log(`Using ELECTRON_BUILDER_CACHE=${env.ELECTRON_BUILDER_CACHE}`)
 
 const npmCli = process.env.npm_execpath || join(dirname(process.execPath), 'node_modules', 'npm', 'bin', 'npm-cli.js')
-const electronRebuildCli = join(root, 'node_modules', '@electron', 'rebuild', 'lib', 'cli.js')
+const nativeManager = join(root, 'scripts', 'manage-sqlite-native.mjs')
 const electronBuilderCli = join(root, 'node_modules', 'electron-builder', 'cli.js')
 const packagedSmokeScript = join(root, 'scripts', 'smoke-packaged-app.mjs')
 
@@ -154,9 +160,8 @@ let exitCode = 0
 try {
   prepareReleaseOutput()
   run(process.execPath, [npmCli, 'run', 'build'])
-  console.log(`Rebuilding better-sqlite3 for Electron ${electronPackage.version} before packaging...`)
-  run(process.execPath, [electronRebuildCli, '-f', '-w', 'better-sqlite3', '--version', electronPackage.version])
-  run(process.execPath, [electronBuilderCli, '--win', 'nsis'])
+  run(process.execPath, [nativeManager, 'electron'])
+  run(process.execPath, [electronBuilderCli, '--win', 'nsis', '--x64', '--publish', 'never'])
   run(process.execPath, [packagedSmokeScript, 'release'])
   writeReleaseMetadata()
 } catch (error) {
@@ -165,7 +170,7 @@ try {
 } finally {
   console.log('Restoring Node.js better-sqlite3 binding after Electron packaging...')
   try {
-    runWithRetry(process.execPath, [npmCli, 'rebuild', 'better-sqlite3'], { retries: 4, delayMs: 2500 })
+    runWithRetry(process.execPath, [nativeManager, 'node'], { retries: 4, delayMs: 2500 })
   } catch (restoreError) {
     console.error(restoreError)
     if (exitCode === 0) exitCode = Number(restoreError?.exitCode ?? 1)
