@@ -2,7 +2,7 @@ import type { AppData } from '../../shared/types'
 import { EMPTY_APP_DATA, normalizeAppData } from '../../shared/defaults'
 import { ALL_ENTITY_COLLECTIONS } from '../../shared/appDataCollections'
 import type { StorageSnapshot } from '../StorageService'
-import { libraryEntityId, normalizeLibraryData, parseLibraryJsonValue } from '../libraryValidation'
+import { readLibraryEntity, normalizeLibraryData, parseLibraryJsonValue } from '../libraryValidation'
 import { arrayCollectionKeys, parseJsonObject } from './sqliteEntityMapper'
 import { assertLibrarySchema, SETTINGS_ROW_ID } from './sqliteSchema'
 import type { AppDataArrayKey, SqliteDatabase } from './sqliteTypes'
@@ -57,11 +57,7 @@ export function readLibrarySnapshot(db: SqliteDatabase): StorageSnapshot {
     const target = typeof row.collection === 'string' && collections.get(row.collection)
     if (!target || typeof row.json !== 'string') throw new Error('SQLite 书库包含无法识别的记录。')
     const value = parseLibraryJsonValue(row.json)
-    const id = libraryEntityId(row.collection as AppDataArrayKey, value)
-    if (id === undefined ? typeof row.id !== 'string' || !/^promptVersions:(0|[1-9]\d*)$/.test(row.id) : row.id !== id) {
-      throw new Error(`SQLite 书库中的 ${row.collection} 记录标识不一致。`)
-    }
-    target.push(value)
+    target.push(readLibraryEntity(row.collection as AppDataArrayKey, row.id, value))
   }
   return { revision, data: normalizeLibraryData({ ...Object.fromEntries(collections), schemaVersion, settings }) }
 }

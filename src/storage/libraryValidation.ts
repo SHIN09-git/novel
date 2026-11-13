@@ -12,6 +12,25 @@ function nonemptyString(value: unknown): value is string {
 
 const projectScoped = new Set<AppDataArrayKey>(PROJECT_SCOPED_COLLECTIONS)
 
+// Early adoption receipts carried commitId only. The old SQLite writer used a
+// collection-position key for those rows; that position is not the receipt identity.
+function legacyReceiptId(collection: AppDataArrayKey, value: unknown): string | undefined {
+  if (collection === 'chapterCommitBundles' && isRecord(value) && value.id === undefined &&
+      nonemptyString(value.projectId) && nonemptyString(value.commitId)) return value.commitId
+}
+
+export function readLibraryEntity(collection: AppDataArrayKey, rowId: unknown, value: unknown): unknown {
+  const receipt = legacyReceiptId(collection, value)
+  if (receipt && (rowId === receipt || (typeof rowId === 'string' && /^chapterCommitBundles:(0|[1-9]\d*)$/.test(rowId)))) {
+    return { ...value as Record<string, unknown>, id: receipt }
+  }
+  const id = libraryEntityId(collection, value)
+  if (id === undefined ? typeof rowId !== 'string' || !/^promptVersions:(0|[1-9]\d*)$/.test(rowId) : rowId !== id) {
+    throw new Error(`SQLite 书库中的 ${collection} 记录标识不一致。`)
+  }
+  return value
+}
+
 export function libraryEntityId(collection: AppDataArrayKey, entity: unknown): string | undefined {
   if (isRecord(entity) && (!projectScoped.has(collection) || nonemptyString(entity.projectId))) {
     if (nonemptyString(entity.id)) return entity.id
@@ -53,18 +72,23 @@ export function normalizeLibraryData(
     input.schemaVersion < 1 || input.schemaVersion > EMPTY_APP_DATA.schemaVersion) {
     throw new Error('书库的数据版本不受支持。')
   }
+  let compatible = input
   for (const key of ALL_ENTITY_COLLECTIONS) {
     if (!Object.hasOwn(input, key)) continue
     const records = input[key]
     if (!Array.isArray(records)) throw new Error(`书库中的 ${key} 不是数组。`)
     const ids = new Set<string>()
+    let repaired: unknown[] | undefined
     for (const [index, record] of records.entries()) {
-      const id = libraryEntityId(key, record) ?? `${key}:${index}`
+      const receipt = legacyReceiptId(key, record)
+      const id = receipt ?? libraryEntityId(key, record) ?? `${key}:${index}`
       if (ids.has(id)) throw new Error(`书库中的 ${key} 含有重复标识。`)
       ids.add(id)
+      if (receipt) (repaired ??= records.slice())[index] = { ...record, id: receipt }
     }
+    if (repaired) compatible = { ...compatible, [key]: repaired }
   }
-  const data = normalize(input as unknown as AppData)
+  const data = normalize(compatible as unknown as AppData)
   for (const key of ALL_ENTITY_COLLECTIONS) {
     const records = input[key]
     if (Array.isArray(records) && data[key].length < records.length) {

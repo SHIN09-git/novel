@@ -2,7 +2,7 @@ import type { AppData, ChapterCommitBundle, RevisionCommitBundle } from '../../s
 import { normalizeAppData } from '../../shared/defaults'
 import { normalizeHardCanonPack } from '../../shared/normalizers/appData'
 import { applicableRules } from '../../services/hardCanonAudit/rules'
-import { libraryEntityId, parseLibraryJsonValue } from '../libraryValidation'
+import { readLibraryEntity, parseLibraryJsonValue } from '../libraryValidation'
 import { asRecord } from './sqliteEntityMapper'
 import { receiptKeys } from './sqliteReceiptAliases'
 import { readLibraryHeader } from './sqliteSnapshot'
@@ -26,8 +26,7 @@ class CommitRows {
     if (typeof row.id !== 'string' || typeof row.json !== 'string') throw new Error('Invalid SQLite commit record.')
     if (!group.has(row.id)) {
       const value = parseLibraryJsonValue(row.json)
-      if (libraryEntityId(key, value) !== row.id) throw new Error(`SQLite record ID mismatch: ${key}/${row.id}`)
-      group.set(row.id, asRecord(value))
+      group.set(row.id, asRecord(readLibraryEntity(key, row.id, value)))
     }
   }
 

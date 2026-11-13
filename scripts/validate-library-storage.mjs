@@ -201,6 +201,37 @@ test('legacy entity keys agree with the original SQLite writer, including explic
     [{ id: 'promptVersions:0' }, { id: 'separate-id' }]))
 })
 
+test('legacy chapter receipts: open without rewriting, preserve bodies and ids on save, reject ambiguous keys', async () => {
+  const dir = directory(), sqlite = seededFile(dir), json = join(dir, 'old.json')
+  const row = { projectId: 'test-book', chapterId: 'first', commitId: 'old-adoption', note: 'historical content' }
+  const expected = { ...row, id: row.commitId }
+  writeFileSync(json, JSON.stringify({ ...seeded, chapterCommitBundles: [row] }))
+  modify(sqlite, db => db.prepare('INSERT INTO entities(collection,id,project_id,json) VALUES (?,?,?,?)')
+    .run('chapterCommitBundles', 'chapterCommitBundles:126', row.projectId, JSON.stringify(row)))
+  for (const path of [sqlite, json]) {
+    const original = readFileSync(path)
+    let s = existing(path)
+    try { assert.deepEqual((await s.load()).chapterCommitBundles, [expected]) } finally { s.close?.() }
+    assert.deepEqual(readFileSync(path), original)
+    s = existing(path)
+    try { const snap = await s.loadSnapshot(); await s.saveIfCurrent(snap.data, snap.revision) } finally { s.close?.() }
+    s = existing(path)
+    try { assert.deepEqual((await s.load()).chapterCommitBundles, [expected]) } finally { s.close?.() }
+  }
+  const insert = (key, content) => modify(sqlite, db => db.prepare(
+    'INSERT INTO entities(collection,id,project_id,json) VALUES (?,?,?,?)'
+  ).run('chapterCommitBundles', key, row.projectId, JSON.stringify(content)))
+  insert('chapterCommitBundles:12', row)
+  assert.throws(() => existing(sqlite), /重复标识/)
+  modify(sqlite, db => db.prepare("DELETE FROM entities WHERE collection='chapterCommitBundles' AND id=?").run('chapterCommitBundles:12'))
+  insert('unrelated-key', row)
+  assert.throws(() => existing(sqlite), /标识/)
+  for (const bad of [{...row, commitId: ''}, {...row, projectId: ''}, {...row, id: null}]) {
+    writeFileSync(json, JSON.stringify({ ...seeded, chapterCommitBundles: [bad] }))
+    assert.throws(() => existing(json), /缺少有效标识/)
+  }
+})
+
 test('unrelated, truncated, incomplete and unsupported SQLite files are never adopted or repaired', () => {
   const dir = directory(), sibling = join(dir, 'novel-director-data.json'), config = join(dir, 'app-config.json')
   const other = JSON.stringify(seeded)

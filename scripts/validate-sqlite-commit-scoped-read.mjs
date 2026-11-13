@@ -161,6 +161,18 @@ test('full and scoped validation reject mismatched secondary diagnostics, stored
   await rejectLikeFull(store, old, /sourceContentHash/)
 })
 
+test('id-less adoption receipt is found by commitId and replay never writes a duplicate', async t => {
+  const { store, peer } = await library(t)
+  const b = adopt(await store.load())
+  const saved = await store.saveChapterCommitBundle(b)
+  peer.prepare("UPDATE entities SET id='chapterCommitBundles:126', json=json_remove(json,'$.id') WHERE collection='chapterCommitBundles' AND id=?").run(b.commitId)
+  assert.equal((await store.load()).chapterCommitBundles[0].id, b.commitId)
+  const {result} = await narrow(() => store.saveChapterCommitBundle(b, saved.revision))
+  assert.deepEqual(result.savedCollections, [])
+  assert.equal(result.revision, saved.revision)
+  assert.deepEqual(peer.prepare("SELECT id FROM entities WHERE collection='chapterCommitBundles'").all(), [{id:'chapterCommitBundles:126'}])
+})
+
 test('legacy receipt aliases remain visible across peer writes; failed old-library writes roll back index installation too', async t => {
   const { store, peer } = await library(t)
   const data = await store.load(), b = adopt(data)
