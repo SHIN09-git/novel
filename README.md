@@ -4,7 +4,7 @@
 
 Novel Director 是一个实验性的、本地优先的 AI 长篇小说工作台。它是面向长篇创作的“小说导演台”：管理项目圣经、章节连续性、角色状态账本、伏笔调度、Prompt 上下文、生成追踪、质量门禁和修订流程。
 
-当前版本为 `0.1.6-preview.20`，仍在试用阶段。使用真实稿件前请备份。源码更新不代表安装包已更新，包的版本和验证记录以 `release/BUILD_INFO.json` 为准。
+当前预发布版为 [`0.1.6-preview.22`](https://github.com/SHIN09-git/novel/releases/tag/v0.1.6-preview.22)，仍在试用阶段。使用真实稿件前请备份。源码更新不会自动升级已安装的程序。
 
 第一次使用请看 [新手教程](./docs/BEGINNER_TUTORIAL.md) 或 [快速开始](./QUICKSTART.md)。Codex 接入、单书创作权与全库管理权见 [Agent 授权指南](./docs/AGENT_PROJECT_AUTHORIZATION.md)。
 
@@ -77,7 +77,7 @@ npm.cmd run dist:win
 
 生成产物位于：
 
-- `release/Novel Director Setup 0.1.6-preview.20.exe`
+- `release/Novel Director Setup 0.1.6-preview.22.exe`
 - `release/win-unpacked/Novel Director.exe`
 
 `release/` 始终只保留当前可分发版本；历史安装包会集中归档到 `releases/archive/`。每次成功打包还会生成 `BUILD_INFO.json` 和 `SHA256SUMS.txt`，用于确认版本、构建时间与安装包校验值。详见 [发行产物说明](docs/RELEASE_ARTIFACTS.md)。
@@ -213,7 +213,7 @@ Novel Director 使用 [MIT License](./LICENSE) 发布。
 
 Novel Director is an experimental, local-first desktop workbench for managing AI-assisted long-form fiction projects. It is designed for authors who need more than a text editor: project bibles, chapter continuity, character state, foreshadowing schedules, prompt context control, generation traces, quality gates, and revision workflows.
 
-The current version is `0.1.6-preview.20`, an early trial. Back up real manuscripts before use. Source updates do not automatically update installed binaries; check `release/BUILD_INFO.json` for the packaged version.
+The current prerelease is [`0.1.6-preview.22`](https://github.com/SHIN09-git/novel/releases/tag/v0.1.6-preview.22). Back up real manuscripts before use. Source updates do not automatically upgrade installed copies.
 
 Start with the [beginner tutorial](./docs/BEGINNER_TUTORIAL.md) or [quickstart](./QUICKSTART.md). Agent setup and project grants are in the [authorization guide](./docs/AGENT_PROJECT_AUTHORIZATION.md). See [CHANGELOG](./CHANGELOG.md), [release artifacts](./docs/RELEASE_ARTIFACTS.md) and [ROADMAP](./ROADMAP.md) for changes, binaries and next steps. The [2026-10-31 performance record](./docs/REDUNDANCY_PERFORMANCE.md) covers redundant computation and revision instructions.
 
@@ -273,7 +273,7 @@ npm.cmd run dist:win
 
 Generated artifacts are written to:
 
-- `release/Novel Director Setup 0.1.6-preview.20.exe`
+- `release/Novel Director Setup 0.1.6-preview.22.exe`
 - `release/win-unpacked/Novel Director.exe`
 
 `release/` contains only the current distributable build. Historical artifacts are kept under `releases/archive/`. Successful packaging also writes `BUILD_INFO.json` and `SHA256SUMS.txt` for version and integrity checks. See [Release Artifacts](docs/RELEASE_ARTIFACTS.md).

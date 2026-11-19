@@ -1,6 +1,6 @@
 # 路线图 / Roadmap
 
-更新日期：2026-11-13。这里只保留当前方向和下一步，不再重复各版本的施工日志、源码行数和已完成待办。历史变更见 [CHANGELOG](./CHANGELOG.md)，包的实际状态见 [发行产物说明](./docs/RELEASE_ARTIFACTS.md)。
+更新日期：2026-11-19。这里只保留当前方向和下一步，不再重复各版本的施工日志、源码行数和已完成待办。历史变更见 [CHANGELOG](./CHANGELOG.md)，包的实际状态见 [发行产物说明](./docs/RELEASE_ARTIFACTS.md)。
 
 ## 当前方向
 
@@ -10,14 +10,14 @@
 
 - 本地 SQLite、JSON 导入导出、备份和三类事务提交已接入。章节版本可查看、比较和恢复。
 - Context Need Planner、预算选择、角色硬状态、伏笔操作规则和 HardCanon 共用最终 Prompt 与 Run Trace。
-- 桌面和 Agent 共用生成、审稿、修订、候选决定及正式提交流程；项目权限可以撤回。
+- 桌面和 Agent 共用生成、审稿、修订、候选决定及正式提交流程。[Preview.22](https://github.com/SHIN09-git/novel/releases/tag/v0.1.6-preview.22) 增加可撤回的全书创作权、全库管理权、自带 MCP 和可恢复章节工作单。
 - 章节阅读、局部重写、任务编辑、候选历史和作者诊断摘要已有入口。
 
 [Preview.20](https://github.com/SHIN09-git/novel/releases/tag/v0.1.6-preview.20) 已公开发布，包含[长篇完稿修复](./docs/LONG_NOVEL_COMPLETION_REPAIR_PLAN.md)：超限保稿、成稿硬规则核查、跨章对账、按书统计用量和批量改名。用量不能反推供应商余额或缺失的历史账单。此前减少 Novelty 重复分词、Prompt 追踪重复渲染的实测见[性能记录](./docs/REDUNDANCY_PERFORMANCE.md)。
 
 ## 下一步优先事项
 
-见[书库可靠性与长篇性能施工计划](./docs/LIBRARY_STABILITY_AND_PERFORMANCE_PLAN.md)。本轮候选为 **preview.21**；候选测试与公开发布分开，未替换已发布的 preview.20。
+见[书库可靠性与长篇性能施工计划](./docs/LIBRARY_STABILITY_AND_PERFORMANCE_PLAN.md)。以下保留 Preview.21 的验收记录和后续性能检查项。
 
 | 优先级 | 工作 | 完成条件 |
 | --- | --- | --- |
@@ -56,7 +56,7 @@ npm.cmd run build
 
 ## English
 
-Updated 2026-11-13. The [preview.20 prerelease](https://github.com/SHIN09-git/novel/releases/tag/v0.1.6-preview.20) includes the [long-novel fixes](./docs/LONG_NOVEL_COMPLETION_REPAIR_PLAN.md). Provider balances and unrecorded historical usage remain unknown.
+Updated 2026-11-19. [Preview.22](https://github.com/SHIN09-git/novel/releases/tag/v0.1.6-preview.22) includes book and library grants, bundled MCP and resumable chapter work items. The earlier [long-novel fixes](./docs/LONG_NOVEL_COMPLETION_REPAIR_PLAN.md) remain in place. Provider balances and unrecorded historical usage remain unknown.
 
 The [library plan](./docs/LIBRARY_STABILITY_AND_PERFORMANCE_PLAN.md) qualifies preview.21 separately from public releases. Project opening no longer sends a full snapshot; SQLite commits load their validation inputs by scope. New automatic backups use compression where the file can be restored safely. Existing receipts and manual backups are retained. Full-library startup reads are a separate, deferred optimization.
 
