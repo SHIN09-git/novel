@@ -113,8 +113,9 @@ export function findProjectId(data: Pick<AppData, 'projects'>, args: Record<stri
   if (!value) throw new Error('Missing projectId or project.')
   const direct = data.projects.find((project) => project.id === value)
   if (direct) return direct.id
-  const byName = data.projects.find((project) => project.name === value)
-  if (byName) return byName.id
+  const byName = data.projects.filter((project) => project.name === value)
+  if (byName.length > 1) throw new Error('书库有同名作品，请使用明确的 projectId。')
+  if (byName.length === 1) return byName[0].id
   throw new Error(`Project not found: ${value}`)
 }
 

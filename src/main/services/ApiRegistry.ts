@@ -6,6 +6,8 @@ export interface ApiRoute {
   id: string
   keyEnv: string
   backupKeyEnv?: string
+  /** Header that carries the raw key. Absent means `Authorization: Bearer`. */
+  apiKeyHeader?: string
   legacyDesktopKey: boolean
 }
 
@@ -56,7 +58,17 @@ export async function readApiRegistry(): Promise<ApiRegistry> {
           !keyName.test(item.backupKeyEnv) || item.backupKeyEnv === item.keyEnv))) {
       throw new Error(`请检查 API 清单中 ${id} 的 baseUrl、keyEnv、backupKeyEnv 和 aliases。`)
     }
-    const route: ApiRoute = { id, keyEnv: item.keyEnv, backupKeyEnv: item.backupKeyEnv, legacyDesktopKey: id === config.desktopSavedKeyFor }
+    // A registry-chosen header must not be able to replace transport headers.
+    if (item.apiKeyHeader !== undefined && (typeof item.apiKeyHeader !== 'string' ||
+        !/^[A-Za-z][A-Za-z0-9-]{0,63}$/.test(item.apiKeyHeader) ||
+        ['authorization', 'content-type', 'content-length', 'host', 'cookie'].includes(item.apiKeyHeader.toLowerCase()))) {
+      throw new Error(`API 清单中 ${id} 的 apiKeyHeader 必须是一个自定义请求头名称。`)
+    }
+    const route: ApiRoute = {
+      id, keyEnv: item.keyEnv, backupKeyEnv: item.backupKeyEnv,
+      ...(item.apiKeyHeader ? { apiKeyHeader: item.apiKeyHeader } : {}),
+      legacyDesktopKey: id === config.desktopSavedKeyFor
+    }
     const base = apiEndpoint(item.baseUrl)
     for (const address of [item.baseUrl, ...(item.aliases ?? [])]) {
       const endpoint = typeof address === 'string' ? apiEndpoint(address) : ''
@@ -75,6 +87,10 @@ export function sameApiEndpoint(registry: ApiRegistry, left: string, right: stri
   const a = apiEndpoint(left)
   const b = apiEndpoint(right)
   return Boolean(a && b && (a === b || (registry.has(a) && registry.get(a) === registry.get(b))))
+}
+
+export function apiKeyHeaderFor(registry: ApiRegistry, baseUrl: string): string | undefined {
+  return registry.get(apiEndpoint(baseUrl))?.apiKeyHeader
 }
 
 export function routeKey(route: ApiRoute): string {

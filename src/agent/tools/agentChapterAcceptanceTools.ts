@@ -4,6 +4,8 @@ import { buildChapterAcceptanceReview } from '../../services/ChapterAcceptanceRe
 import { buildAcceptedDraftCommitBundle, applyChapterCommitBundleToAppData } from '../../services/ChapterCommitBundleService'
 import { decisionFingerprint } from '../../services/candidateDecisionPrimitives'
 import { AgentDecisionService } from '../AgentDecisionService'
+import { firstPendingRunTarget } from '../agentBatchWriteback'
+import { AgentDraftReviewError, assertAgentDraftContent } from '../agentDraftReview'
 import { saveAgentChapterCommitBundle, saveAgentRuntimeData, type AgentRuntimeData } from '../AgentRuntime'
 import { findProjectId, requiredString } from './agentToolArguments'
 import type { AgentToolDefinition } from './agentToolTypes'
@@ -21,6 +23,13 @@ interface AcceptanceBinding {
   reason: string
 }
 
+function assertExpectedReports(args: Record<string, unknown>, review: ChapterAcceptanceReview) {
+  if ((args.expectedQualityGateReportId !== undefined && args.expectedQualityGateReportId !== review.qualityGateReportId) ||
+    (args.expectedEditorialVerdictId !== undefined && args.expectedEditorialVerdictId !== review.editorialVerdictId)) {
+    throw new AgentDraftReviewError('DRAFT_REPORT_CHANGED', '当前正文的审稿结论已变化。请刷新工作单后重新决定。')
+  }
+}
+
 function bind(data: AppData, args: Record<string, unknown>): AcceptanceBinding {
   const projectId = findProjectId(data, args)
   const runId = requiredString(args, 'agentRunId')
@@ -32,11 +41,16 @@ function bind(data: AppData, args: Record<string, unknown>): AcceptanceBinding {
   const draftId = requiredString(args, 'draftId')
   const draft = data.generatedChapterDrafts.find((item) => item.id === draftId && item.jobId === jobId && item.projectId === projectId)
   if (!draft || draft.status !== 'draft') throw new Error('草稿不存在或已处理。')
+  if (args.expectedDraftContentHash !== undefined) {
+    assertAgentDraftContent(draft, requiredString(args, 'expectedDraftContentHash'))
+  }
   if (args.mode !== 'reviewed' && args.mode !== 'unreviewed') throw new Error('mode 必须为 reviewed 或 unreviewed。')
   const chapter = data.chapters.find((item) => item.projectId === projectId && item.order === job.targetChapterOrder)
+  const review = buildChapterAcceptanceReview(data, draft, args.mode)
+  assertExpectedReports(args, review)
   return { projectId, agentRunId: runId, jobId, draftId, draftHash: decisionFingerprint({ title: draft.title, body: draft.body }),
     chapterOrder: job.targetChapterOrder, existingChapterHash: chapter ? decisionFingerprint(chapter) : null,
-    review: buildChapterAcceptanceReview(data, draft, args.mode), reason: requiredString(args, 'reason') }
+    review, reason: requiredString(args, 'reason') }
 }
 
 function bindingFor(preview: AgentActionPreview): AcceptanceBinding {
@@ -54,6 +68,18 @@ function scopeFor(runtime: AgentRuntimeData, binding: AcceptanceBinding) {
     actions: binding.review.mode === 'unreviewed' ? ['accept_draft', 'accept_unreviewed_draft'] as const : ['accept_draft'] as const }
 }
 
+function assertBookCreativeAcceptance(data: AppData, binding: AcceptanceBinding) {
+  const report = data.qualityGateReports.find(item => item.id === binding.review.qualityGateReportId && item.projectId === binding.projectId)
+  if (binding.review.mode !== 'reviewed' || !['passed', 'needs_review'].includes(binding.review.qualityStatus) ||
+    binding.review.editorialStatus === 'blocked' || report?.issues.some(issue => issue.type === 'manual_review_required')) {
+    throw new Error('使用全库管理权或全书创作权时，每章必须完成审稿并通过质量门禁后才能提交。请先修订或重审当前草稿。')
+  }
+  const run = data.agentRuns.find(item => item.projectId === binding.projectId && item.id === binding.agentRunId)!
+  if (firstPendingRunTarget(data, run)?.jobId !== binding.jobId) {
+    throw new Error('请先提交本批第一个待完成章节，或重新读取当前任务。')
+  }
+}
+
 function output(preview: AgentActionPreview, binding: AcceptanceBinding) {
   return { preview, previewHash: decisionFingerprint(binding), review: binding.review,
     requiredAuthorization: binding.review.mode === 'unreviewed' ? ['accept_draft', 'accept_unreviewed_draft'] : ['accept_draft'] }
@@ -65,11 +91,18 @@ export async function previewAgentChapterAcceptance(data: AppData, args: Record<
   const prior = data.agentActionPreviews.find((item) => item.id === id)
   if (prior?.status === 'applied') {
     const binding = bindingFor(prior)
+    if (args.expectedDraftContentHash !== undefined &&
+      requiredString(args, 'expectedDraftContentHash') !== binding.review.draftContentHash) {
+      throw new AgentDraftReviewError('DRAFT_VERSION_CHANGED', '已有提交不对应指定正文版本。')
+    }
+    assertExpectedReports(args, binding.review)
     if (binding.agentRunId !== args.agentRunId || binding.jobId !== args.jobId || binding.draftId !== args.draftId ||
       binding.review.mode !== args.mode || binding.reason !== args.reason) throw new Error('同一操作编号不能用于不同采纳决定。')
     return { ...output(prior, binding), replayed: true }
   }
   const binding = bind(data, args)
+  if (runtime.storagePath && await new AgentAuthorizationService(runtime.userDataPath)
+    .requiresReviewedCommits(runtime.storagePath, projectId)) assertBookCreativeAcceptance(data, binding)
   if (prior) {
     if (decisionFingerprint(bindingFor(prior)) !== decisionFingerprint(binding)) throw new Error('同一操作编号不能预览不同正文或采纳决定。')
     return { ...output(prior, binding), replayed: true }
@@ -129,7 +162,8 @@ export async function applyAgentChapterAcceptance(data: AppData, args: Record<st
   }
   const current = bind(data, { projectId, agentRunId: binding.agentRunId, jobId: binding.jobId, draftId: binding.draftId, mode: binding.review.mode, reason: binding.reason })
   if (decisionFingerprint(current) !== decisionFingerprint(binding)) throw new Error('正文、审稿或目标章节已变化，请重新生成采纳预览。')
-  return new AgentAuthorizationService(runtime.userDataPath).withAuthorization(scopeFor(runtime, binding), async (grant) => {
+  return new AgentAuthorizationService(runtime.userDataPath).withAuthorization(scopeFor(runtime, binding), async (grant, reviewedCommitsRequired) => {
+    if (reviewedCommitsRequired) assertBookCreativeAcceptance(data, current)
     const bundle = buildAcceptedDraftCommitBundle({ appData: data, projectId, draftId: binding.draftId,
       targetChapterOrder: binding.chapterOrder, commitId, chapterId: `${preview.id}:chapter`,
       acceptedAt: new Date().toISOString(), acceptanceMode: binding.review.mode, reviewedLengthOverflowNotice: binding.review.lengthOverflowNotice,
@@ -151,10 +185,15 @@ export const AGENT_CHAPTER_ACCEPTANCE_DEFINITIONS: AgentToolDefinition[] = [
     description: 'Bind an explicit director acceptance decision to the exact current draft, reports and target chapter. Preview only. Acceptance may disagree with a review without claiming it passed.',
     inputSchema: { type: 'object', additionalProperties: false, properties: { ...common,
       operationId: { type: 'string' }, agentRunId: { type: 'string' }, jobId: { type: 'string' }, draftId: { type: 'string' },
-      mode: { type: 'string', enum: ['reviewed', 'unreviewed'] }, reason: { type: 'string' } },
+      mode: { type: 'string', enum: ['reviewed', 'unreviewed'] }, reason: { type: 'string' },
+      expectedDraftContentHash: { type: 'string', description: 'Pin the draft body that was read in the work item.' },
+      expectedQualityGateReportId: { type: ['string', 'null'] },
+      expectedEditorialVerdictId: { type: ['string', 'null'] } },
     required: ['projectId', 'operationId', 'agentRunId', 'jobId', 'draftId', 'mode', 'reason'] } },
   { name: 'agent.applyChapterAcceptance', riskLevel: 'write_commit',
     description: 'Commit the exact acceptance preview under an active author-issued project grant. Creates a version; does not apply memory candidates. Repeated calls are idempotent.',
     inputSchema: { type: 'object', additionalProperties: false, properties: { ...common,
-      previewId: { type: 'string' }, expectedPreviewHash: { type: 'string' } }, required: ['projectId', 'previewId', 'expectedPreviewHash'] } }
+      previewId: { type: 'string' }, expectedPreviewHash: { type: 'string' },
+      responseMode: { type: 'string', enum: ['work_item'], description: 'Include the next chapter work item after the commit.' }
+    }, required: ['projectId', 'previewId', 'expectedPreviewHash'] } }
 ]

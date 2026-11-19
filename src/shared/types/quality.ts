@@ -126,6 +126,14 @@ export interface QualityGateReport {
   draftId: ID | null
   draftContentHash?: string | null
   promptContextSnapshotId?: ID | null
+  revisionReview?: {
+    agentRunId: ID
+    revisionVersionId: ID
+    versionHash: string
+    contextHash: string
+    commandHash: string
+    consistencyReviewReportId: ID
+  }
   overallScore: number
   pass: boolean
   /** Snapshot for this text and these rules, not an acceptance-time check. */

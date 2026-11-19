@@ -1,18 +1,17 @@
 import { loadAgentRuntimeData } from '../AgentRuntime'
 import { handleAgentOverviewReadTool } from './agentOverviewReadHandlers'
 import { isChapterTitleTool, runChapterTitleTool } from './agentChapterTitleTools'
-import { findProjectId, requiredString, stringArg } from './agentToolArguments'
-import { AgentAuthorizationService } from '../../main/services/AgentAuthorizationService'
+import { stringArg } from './agentToolArguments'
 import { decorateCandidateAuthorization } from './agentCandidateAuthorization'
 import { AGENT_TOOL_DEFINITIONS } from './agentToolDefinitions'
-import { handleAgentReadTool } from './agentToolReadHandlers'
+import { handleAgentRuntimeReadTool } from './agentToolReadHandlers'
+import { handleAgentLibraryTool } from './agentLibraryTools'
 import type {
   AgentToolCallInput,
   AgentToolCallResult,
   AgentToolDefinition
 } from './agentToolTypes'
 import { handleAgentWriteTool } from './agentToolWriteHandlers'
-import { AgentExecutionControlService } from '../AgentExecutionControlService'
 
 export { AGENT_TOOL_DEFINITIONS } from './agentToolDefinitions'
 export type {
@@ -31,6 +30,8 @@ export class AgentToolService {
   static async callTool(input: AgentToolCallInput): Promise<AgentToolCallResult> {
     const args = input.arguments ?? {}
     if (isChapterTitleTool(input.name)) return runChapterTitleTool(input.name, args)
+    const library = await handleAgentLibraryTool(input.name, args)
+    if (library) return library
     const overview = await handleAgentOverviewReadTool(input.name, args)
     if (overview) return overview
     const runtime = await loadAgentRuntimeData({
@@ -38,23 +39,7 @@ export class AgentToolService {
       userDataPath: stringArg(args, 'userDataPath')
     })
 
-    const authority = new AgentAuthorizationService(runtime.userDataPath)
-    const controlReadResult = input.name === 'agent.getProjectAuthorization'
-      ? { handled: true as const, payload: { projectId: findProjectId(runtime.data, args),
-          grants: runtime.storagePath ? await authority.list(runtime.storagePath, findProjectId(runtime.data, args)) : [] } }
-      : input.name === 'agent.getPipelineProgress'
-      ? {
-          handled: true as const,
-          payload: await AgentExecutionControlService.getProgress(
-            runtime.data,
-            runtime,
-            requiredString(args, 'jobId')
-          )
-        }
-      : { handled: false as const }
-    const readResult = controlReadResult.handled
-      ? controlReadResult
-      : handleAgentReadTool(input.name, args, runtime.data)
+    const readResult = await handleAgentRuntimeReadTool(input.name, args, runtime)
     const result = readResult.handled
       ? readResult
       : await handleAgentWriteTool(input.name, args, runtime.data, runtime)

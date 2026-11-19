@@ -3,6 +3,7 @@ import { getNextChapterTarget, getProjectDigest, listProjects } from '../agentPr
 import { findProjectId, stringArg } from './agentToolArguments'
 import { readAgentBookProgress } from './agentBookProgressRead'
 import { readAgentBookContinuity } from './agentBookContinuityRead'
+import { readAgentStageSummaries, readAgentStoryBible } from './agentBookReferenceRead'
 import { estimateAgentProjectUsage, readAgentProjectUsage } from './agentProjectUsageRead'
 import type { AgentToolCallResult } from './agentToolTypes'
 
@@ -19,14 +20,20 @@ export async function handleAgentOverviewReadTool(
     case 'agent.estimateProjectUsage': return estimateAgentProjectUsage(args)
     case 'agent.getBookProgress': return readAgentBookProgress(args)
     case 'agent.getBookContinuityReport': return readAgentBookContinuity(args)
+    case 'agent.getStoryBible': return readAgentStoryBible(args)
+    case 'agent.getStageSummaries': return readAgentStageSummaries(args)
   }
   if (!OVERVIEW_TOOLS.has(name)) return null
   const runtime = await loadAgentProjectOverview({
     storagePath: stringArg(args, 'storagePath'), userDataPath: stringArg(args, 'userDataPath')
   })
   const { data, ...storage } = runtime
+  const status = args.status ?? 'active'
+  if (name === 'agent.listProjects' && status !== 'active' && status !== 'archived' && status !== 'all') {
+    throw new Error('status must be active, archived, or all.')
+  }
   const projectId = name === 'agent.listProjects' ? null : findProjectId(data, args)
-  const payload = projectId === null ? listProjects(data)
+  const payload = projectId === null ? listProjects(data, status === 'archived' || status === 'all' ? status : 'active')
     : name === 'agent.getNextChapterTarget' ? getNextChapterTarget(data, projectId)
     : name === 'agent.getPendingHumanReviewItems' ? getProjectDigest(data, projectId).pendingReview
     : getProjectDigest(data, projectId)

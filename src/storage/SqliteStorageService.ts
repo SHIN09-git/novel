@@ -107,10 +107,11 @@ export async function loadSqliteCollectionsReadonly(
   return readSqliteReadonly(storagePath, (db) => {
     let projectId: string | undefined
     if (projectSelector !== undefined) {
-      const row = db.prepare("SELECT id FROM entities WHERE collection = 'projects' AND (id = ? OR title = ?) ORDER BY (id = ?) DESC, id LIMIT 1")
-        .get(projectSelector, projectSelector, projectSelector)
-      if (typeof row?.id !== 'string') throw new Error(`Project not found: ${projectSelector}`)
-      projectId = row.id
+      const rows = db.prepare("SELECT id FROM entities WHERE collection = 'projects' AND (id = ? OR title = ?) ORDER BY (id = ?) DESC, id LIMIT 2")
+        .all(projectSelector, projectSelector, projectSelector)
+      if (typeof rows[0]?.id !== 'string') throw new Error(`Project not found: ${projectSelector}`)
+      if (rows.length > 1 && rows[0].id !== projectSelector) throw new Error('书库有同名作品，请使用明确的 projectId。')
+      projectId = rows[0].id
     }
     return { data: readAppDataCollectionsFromDatabase(db, collections, projectId), revision: currentRevisionFromDatabase(db) }
   })

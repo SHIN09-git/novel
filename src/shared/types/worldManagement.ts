@@ -16,6 +16,7 @@ export interface WorldManagementSource {
   /** Optional provenance link for a run-originated action; standalone director edits need no run. */
   agentRunId?: ID
   requestedAt?: string
+  restoredFromOperationId?: ID
 }
 
 export interface WorldManagementCommand {
@@ -35,8 +36,8 @@ export interface WorldManagementReceipt {
   operationId: ID
   commandFingerprint: string
   previewFingerprint: string
-  entity: WorldManagedEntity
-  action: WorldManagementAction
+  entity: WorldManagedEntity | 'project' | 'story_bible' | 'stage_summary'
+  action: WorldManagementAction | 'restore'
   targetId: ID
   source: WorldManagementSource
   /** A persisted receipt is created only inside AgentAuthorizationService.withAuthorization. */

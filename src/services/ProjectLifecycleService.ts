@@ -6,7 +6,7 @@ import {
   type DependentCollectionKey,
   type ProjectScopedCollectionKey
 } from '../shared/appDataCollections'
-import type { AppData, ID } from '../shared/types'
+import type { AppData, ID, Project } from '../shared/types'
 
 type ProjectOwnedRecord = { projectId?: ID | null }
 
@@ -71,13 +71,25 @@ export function selectProjectScopedCollections(
 }
 
 export function markProjectOpened(data: AppData, projectId: ID, openedAt: string): AppData {
-  if (!data.projects.some((project) => project.id === projectId)) return data
+  if (!data.projects.some((project) => project.id === projectId && !isProjectArchived(project))) return data
   return {
     ...data,
     projects: data.projects.map((project) =>
       project.id === projectId ? { ...project, lastOpenedAt: openedAt } : project
     )
   }
+}
+
+export function isProjectArchived(project: Pick<Project, 'archivedAt'>): boolean {
+  return Boolean(project.archivedAt)
+}
+
+export function assertProjectWritable(project: Project | undefined): void {
+  if (project && isProjectArchived(project)) throw new Error(`《${project.name}》已归档，请先恢复项目。`)
+}
+
+export function setProjectArchived(project: Project, archived: boolean, at: string): Project {
+  return isProjectArchived(project) === archived ? project : { ...project, archivedAt: archived ? at : null, updatedAt: at }
 }
 
 export function getProjectDeletionSummary(data: AppData, projectId: ID): ProjectDeletionSummary {

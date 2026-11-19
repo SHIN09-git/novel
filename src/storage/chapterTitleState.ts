@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto'
 import { readFile } from 'node:fs/promises'
 import type { ChapterTitleState, TitleVersionIndex } from '../services/ChapterTitleRenameService'
 import { normalizeChapterTitleReceipts } from '../shared/normalizers/chapterTitle'
+import { isProjectArchived } from '../services/ProjectLifecycleService'
 import type { AppData } from '../shared/types'
 import { currentRevisionFromDatabase } from './sqlite/sqliteSnapshot'
 import type { SqliteDatabase } from './sqlite/sqliteTypes'
@@ -10,20 +11,23 @@ function missingProject(): never { throw new Error('改名目标项目不存在�
 
 export async function readJsonChapterTitles(path: string, projectId: string) {
   const raw = await readFile(path, 'utf8'), data = JSON.parse(raw) as Partial<AppData>
-  if (!data.projects?.some(p => p.id === projectId)) missingProject()
-  const state: ChapterTitleState = { projectId, chapters: (data.chapters ?? []).filter(c => c.projectId === projectId),
+  const project = data.projects?.find(p => p.id === projectId)
+  if (!project) missingProject()
+  const state: ChapterTitleState = { projectId, projectArchived: isProjectArchived(project), chapters: (data.chapters ?? []).filter(c => c.projectId === projectId),
     receipts: normalizeChapterTitleReceipts(data.chapterTitleReceipts).filter(r => r.projectId === projectId) }
   return { data, state, revision: createHash('sha256').update(raw).digest('hex') }
 }
 
 export function readSqliteChapterTitles(db: SqliteDatabase, projectId: string) {
-  if (!db.prepare("SELECT 1 FROM entities WHERE collection = 'projects' AND id = ?").get(projectId)) missingProject()
+  const project = db.prepare("SELECT json_extract(json, '$.archivedAt') AS archivedAt FROM entities WHERE collection = 'projects' AND id = ?").get(projectId)
+  if (!project) missingProject()
   const chapters = db.prepare(`SELECT id, project_id AS projectId, chapter_order AS "order",
     json_extract(json, '$.title') AS title, json_extract(json, '$.archivedAt') AS archivedAt
     FROM entities WHERE collection = 'chapters' AND project_id = ?`).all(projectId) as unknown as ChapterTitleState['chapters']
   const receipts = db.prepare("SELECT json FROM entities WHERE collection = 'chapterTitleReceipts' AND project_id = ?")
     .all(projectId).map(r => JSON.parse(String(r.json)))
-  return { state: { chapters, projectId, receipts: normalizeChapterTitleReceipts(receipts) }, revision: currentRevisionFromDatabase(db) }
+  return { state: { chapters, projectId, projectArchived: Boolean(project.archivedAt),
+    receipts: normalizeChapterTitleReceipts(receipts) }, revision: currentRevisionFromDatabase(db) }
 }
 
 function addVersion(index: TitleVersionIndex, chapterId: unknown, ...ids: unknown[]) {

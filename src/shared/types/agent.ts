@@ -1,6 +1,6 @@
 import type { ID } from './base'
 
-export type AgentRunMode = 'single_chapter' | 'multi_chapter' | 'arc'
+export type AgentRunMode = 'single_chapter' | 'multi_chapter' | 'arc' | 'book_revision'
 
 export type AgentSafetyMode = 'conservative' | 'autonomous' | 'experimental'
 
@@ -57,6 +57,7 @@ export interface AgentRun {
   mode: AgentRunMode
   safetyMode: AgentSafetyMode
   targetChapterOrders: number[]
+  revisionChapterIds?: ID[]
   status: AgentRunStatus
   createdJobIds: ID[]
   createdDraftIds: ID[]

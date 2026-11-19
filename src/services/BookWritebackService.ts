@@ -129,5 +129,5 @@ export function createBookWritebackIndex(data: ReceiptData, projectId: ID, failu
     return { confirmed: false, chapterId: pending?.chapterId ?? null, draftId: pending?.id ?? null, versionId: null, commitId: null,
       reason: pending ? '本次草稿尚未正式写回，请审阅后采纳，再继续下一章。' : '未能核实本次草稿的采纳回执、落库版本和当前正文，请先检查提交结果。' }
   }
-  return { current, verifyJob }
+  return { current, verifyJob, descendsFrom }
 }

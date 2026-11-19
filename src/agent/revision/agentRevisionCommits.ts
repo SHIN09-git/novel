@@ -1,10 +1,13 @@
 import type { AgentActionPreview, AppData, RevisionCommitBundle } from '../../shared/types'
 import { draftContentHash } from '../../services/DraftDiagnosticBindingService'
+import { AgentAuthorizationService } from '../../main/services/AgentAuthorizationService'
 import { applyRevisionCommitBundleToAppData, buildRevisionCommitBundle, validateRevisionCommitBundle } from '../../services/RevisionCommitBundleService'
 import { AgentCommitService } from '../AgentCommitService'
 import { withAgentActionAcknowledgement } from '../agentAcknowledgedAction'
 import { saveAgentRevisionCommitBundle, saveAgentRuntimeData, type AgentRuntimeData } from '../AgentRuntime'
 import { findProjectId, requiredString } from '../tools/agentToolArguments'
+import { assertRevisionBatchTarget, firstPendingRunTarget } from '../agentBatchWriteback'
+import { requirePassingRevisionReview } from './agentRevisionReviewEvidence'
 import {
   assertRevisionWritable, checkKnownAgentSource, checkRevisionFields, checkSourceHashes, checkVersionSource, commandIdentity,
   recordRevisionOperation, replayRevisionOperation, resolveRevisionSource, revisionAudit, revisionCommonFields,
@@ -18,7 +21,7 @@ function previewOutput(preview: AgentActionPreview) {
 }
 
 function buildPreviewBundle(data: AppData, preview: AgentActionPreview, audit: RevisionAudit) {
-  return buildRevisionCommitBundle({
+  const bundle = buildRevisionCommitBundle({
     appData: data, projectId: preview.projectId, chapterId: audit.source.chapterId,
     revisionCommitId: `agent-revision-commit-${preview.id}`, newChapterVersionId: `agent-revision-chapter-version-${preview.id}`,
     revisionSessionId: audit.sessionId, revisionVersionId: audit.versionId, revisedAt: preview.createdAt,
@@ -26,6 +29,8 @@ function buildPreviewBundle(data: AppData, preview: AgentActionPreview, audit: R
     revisionReason: preview.reason,
     revisionNote: `Agent ${preview.agentRunId}; preview ${preview.id}; binding ${revisionFingerprint(audit)}. No human approval claimed.`
   })
+  return { ...bundle, ...(audit.qualityGateReportId ? { qualityGateReportId: audit.qualityGateReportId,
+    consistencyReviewReportId: audit.consistencyReviewReportId } : {}) }
 }
 
 function validateCurrentPreview(data: AppData, preview: AgentActionPreview, audit: RevisionAudit) {
@@ -39,10 +44,11 @@ function validateCurrentPreview(data: AppData, preview: AgentActionPreview, audi
   checkKnownAgentSource(data, resolved.source, 'version', version.id, revisionFingerprint(version))
   if (revisionFingerprint(resolved.source) !== revisionFingerprint(audit.source)) throw new Error('Revision preview source binding changed.')
   if (!resolved.chapter) throw new Error('An unlinked draft can hold candidates but needs a chapter before formal revision commit.')
+  return { chapter: resolved.chapter, version }
 }
 
 export async function previewAgentRevisionCommit(data: AppData, args: Record<string, unknown>, runtime: AgentRuntimeData) {
-  checkRevisionFields(args, [...revisionWriteFields, ...revisionHashFields, 'versionId', 'expectedVersionHash'])
+  checkRevisionFields(args, [...revisionWriteFields, ...revisionHashFields, 'versionId', 'expectedVersionHash', 'expectedQualityGateReportId'])
   const projectId = findProjectId(data, args)
   const identity = commandIdentity(args, 'preview_revision_commit', projectId)
   const prior = replayRevisionOperation(data, projectId, identity)
@@ -58,10 +64,21 @@ export async function previewAgentRevisionCommit(data: AppData, args: Record<str
   const source = resolveRevisionSource(data, projectId, session.chapterId, session.sourceDraftId)
   checkSourceHashes(source.source, args)
   checkKnownAgentSource(data, source.source, 'version', version.id, revisionFingerprint(version))
+  const run = revisionRun(data, projectId, identity.agentRunId)
+  assertRevisionBatchTarget(data, run, session.chapterId)
+  const requiresReview = run.mode === 'book_revision' || Boolean(runtime.storagePath &&
+    await new AgentAuthorizationService(runtime.userDataPath).requiresReviewedCommits(runtime.storagePath, projectId))
+  const reviewId = args.expectedQualityGateReportId === undefined ? undefined : requiredString(args, 'expectedQualityGateReportId')
+  let review
+  if (requiresReview || reviewId) {
+    if (!source.chapter) throw new Error('必须为正式章节准备修订。')
+    review = requirePassingRevisionReview(data, run.id, source.chapter, version, reviewId)
+  }
   const audit: RevisionAudit = {
     schemaVersion: 1, actor: { kind: 'agent', agentRunId: identity.agentRunId }, operation: 'preview_revision_commit',
     commandHash: identity.hash, source: source.source, sessionId: session.id, requestId: request.id,
-    requestHash: revisionFingerprint(request), versionId: version.id, versionHash: revisionFingerprint(version), candidateContentHash: draftContentHash(version.body)
+    requestHash: revisionFingerprint(request), versionId: version.id, versionHash: revisionFingerprint(version), candidateContentHash: draftContentHash(version.body),
+    ...(review ?? {})
   }
   const timestamp = new Date().toISOString()
   const preview: AgentActionPreview = {
@@ -85,6 +102,7 @@ function assertPersistedBundle(bundle: RevisionCommitBundle, preview: AgentActio
   if (bundle.revisionCommitId !== `agent-revision-commit-${preview.id}` || bundle.projectId !== preview.projectId ||
     bundle.chapterId !== audit.source.chapterId || bundle.revisionSessionId !== audit.sessionId || bundle.revisionVersionId !== audit.versionId ||
     bundle.revisedBy !== 'agent' || bundle.actor?.kind !== 'agent' || bundle.actor.agentRunId !== preview.agentRunId ||
+    bundle.qualityGateReportId !== audit.qualityGateReportId || bundle.consistencyReviewReportId !== audit.consistencyReviewReportId ||
     bundle.actor.actionPreviewId !== preview.id || draftContentHash(bundle.beforeText ?? '') !== audit.source.sourceChapterContentHash ||
     draftContentHash(bundle.afterText) !== audit.candidateContentHash || !bundle.revisionNote?.includes(`binding ${revisionFingerprint(audit)}.`)) {
     throw new Error('Persisted revision commit does not match the approved Agent preview.')
@@ -115,21 +133,34 @@ export async function applyApprovedAgentRevisionCommit(data: AppData, args: Reco
   } else {
     if (preview.status === 'applied') throw new Error('Applied revision preview is missing its commit.')
     validateCurrentPreview(data, preview, audit)
+    assertRevisionBatchTarget(data, run, audit.source.chapterId)
     const { version } = revisionVersion(data, projectId, audit.versionId!)
     if (version.responseScope === 'broader_than_requested' && args.acceptBroaderResponse !== true) throw new Error('Explicitly acknowledge the broader whole-chapter response.')
   }
   return withAgentActionAcknowledgement({ runtime, projectId,
     chapterOrder: data.chapters.find((item) => item.id === audit.source.chapterId && item.projectId === projectId)?.order,
-    action: 'apply_revision', confirmed: args.confirm === true, requiresGrant: preview.requiresHumanApproval
-  }, async (grant) => {
+    action: 'apply_revision', confirmed: args.confirm === true,
+    requiresGrant: preview.requiresHumanApproval || run.mode === 'book_revision' || Boolean(audit.qualityGateReportId)
+  }, async (grant, reviewedCommitsRequired) => {
+  if (!committed && (reviewedCommitsRequired || run.mode === 'book_revision' || audit.qualityGateReportId)) {
+    const { chapter, version } = validateCurrentPreview(data, preview, audit)
+    const checked = requirePassingRevisionReview(data, run.id, chapter, version, audit.qualityGateReportId)
+    if (checked.consistencyReviewReportId !== audit.consistencyReviewReportId) throw new Error('一致性审稿记录已变化，请刷新预览。')
+  }
   const bundle = committed ?? buildPreviewBundle(data, preview, audit)
   if (!committed && grant && bundle.actor) bundle.actor = { ...bundle.actor, authorizationGrantId: grant.id }
   const applied = AgentCommitService.applyRevisionCommitBundleForAgent({ appData: data, preview, bundle, confirm: Boolean(grant) })
   applied.decision.id = `agent-revision-applied-${preview.id}`
   applied.decision.evidence = [...revisionEvidence(audit), 'acknowledgedBy=agent', `previewHash=${revisionFingerprint(audit)}`, `revisionCommitId=${bundle.revisionCommitId}`]
   // Use one stable decision for crash recovery instead of adding a second history entry.
+  const batchNext = run.mode === 'book_revision' ? firstPendingRunTarget(applied.appData, run) : null
   applied.appData.agentRuns = applied.appData.agentRuns.map((item) => item.id === run.id ? {
-    ...item, decisions: [...run.decisions.filter((decision) => decision.id !== applied.decision.id), applied.decision]
+    ...item, decisions: [...run.decisions.filter((decision) => decision.id !== applied.decision.id), applied.decision],
+    ...(run.mode === 'book_revision' ? {
+      status: batchNext ? 'paused' as const : 'completed' as const,
+      completedAt: batchNext ? null : applied.decision.createdAt,
+      summary: batchNext ? `已提交第 ${bundle.chapter.order} 章修订；下一章：第 ${batchNext.chapterOrder} 章。` : '本批修订已逐章审稿并提交。'
+    } : {})
   } : item)
   const commitSave = await saveAgentRevisionCommitBundle(bundle, runtime)
   runtime.data = applyRevisionCommitBundleToAppData(data, bundle)

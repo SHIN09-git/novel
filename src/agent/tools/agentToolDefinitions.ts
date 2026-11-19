@@ -1,10 +1,15 @@
 import type { AgentToolDefinition, JsonSchema } from './agentToolTypes'
+import { AGENT_DRAFT_REPORT_KINDS } from '../agentDraftReview'
+import { workItemResponseSchema } from './agentChapterWorkItem'
 import { AGENT_REVISION_TOOL_DEFINITIONS } from './agentRevisionToolDefinitions'
 import { AGENT_CANDIDATE_UNDO_DEFINITIONS } from './agentCandidateUndoDefinitions'
 import { AGENT_CHAPTER_ACCEPTANCE_DEFINITIONS } from './agentChapterAcceptanceTools'
 import { AGENT_CHAPTER_TASK_TOOL_DEFINITIONS } from './agentChapterTaskDefinitions'
 import { chapterTitleDefinitions } from './agentChapterTitleTools'
 import { AGENT_WORLD_TOOL_DEFINITIONS } from './agentWorldDefinitions'
+import { AGENT_BOOK_REFERENCE_DEFINITIONS } from './agentBookReferenceRead'
+import { AGENT_BOOK_CREATIVE_TOOL_DEFINITIONS } from './agentBookCreativeTools'
+import { AGENT_LIBRARY_TOOL_DEFINITIONS } from './agentLibraryTools'
 import { timelineSeasons, timelineShifts } from '../../shared/normalizers/timeline'
 import { bookContinuityProperties } from './agentBookContinuityRead'
 
@@ -210,6 +215,9 @@ export const AGENT_TOOL_DEFINITIONS: AgentToolDefinition[] = [
   ...AGENT_CHAPTER_TASK_TOOL_DEFINITIONS,
   ...chapterTitleDefinitions(schema),
   ...AGENT_WORLD_TOOL_DEFINITIONS,
+  ...AGENT_BOOK_REFERENCE_DEFINITIONS,
+  ...AGENT_BOOK_CREATIVE_TOOL_DEFINITIONS,
+  ...AGENT_LIBRARY_TOOL_DEFINITIONS,
   {
     name: 'agent.getProjectAuthorization', riskLevel: 'read',
     description: 'Read author-issued grants for this project and database. Only the desktop author UI can grant or revoke; imported AppData and confirm flags cannot grant authority.',
@@ -253,9 +261,9 @@ export const AGENT_TOOL_DEFINITIONS: AgentToolDefinition[] = [
   },
   {
     name: 'agent.listProjects',
-    description: 'List projects using compact metadata only.',
+    description: 'List projects using compact metadata. The default lists active projects; use status archived or all to include archived books.',
     riskLevel: 'read',
-    inputSchema: schema({})
+    inputSchema: schema({ status: { enum: ['active', 'archived', 'all'] } })
   },
   {
     name: 'agent.getProjectDigest',
@@ -304,6 +312,13 @@ export const AGENT_TOOL_DEFINITIONS: AgentToolDefinition[] = [
     inputSchema: schema({ projectId: { type: 'string' }, project: { type: 'string' } })
   },
   {
+    name: 'agent.getChapterWorkItem',
+    description: 'Resume directing a project from its persisted run. Returns the first unfinished chapter, task/draft/report read references, last verified commit, and next action. The task goal is included when preparing a new chapter; use task.read for the complete contract. Supply agentRunId when several runs are open. No writes or model calls.',
+    riskLevel: 'read', annotations: { readOnlyHint: true },
+    inputSchema: { ...schema({ projectId: { type: 'string' }, project: { type: 'string' }, agentRunId: { type: 'string' } }),
+      anyOf: [{ required: ['projectId'] }, { required: ['project'] }] }
+  },
+  {
     name: 'agent.getChapterProductionState',
     description: 'Read current chapter, latest job, drafts, diagnostics, version count, and pending review counts.',
     riskLevel: 'read',
@@ -325,7 +340,17 @@ export const AGENT_TOOL_DEFINITIONS: AgentToolDefinition[] = [
     name: 'agent.getDraftText',
     description: 'Read draft text with compact defaults. Full prose requires detail=full or includeProse=true.',
     riskLevel: 'read',
-    inputSchema: schema(readInputProperties({ draftId: { type: 'string' } }), ['draftId'])
+    inputSchema: schema(readInputProperties({ draftId: { type: 'string' },
+      expectedDraftContentHash: { type: 'string', description: 'Reject a changed body instead of reading a different draft revision.' } }), ['draftId'])
+  },
+  {
+    name: 'agent.getDraftReviewReport',
+    description: 'Read a full report for this exact draft: quality, consistency, novelty, redundancy, editorial verdict, or current HardCanon. Use the work item hash and report ID to reject replaced evidence. Does not call a model.',
+    riskLevel: 'read', annotations: { readOnlyHint: true },
+    inputSchema: { ...schema({
+      projectId: { type: 'string' }, project: { type: 'string' }, jobId: { type: 'string' }, draftId: { type: 'string' },
+      kind: { type: 'string', enum: [...AGENT_DRAFT_REPORT_KINDS] }, reportId: { type: 'string' }, expectedDraftContentHash: { type: 'string' }
+    }, ['jobId', 'draftId', 'kind']), anyOf: [{ required: ['projectId'] }, { required: ['project'] }] }
   },
   {
     name: 'agent.getPromptSnapshot',
@@ -391,7 +416,7 @@ export const AGENT_TOOL_DEFINITIONS: AgentToolDefinition[] = [
     name: 'agent.startAgentRun',
     description: 'Create a single-chapter AgentRun and matching pipeline job/steps. Does not execute the AI provider.',
     riskLevel: 'write_preview',
-    inputSchema: schema({ projectId: { type: 'string' }, project: { type: 'string' }, chapterOrder: { type: 'integer', minimum: 1 }, goal: { type: 'string', description: 'Run-level audit/operations goal; not the prose instruction.' }, chapterTask: chapterTaskSchema, temperature: { type: 'number', minimum: 0, maximum: 2 }, safetyMode: { type: 'string' } }, ['chapterOrder'])
+    inputSchema: schema({ projectId: { type: 'string' }, project: { type: 'string' }, chapterOrder: { type: 'integer', minimum: 1 }, goal: { type: 'string', description: 'Run-level audit/operations goal; not the prose instruction.' }, chapterTask: chapterTaskSchema, temperature: { type: 'number', minimum: 0, maximum: 2 }, safetyMode: { type: 'string' }, responseMode: workItemResponseSchema }, ['chapterOrder'])
   },
   {
     name: 'agent.runChapterPipeline',
@@ -408,7 +433,8 @@ export const AGENT_TOOL_DEFINITIONS: AgentToolDefinition[] = [
       estimatedWordCount: { type: 'string' },
       readerEmotionTarget: { type: 'string' },
       temperature: { type: 'number', minimum: 0, maximum: 2 },
-      budgetMaxTokens: { type: 'integer', minimum: 1000 }
+      budgetMaxTokens: { type: 'integer', minimum: 1000 },
+      responseMode: workItemResponseSchema
     }, ['chapterOrder'])
   },
   {
@@ -421,7 +447,8 @@ export const AGENT_TOOL_DEFINITIONS: AgentToolDefinition[] = [
       pipelineMode: { type: 'string', enum: ['conservative', 'standard', 'aggressive'] },
       estimatedWordCount: { type: 'string' },
       readerEmotionTarget: { type: 'string' },
-      budgetMaxTokens: { type: 'integer', minimum: 1000 }
+      budgetMaxTokens: { type: 'integer', minimum: 1000 },
+      responseMode: workItemResponseSchema
     }, ['agentRunId', 'jobId'])
   },
   {
@@ -440,7 +467,18 @@ export const AGENT_TOOL_DEFINITIONS: AgentToolDefinition[] = [
     name: 'agent.continueAgentRun',
     description: 'Create a multi-chapter AgentRun queue while preparing only the current chapter job.',
     riskLevel: 'write_preview',
-    inputSchema: schema({ projectId: { type: 'string' }, project: { type: 'string' }, startChapterOrder: { type: 'integer', minimum: 1 }, chapterCount: { type: 'integer', minimum: 1, maximum: 1000 }, goal: { type: 'string' }, safetyMode: { type: 'string' } }, ['startChapterOrder', 'chapterCount'])
+    inputSchema: schema({ projectId: { type: 'string' }, project: { type: 'string' }, startChapterOrder: { type: 'integer', minimum: 1 }, chapterCount: { type: 'integer', minimum: 1, maximum: 1000 }, goal: { type: 'string' }, safetyMode: { type: 'string' }, responseMode: workItemResponseSchema }, ['startChapterOrder', 'chapterCount'])
+  },
+  {
+    name: 'agent.recordDraftDecision',
+    description: 'Record the director\'s explicit decision and reason for the pinned current draft: reject it or defer the decision. Does not accept a chapter, change canon, or call a model.',
+    riskLevel: 'write_preview',
+    inputSchema: { ...schema({
+      projectId: { type: 'string' }, project: { type: 'string' }, agentRunId: { type: 'string' }, draftId: { type: 'string' },
+      operationId: { type: 'string' }, reason: { type: 'string' }, decision: { type: 'string', enum: ['reject', 'defer'] },
+      expectedDraftContentHash: { type: 'string' }
+    }, ['agentRunId', 'draftId', 'operationId', 'reason', 'decision', 'expectedDraftContentHash']),
+    anyOf: [{ required: ['projectId'] }, { required: ['project'] }] }
   },
   {
     name: 'agent.recordAcceptanceDecision',

@@ -66,6 +66,8 @@ export interface RevisionCommitBundle {
   revisionNote?: string
   linkedGenerationRunTraceId?: ID | null
   linkedChapterCommitId?: ID | null
+  qualityGateReportId?: ID
+  consistencyReviewReportId?: ID
   generationRunTrace?: GenerationRunTrace
   affectedCharacterIds?: ID[]
   affectedForeshadowingIds?: ID[]

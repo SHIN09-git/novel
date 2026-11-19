@@ -151,6 +151,8 @@ export function readRevisionCommitContext(db: SqliteDatabase, b: RevisionCommitB
   r.ids('chapterVersions', b.baseChapterVersionId, b.newChapterVersionId)
   r.receipt('chapterCommitBundles', b.linkedChapterCommitId)
   r.ids('generationRunTraces', b.linkedGenerationRunTraceId, b.generationRunTrace?.id)
+  r.ids('qualityGateReports', b.qualityGateReportId)
+  r.ids('consistencyReviewReports', b.consistencyReviewReportId)
   r.ids('agentRuns', b.actor?.agentRunId)
   r.ids('agentActionPreviews', b.actor?.actionPreviewId)
   const version = r.one('revisionVersions', b.revisionVersionId ?? b.revisionVersion?.id)

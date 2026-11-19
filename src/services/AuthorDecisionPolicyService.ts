@@ -6,6 +6,7 @@ import type {
   QualityGateReport
 } from '../shared/types'
 import { draftContentHash, latestQualityReportForDraft } from './DraftDiagnosticBindingService'
+import { readCandidateDraftSource, STALE_CANDIDATE_SOURCE } from './CandidateDraftSource'
 import type { EditorialCoverageExpectation } from './EditorialVerdictService'
 import {
   QUALITY_GATE_HUMAN_REVIEW_SCORE,
@@ -221,7 +222,7 @@ export class AuthorDecisionPolicyService {
   static assessMemoryCandidateQuality(
     candidate: MemoryUpdateCandidate,
     reports: QualityGateReport[],
-    data?: Pick<AppData, 'generatedChapterDrafts'>
+    data?: Pick<AppData, 'generatedChapterDrafts'> & Partial<Pick<AppData, 'chapters'>>
   ): MemoryCandidateQualityAssessment {
     const scopedReports = reports.filter((report) =>
       report.projectId === candidate.projectId && report.jobId === candidate.jobId
@@ -231,11 +232,13 @@ export class AuthorDecisionPolicyService {
     const drafts = data?.generatedChapterDrafts.filter((draft) =>
       draft.projectId === candidate.projectId && draft.jobId === candidate.jobId
     ) ?? []
-    const draft = drafts.length === 1 ? drafts[0] : null
+    const source = data?.chapters && (candidate.sourceDraftId || candidate.sourceDraftContentHash)
+      ? readCandidateDraftSource({ chapters: data.chapters, generatedChapterDrafts: data.generatedChapterDrafts }, candidate) : null
+    if (source?.status === 'stale') return { report: null, sourceStatus: 'unverified', warnings: [...warnings, STALE_CANDIDATE_SOURCE] }
+    const draft = source?.draft ?? (drafts.length === 1 ? drafts[0] : null)
     const candidateTime = Date.parse(candidate.createdAt)
-    // Candidates have no source hash. A unique, unchanged draft is the strongest
-    // available association; never attach an older candidate to a newer draft.
-    if (draft && Date.parse(draft.createdAt) <= candidateTime && Date.parse(draft.updatedAt) <= candidateTime) {
+    // Timestamp inference is only for candidates without a version binding.
+    if (draft && (source?.draft === draft || (Date.parse(draft.createdAt) <= candidateTime && Date.parse(draft.updatedAt) <= candidateTime))) {
       const report = latestQualityReportForDraft(scopedReports.filter((item) =>
         !item.chapterId || item.chapterId === draft.chapterId
       ), draft)
@@ -256,7 +259,7 @@ export class AuthorDecisionPolicyService {
   static reportsForMemoryCandidates(
     candidates: MemoryUpdateCandidate[],
     reports: QualityGateReport[],
-    data?: Pick<AppData, 'generatedChapterDrafts'>
+    data?: Pick<AppData, 'generatedChapterDrafts'> & Partial<Pick<AppData, 'chapters'>>
   ): QualityGateReport[] {
     return [
       ...new Map(

@@ -6,6 +6,7 @@ import type {
   CharacterStateTransaction
 } from '../../shared/types'
 import { resourceAccountScope, stateFactDefinition } from '../../shared/characterStateDefinition'
+import { assertCandidateDraftSource } from '../CandidateDraftSource'
 import {
   applyStateTransactionValue,
   inferStateValueType,
@@ -238,6 +239,7 @@ export function previewStateChangeCandidate(candidate: CharacterStateChangeCandi
 export function applyStateChangeCandidate(candidateId: string, appData: AppData): AppData {
   const candidate = appData.characterStateChangeCandidates.find((item) => item.id === candidateId)
   if (!candidate || candidate.status !== 'pending') return appData
+  assertCandidateDraftSource(appData, candidate)
   const timestamp = stateTimestamp()
   const { proposed, existing, transactionType, nextValue, retiredByUndo } = previewStateChangeCandidate(candidate, appData)
   const fallbackCategory = proposed?.category ?? 'custom'

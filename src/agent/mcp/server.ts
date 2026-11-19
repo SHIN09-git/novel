@@ -15,6 +15,7 @@ interface JsonRpcResponse {
   error?: {
     code: number
     message: string
+    data?: { code: string }
   }
 }
 
@@ -30,11 +31,11 @@ function writeLineMessage(message: JsonRpcResponse): void {
   process.stdout.write(`${JSON.stringify(message)}\n`)
 }
 
-function errorResponse(id: JsonRpcRequest['id'], code: number, message: string): JsonRpcResponse {
+function errorResponse(id: JsonRpcRequest['id'], code: number, message: string, errorCode?: string): JsonRpcResponse {
   return {
     jsonrpc: '2.0',
     id: id ?? null,
-    error: { code, message }
+    error: { code, message, ...(errorCode ? { data: { code: errorCode } } : {}) }
   }
 }
 
@@ -112,7 +113,8 @@ async function handleRequest(request: JsonRpcRequest): Promise<JsonRpcResponse |
         return errorResponse(request.id, -32601, `Unknown method: ${request.method}`)
     }
   } catch (error) {
-    return errorResponse(request.id, -32000, error instanceof Error ? error.message : String(error))
+    const code = error instanceof Error && 'code' in error && typeof error.code === 'string' ? error.code : undefined
+    return errorResponse(request.id, -32000, error instanceof Error ? error.message : String(error), code)
   }
 }
 

@@ -1,5 +1,6 @@
 import type { AppData, ID } from '../shared/types'
 import { activeChapters, archivedChapters, nextChapterOrder } from '../services/ChapterLifecycleService'
+import { isProjectArchived } from '../services/ProjectLifecycleService'
 import { summarizeBookManuscript } from '../services/bookProgress/manuscript'
 import { visibleCharacterCount } from '../services/chapterTaskContractText'
 import type { AgentProjectOverviewData } from './agentProjectOverviewData'
@@ -18,8 +19,8 @@ import type {
   AgentProjectListItem
 } from './agentReadableSummaryTypes'
 
-export function listProjects(data: AgentProjectOverviewData): AgentProjectListItem[] {
-  return [...data.projects]
+export function listProjects(data: AgentProjectOverviewData, status: 'active' | 'archived' | 'all' = 'active'): AgentProjectListItem[] {
+  return data.projects.filter(project => status === 'all' || isProjectArchived(project) === (status === 'archived'))
     .sort(byUpdatedAtDesc)
     .map((project) => {
       const projectChapters = data.chapters.filter((chapter) => chapter.projectId === project.id)
@@ -41,6 +42,7 @@ export function listProjects(data: AgentProjectOverviewData): AgentProjectListIt
         pendingReviewCount: pendingReview.memoryCandidates + pendingReview.characterStateCandidates,
         latestChapterOrder: latestChapter?.order ?? null,
         latestChapterTitle: latestChapter?.title ?? null,
+        ...(project.archivedAt ? { archivedAt: project.archivedAt } : {}),
         updatedAt: project.updatedAt
       }
     })
@@ -64,6 +66,7 @@ export function getProjectDigest(data: AgentProjectOverviewData, projectId: ID):
       name: project.name,
       genre: project.genre,
       description: compact(project.description, 300),
+      ...(project.archivedAt ? { archivedAt: project.archivedAt } : {}),
       updatedAt: project.updatedAt
     },
     nextChapterOrder: manuscript.nextAssignableOrder,
@@ -115,6 +118,7 @@ export function getNextChapterTarget(
   const nextOrder = nextChapterOrder(data.chapters, projectId)
   return {
     projectId,
+    ...(project.archivedAt ? { archivedAt: project.archivedAt } : {}),
     nextChapterOrder: nextOrder,
     nextAssignableOrder: nextOrder,
     progressTool: 'agent.getBookProgress' as const,

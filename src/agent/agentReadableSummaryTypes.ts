@@ -21,6 +21,7 @@ export interface AgentProjectListItem {
   latestChapterOrder: number | null
   latestChapterTitle: string | null
   updatedAt: string
+  archivedAt?: string
 }
 
 export interface AgentProjectDigest {
@@ -30,6 +31,7 @@ export interface AgentProjectDigest {
     genre: string
     description: string
     updatedAt: string
+    archivedAt?: string
   }
   nextChapterOrder: number
   manuscript: { totalWords: number; chapterCount: number; completeThrough: number }

@@ -10,6 +10,7 @@ import type {
 import { normalizeTreatmentMode } from '../shared/foreshadowingTreatment'
 import { normalizeMemoryUpdatePatch } from '../shared/normalizers/memoryUpdate'
 import { editTimelineEvent, timelineTimeValues } from '../shared/normalizers/timeline'
+import { assertCandidateDraftSource } from './CandidateDraftSource'
 
 export interface ApplicableMemoryCandidatePatch {
   candidate: MemoryUpdateCandidate
@@ -215,6 +216,7 @@ export function applyMemoryCandidatePatchToData({
   requireProject(current, projectId)
   const persistedCandidate = requirePersistedCandidate(current, candidate.id, projectId)
   if (persistedCandidate.status !== 'pending') return current
+  assertCandidateDraftSource(current, persistedCandidate)
 
   const applicable = resolveApplicableMemoryPatch(persistedCandidate)
   if (!applicable.patch) throw new Error(applicable.error ?? `记忆候选无法应用：${persistedCandidate.id}`)

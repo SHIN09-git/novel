@@ -542,7 +542,7 @@ function audit(command: WorldManagementCommand, receipt: WorldManagementReceipt)
 
 function resultFromReceipt(command: WorldManagementCommand, receipt: WorldManagementReceipt): WorldManagementResult['result'] {
   return {
-    projectId: receipt.projectId, entity: receipt.entity, action: receipt.action, id: receipt.targetId,
+    projectId: receipt.projectId, entity: command.entity, action: command.action, id: receipt.targetId,
     fingerprint: receipt.previewFingerprint, changed: false, replayed: true, before: copy(receipt.before), after: copy(receipt.after),
     audit: audit(command, receipt)
   }

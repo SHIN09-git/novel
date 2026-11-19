@@ -17,6 +17,7 @@ import { appendGenerationRunTraceAiCall } from '../../../utils/runTrace'
 import { noveltyAdjustedConfidence, noveltyWarnings, serializeOutput } from '../pipelineUtils'
 import { parseOutput } from '../pipelineRuntimeBasics'
 import type { PipelineStepHandlerContext } from '../pipelineRunnerTypes'
+import { candidateDraftBinding } from '../../../../../services/CandidateDraftSource'
 
 function meaningfulText(value: unknown): string {
   return String(value ?? '').trim()
@@ -150,10 +151,12 @@ export async function runChapterReviewStep(ctx: PipelineStepHandlerContext) {
   const auditWarnings = [...noveltyWarnings(state.noveltyAuditResult), ...(fallbackWarning ? [fallbackWarning] : [])]
   const analysisForOutput = unifiedAnalysis ?? (supportsUnifiedAnalysis ? fallbackAnalysis(review, fallbackWarning) : null)
   const timestamp = now()
+  const binding = candidateDraftBinding(state.draftRecord)
   const reviewCandidates: MemoryUpdateCandidate[] = hasChapterReviewMemoryContent(review) ? [{
     id: newId(),
     projectId: project.id,
     jobId: job.id,
+    ...binding,
     type: 'chapter_review',
     targetId: null,
     proposedPatch: {
@@ -206,6 +209,7 @@ export async function runChapterReviewStep(ctx: PipelineStepHandlerContext) {
     }
     return {
       id: newId(), projectId: project.id, jobId: job.id, characterId: suggestion.characterId,
+      ...binding,
       chapterId: null, chapterOrder: options.targetChapterOrder, candidateType: suggestion.changeType,
       targetFactId: existingFact?.id ?? null, proposedFact: fact, proposedTransaction: transaction,
       beforeValue: suggestion.beforeValue ?? existingFact?.value ?? null, afterValue: suggestion.afterValue,

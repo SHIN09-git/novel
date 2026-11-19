@@ -26,6 +26,25 @@
 
 .home-workspace :is(h2, h3, p, small, span) { overflow-wrap: anywhere; }
 
+.home-library-authorization,
+.home-library-record {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  padding: var(--space-3) 0;
+  border-bottom: 1px solid var(--line);
+}
+
+.home-library-authorization small,
+.home-library-record small { display: block; color: var(--muted); }
+.home-library-authorization .notice { flex-basis: 100%; margin: 0; }
+.home-library-records > summary { color: var(--ink); font-weight: 650; cursor: pointer; }
+.home-library-entry { margin: var(--space-3) 0 0; padding: var(--space-2) 0; border-bottom: 1px solid var(--line); }
+.home-library-entry summary { overflow-wrap: anywhere; cursor: pointer; }
+.home-library-diff { margin: var(--space-2) 0; white-space: pre-wrap; overflow-wrap: anywhere; }
+
 .home-header-action {
   display: inline-flex;
   align-items: center;

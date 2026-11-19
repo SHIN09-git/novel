@@ -121,9 +121,11 @@ Commands:
   book-progress --project-id <id> | --project <name-or-id> [--from <chapter>] [--to <chapter>] [--issues-only] [--offset <n>] [--limit <n>]
   project-usage --project-id <id> | --project <name-or-id>
   book-continuity --project-id <id> | --project <name-or-id> [--from <chapter>] [--to <chapter>] [--kind <category>] [--status conflict|needs_evidence|open] [--offset <n>] [--limit <n>]
+  chapter-work-item --project-id <id> | --project <name-or-id> [--agent-run-id <id>]
   chapter-state --project-id <id> | --project <name-or-id> --chapter <order>
   chapter-text --project-id <id> | --project <name-or-id> --chapter <order> [--detail full] [--include-prose] [--max-chars <n>]
-  draft-text --draft-id <id> [--detail full] [--include-prose] [--max-chars <n>]
+  draft-text --draft-id <id> [--detail full] [--include-prose] [--max-chars <n>] [--expected-draft-content-hash <hash>]
+  draft-review-report --project-id <id> --job-id <id> --draft-id <id> --kind <report-kind> [--report-id <id>] [--expected-draft-content-hash <hash>]
   prompt-snapshot --snapshot-id <id> [--detail full] [--include-prompt] [--max-chars <n>]
   version-chain --project-id <id> | --project <name-or-id> --chapter <order>
   version-detail --project-id <id> | --project <name-or-id> --chapter <order> --version-id <id> [--detail full]
@@ -143,12 +145,12 @@ Commands:
   run-chapter --project-id <id> | --project <name-or-id> --chapter <order> [--goal <run-audit-text>] [--chapter-task-json <json>]
               [--safety-mode autonomous|conservative|experimental]
               [--pipeline-mode conservative|standard|aggressive] [--estimated-words <range>] [--reader-emotion <text>]
-              [--temperature <0-2>] [--budget-max-tokens <n>]
+              [--temperature <0-2>] [--budget-max-tokens <n>] [--response-mode work_item]
   retry-chapter --agent-run-id <id> --job-id <id> [--pipeline-mode conservative|standard|aggressive]
-                [--estimated-words <range>] [--reader-emotion <text>] [--budget-max-tokens <n>]
+                [--estimated-words <range>] [--reader-emotion <text>] [--budget-max-tokens <n>] [--response-mode work_item]
   pipeline-progress --job-id <id>
   cancel-chapter --job-id <id> [--reason <text>]
-  continue --project-id <id> | --project <name-or-id> --start-chapter <order> --chapters <count> [--goal <text>] [--safety-mode autonomous|conservative|experimental]
+  continue --project-id <id> | --project <name-or-id> --start-chapter <order> --chapters <count> [--goal <text>] [--safety-mode autonomous|conservative|experimental] [--response-mode work_item]
 
 Storage flags:
   --storage <path>      SQLite/JSON data path. Defaults to app-config or userData.
@@ -183,10 +185,17 @@ function buildToolCall(parsed: ParsedArgs): AgentToolCallInput {
     }
     case 'chapter-state':
       return { name: 'agent.getChapterProductionState', arguments: { ...storage, ...projectArgs(flags), chapterOrder: intFlag(flags, 'chapter') } }
+    case 'chapter-work-item':
+      return { name: 'agent.getChapterWorkItem', arguments: { ...storage, ...projectArgs(flags), agentRunId: flag(flags, 'agent-run-id') } }
     case 'chapter-text':
       return { name: 'agent.getChapterText', arguments: { ...storage, ...projectArgs(flags), chapterOrder: intFlag(flags, 'chapter'), ...readArgs(flags) } }
     case 'draft-text':
-      return { name: 'agent.getDraftText', arguments: { ...storage, draftId: flag(flags, 'draft-id'), ...readArgs(flags) } }
+      return { name: 'agent.getDraftText', arguments: { ...storage, draftId: flag(flags, 'draft-id'), ...readArgs(flags),
+        expectedDraftContentHash: flag(flags, 'expected-draft-content-hash') } }
+    case 'draft-review-report':
+      return { name: 'agent.getDraftReviewReport', arguments: { ...storage, ...projectArgs(flags), jobId: flag(flags, 'job-id'),
+        draftId: flag(flags, 'draft-id'), kind: flag(flags, 'kind'), reportId: flag(flags, 'report-id'),
+        expectedDraftContentHash: flag(flags, 'expected-draft-content-hash') } }
     case 'prompt-snapshot':
       return { name: 'agent.getPromptSnapshot', arguments: { ...storage, snapshotId: flag(flags, 'snapshot-id'), ...readArgs(flags) } }
     case 'version-chain':
@@ -243,7 +252,8 @@ function buildToolCall(parsed: ParsedArgs): AgentToolCallInput {
           estimatedWordCount: flag(flags, 'estimated-words'),
           readerEmotionTarget: flag(flags, 'reader-emotion'),
           temperature: numberFlag(flags, 'temperature'),
-          budgetMaxTokens: flag(flags, 'budget-max-tokens') ? intFlag(flags, 'budget-max-tokens') : undefined
+          budgetMaxTokens: flag(flags, 'budget-max-tokens') ? intFlag(flags, 'budget-max-tokens') : undefined,
+          responseMode: flag(flags, 'response-mode')
         }
       }
     case 'retry-chapter':
@@ -256,7 +266,8 @@ function buildToolCall(parsed: ParsedArgs): AgentToolCallInput {
           pipelineMode: flag(flags, 'pipeline-mode'),
           estimatedWordCount: flag(flags, 'estimated-words'),
           readerEmotionTarget: flag(flags, 'reader-emotion'),
-          budgetMaxTokens: flag(flags, 'budget-max-tokens') ? intFlag(flags, 'budget-max-tokens') : undefined
+          budgetMaxTokens: flag(flags, 'budget-max-tokens') ? intFlag(flags, 'budget-max-tokens') : undefined,
+          responseMode: flag(flags, 'response-mode')
         }
       }
     case 'pipeline-progress':
@@ -275,7 +286,8 @@ function buildToolCall(parsed: ParsedArgs): AgentToolCallInput {
           startChapterOrder: intFlag(flags, 'start-chapter'),
           chapterCount: intFlag(flags, 'chapters'),
           goal: flag(flags, 'goal'),
-          safetyMode: safetyModeArg(flags)
+          safetyMode: safetyModeArg(flags),
+          responseMode: flag(flags, 'response-mode')
         }
       }
     default:

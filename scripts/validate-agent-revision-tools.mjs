@@ -374,8 +374,8 @@ try {
     assert.deepEqual(await h.snapshot(), before)
   })
 
-  await test('eight strict descriptors are registered', () => {
-    const names = ['getRevisionSessions', 'getRevisionVersion', 'createRevisionRequest', 'generateRevisionVersion', 'createManualRevisionVersion', 'editRevisionVersion', 'previewRevisionCommit', 'applyApprovedRevisionCommit']
+  await test('all revision tools including draft-only application have strict descriptors', () => {
+    const names = ['getRevisionSessions', 'getRevisionVersion', 'createRevisionRequest', 'generateRevisionVersion', 'createManualRevisionVersion', 'editRevisionVersion', 'applyRevisionToDraft', 'previewRevisionCommit', 'applyApprovedRevisionCommit']
     for (const name of names) {
       const definition = api.AgentToolService.listTools().find((tool) => tool.name === `agent.${name}`)
       assert.ok(definition); assert.equal(definition.inputSchema.additionalProperties, false)

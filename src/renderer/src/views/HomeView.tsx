@@ -1,17 +1,22 @@
 import { useMemo, useRef, useState } from 'react'
-import { ChevronDown, FileUp, LoaderCircle, Pencil, Plus, Search, Trash2 } from 'lucide-react'
+import { Archive, ChevronDown, FileUp, LoaderCircle, Pencil, Plus, RefreshCw, Search, Trash2 } from 'lucide-react'
 import { createEmptyBible } from '../../../shared/defaults'
 import type { ID, Project } from '../../../shared/types'
 import {
   formatProjectDeletionImpact,
   getProjectDeletionSummary,
-  removeProjectFromAppData
+  isProjectArchived,
+  removeProjectFromAppData,
+  setProjectArchived
 } from '../../../services/ProjectLifecycleService'
 import { useConfirm } from '../components/ConfirmDialog'
 import { EmptyState, TextArea, TextInput } from '../components/FormFields'
 import { Header, type View } from '../components/Layout'
 import { formatDate, newId, now } from '../utils/format'
 import { formatMergeConflictSummary } from '../utils/importFeedback'
+import { AgentBookCreationPanel } from './agent/AgentBookCreationPanel'
+import { AgentLibraryAuthorizationPanel } from './agent/AgentLibraryAuthorizationPanel'
+import { ArchivedProjects, LibraryProjectHistory } from './home/HomeLibraryRecords'
 import type { ImportDataHandler, PersistProps } from './viewTypes'
 import {
   applyProjectFields,
@@ -24,7 +29,7 @@ import {
 import '../styles/views/home.css'
 
 type EditingProject = { id: ID; fields: ProjectFields }
-type BusyAction = 'create' | 'import' | 'open' | 'edit' | 'delete'
+type BusyAction = 'create' | 'import' | 'open' | 'edit' | 'delete' | 'archive' | 'reload'
 
 export function HomeView({
   data,
@@ -32,17 +37,19 @@ export function HomeView({
   touchProject,
   importData,
   setProjectId,
-  setView
+  setView,
+  onReload
 }: PersistProps & {
   importData: ImportDataHandler
   touchProject: (id: ID) => Promise<void>
   setProjectId: (id: ID) => void
   setView: (view: View) => void
+  onReload?: () => Promise<{ ok: boolean; errorMessage?: string }>
 }) {
   const confirmAction = useConfirm()
   const [draft, setDraft] = useState<ProjectFields>(emptyProjectFields)
   const [editing, setEditing] = useState<EditingProject | null>(null)
-  const [isCreateOpen, setIsCreateOpen] = useState(data.projects.length === 0)
+  const [isCreateOpen, setIsCreateOpen] = useState(() => !data.projects.some(project => !isProjectArchived(project)))
   const [searchQuery, setSearchQuery] = useState('')
   const [busyAction, setBusyAction] = useState<BusyAction | null>(null)
   const [operationError, setOperationError] = useState<string | null>(null)
@@ -50,8 +57,10 @@ export function HomeView({
   const createProjectFormRef = useRef<HTMLFormElement>(null)
   const createProjectNameRef = useRef<HTMLInputElement>(null)
   const projectsByRecentOpen = useMemo(() => {
-    return sortProjectsByRecentOpen(data.projects)
+    return sortProjectsByRecentOpen(data.projects).filter(project => !isProjectArchived(project))
   }, [data.projects])
+  const archivedProjects = useMemo(() => data.projects.filter(isProjectArchived)
+    .sort((a, b) => (b.archivedAt ?? '').localeCompare(a.archivedAt ?? '')), [data.projects])
   const visibleProjects = useMemo(
     () => projectsByRecentOpen.filter((project) => projectMatchesSearch(project, searchQuery)),
     [projectsByRecentOpen, searchQuery]
@@ -114,6 +123,29 @@ export function HomeView({
     }
   }
 
+  async function reloadLibrary() {
+    if (!onReload || !beginAction('reload')) return
+    setOperationError(null)
+    try {
+      const result = await onReload()
+      if (!result.ok && result.errorMessage && result.errorMessage !== '已取消重新加载。') reportSaveFailure('读取书库', result.errorMessage)
+    } catch (error) { reportUnexpectedFailure('读取书库', error) } finally { finishAction() }
+  }
+
+  async function changeArchive(project: Project, archive: boolean) {
+    if (!beginAction('archive')) return
+    setOperationError(null)
+    const label = archive ? '归档项目' : '恢复项目'
+    try {
+      if (archive && !await confirmAction({ title: label, message: `归档《${project.name}》后，正文和历史都会保留，可从“已归档项目”恢复。`,
+        confirmLabel: label })) return
+      const saved = await saveData(current => ({
+        ...current, projects: current.projects.map(item => item.id === project.id ? setProjectArchived(item, archive, now()) : item)
+      }))
+      if (!saved.ok) reportSaveFailure(label, saved.errorMessage)
+    } catch (error) { reportUnexpectedFailure(label, error) } finally { finishAction() }
+  }
+
   async function createProject() {
     if (!draft.name.trim() || !beginAction('create')) return
     setOperationError(null)
@@ -162,7 +194,8 @@ export function HomeView({
         return
       }
       if (!result.data) return
-      const openedProjectId = result.importedProjectIds?.[0] ?? result.data.projects[0]?.id
+      const activeIds = new Set(result.data.projects.filter(project => !isProjectArchived(project)).map(project => project.id))
+      const openedProjectId = (result.importedProjectIds ?? [...activeIds]).find(id => activeIds.has(id))
       if (openedProjectId) {
         try {
           await enterStoredProject(openedProjectId)
@@ -231,6 +264,9 @@ export function HomeView({
         description="面向 AI 长篇小说创作的上下文导演台。"
         actions={
           <>
+            {onReload ? <button className="ghost-button home-header-action" type="button" disabled={isBusy} onClick={() => void reloadLibrary()}>
+              <RefreshCw className={busyAction === 'reload' ? 'spin' : undefined} size={16} aria-hidden="true" /> 读取最新书库
+            </button> : null}
             <button className="ghost-button home-header-action" type="button" onClick={() => void importExistingData()} disabled={isBusy} title="导入或合并旧数据 JSON">
               {busyAction === 'import' ? <LoaderCircle className="spin" size={16} aria-hidden="true" /> : <FileUp size={16} aria-hidden="true" />}
               导入 JSON
@@ -244,12 +280,13 @@ export function HomeView({
       />
       <main className="home-workspace">
         {operationError ? <p className="notice danger home-operation-notice" role="alert">{operationError}</p> : null}
+        <AgentLibraryAuthorizationPanel />
         <section aria-labelledby="existing-projects-heading">
           <div className="home-section-heading">
             <h2 id="existing-projects-heading">现有项目</h2>
-            <span>{data.projects.length} 个项目，按最近打开排序</span>
+            <span>{projectsByRecentOpen.length} 个项目，按最近打开排序</span>
           </div>
-          {data.projects.length > 0 ? (
+          {projectsByRecentOpen.length > 0 ? (
             <>
               <label className="home-project-search">
                 <Search size={17} aria-hidden="true" />
@@ -292,6 +329,7 @@ export function HomeView({
                           <div className="row-actions home-project-actions">
                             <button className="primary-button" type="button" disabled={isBusy} onClick={() => void openProject(project.id)}>{busyAction === 'open' ? '正在打开...' : '进入'}</button>
                             <button className="icon-button" type="button" disabled={isBusy} onClick={() => { setOperationError(null); setEditing({ id: project.id, fields: projectFieldsFrom(project) }) }} aria-label={`编辑《${project.name}》`} title="编辑项目资料"><Pencil size={16} aria-hidden="true" /></button>
+                            <button className="icon-button" type="button" disabled={isBusy} onClick={() => void changeArchive(project, true)} aria-label={`归档《${project.name}》`} title="归档项目"><Archive size={16} aria-hidden="true" /></button>
                             <button className="icon-button" type="button" disabled={isBusy} onClick={() => void deleteProject(project)} aria-label={`删除《${project.name}》`} title="删除项目"><Trash2 size={16} aria-hidden="true" /></button>
                           </div>
                         </>
@@ -301,8 +339,10 @@ export function HomeView({
                 </div>
               ) : <div className="home-empty"><EmptyState title="没有匹配的项目" description="试试名称、题材、简介或项目资料中的词语。" /></div>}
             </>
-          ) : <div className="home-empty"><EmptyState title="还没有小说项目" description="新建项目，或从旧数据 JSON 导入继续工作。" /></div>}
+          ) : <div className="home-empty"><EmptyState title="没有未归档的项目" description={archivedProjects.length ? '可恢复已有项目继续创作。' : '新建项目，或从旧数据 JSON 导入继续工作。'} /></div>}
         </section>
+        <ArchivedProjects projects={archivedProjects} disabled={isBusy} onRestore={project => void changeArchive(project, false)} />
+        <LibraryProjectHistory projects={data.projects} receipts={data.worldManagementReceipts} />
         <section aria-labelledby="create-project-heading">
           <button className="home-disclosure" type="button" aria-expanded={isCreateOpen} aria-controls="create-project-form" onClick={() => setIsCreateOpen((open) => !open)} disabled={isBusy}>
             <span><strong id="create-project-heading">创建新项目</strong><small>项目名为必填项；其余资料可以稍后补充。</small></span>
@@ -332,6 +372,7 @@ export function HomeView({
               </fieldset>
             </form>
           ) : null}
+          <AgentBookCreationPanel projects={data.projects} />
         </section>
       </main>
     </div>

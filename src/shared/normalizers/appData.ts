@@ -380,7 +380,7 @@ function normalizeChapterGenerationJob(
 
 function normalizeProject(value: Project | Record<string, unknown>): Project {
   const project = objectOrEmpty(value)
-  const { bookWordTarget: rawTarget, modelRates: rawRates, ...fields } = project
+  const { bookWordTarget: rawTarget, modelRates: rawRates, archivedAt: rawArchive, ...fields } = project
   const modelRates = normalizeProjectModelRates(rawRates)
   const bookWordTarget = normalizeBookWordTarget(rawTarget)
   const timestamp = new Date().toISOString()
@@ -389,6 +389,7 @@ function normalizeProject(value: Project | Record<string, unknown>): Project {
     ...fields,
     ...(bookWordTarget ? { bookWordTarget } : {}),
     ...(modelRates.length ? { modelRates } : {}),
+    ...(rawArchive !== undefined ? { archivedAt: typeof rawArchive === 'string' && Number.isFinite(Date.parse(rawArchive)) ? rawArchive : null } : {}),
     id: stringValue(project.id),
     name: stringValue(project.name) || '未命名项目',
     genre: stringValue(project.genre),

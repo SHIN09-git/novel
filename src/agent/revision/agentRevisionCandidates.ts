@@ -4,11 +4,12 @@ import { revisionTypeOptions } from '../../renderer/src/views/revision/revisionT
 import { findRewriteRange } from '../../renderer/src/components/aiRewriteResultModel'
 import { findProjectId, requiredString } from '../tools/agentToolArguments'
 import { saveAgentRuntimeData, type AgentRuntimeData } from '../AgentRuntime'
+import { assertRevisionBatchTarget } from '../agentBatchWriteback'
 import { readRevisionVersion } from './agentRevisionReads'
 import {
   assertRevisionWritable, checkKnownAgentSource, checkRevisionFields, checkSourceHashes, checkVersionSource, commandIdentity,
   rawRevisionText, recordRevisionOperation, replayRevisionOperation, resolveRevisionSource,
-  revisionFingerprint, revisionHashFields, revisionSession, revisionVersion, revisionWriteFields,
+  revisionFingerprint, revisionHashFields, revisionRun, revisionSession, revisionVersion, revisionWriteFields,
   type RevisionAudit
 } from './agentRevisionModel'
 
@@ -23,6 +24,7 @@ export async function createAgentRevisionRequest(data: AppData, args: Record<str
   const chapterId = args.chapterId === undefined ? draft?.chapterId ?? '' : requiredString(args, 'chapterId')
   const resolved = resolveRevisionSource(data, projectId, chapterId, draftId)
   assertRevisionWritable(resolved)
+  assertRevisionBatchTarget(data, revisionRun(data, projectId, identity.agentRunId), chapterId)
   checkSourceHashes(resolved.source, args)
   const type = args.type === undefined ? 'custom' : requiredString(args, 'type')
   const selectedType = revisionTypeOptions.find((item) => item.value === type)

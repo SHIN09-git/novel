@@ -93,6 +93,8 @@ export interface MemoryUpdateCandidate {
   id: ID
   projectId: ID
   jobId: ID
+  sourceDraftId?: ID
+  sourceDraftContentHash?: string
   type: MemoryUpdateCandidateType
   targetId: ID | null
   proposedPatch: MemoryUpdatePatch

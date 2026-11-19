@@ -30,6 +30,7 @@ try {
   const panelSource = await readFile(join(repoRoot, 'src/renderer/src/views/agent/AgentProjectAuthorizationPanel.tsx'), 'utf8')
   await writeFile(join(workspace, 'ui-stubs.mjs'), `
     export const AGENT_AUTHORIZATION_ACTIONS = ['edit_world', 'accept_high_risk_candidates', 'accept_unreviewed_draft', 'accept_draft', 'apply_revision', 'manage_chapters', 'edit_chapter_task'];
+    export const AGENT_BOOK_CREATIVE_ACTIONS = AGENT_AUTHORIZATION_ACTIONS.filter(action => action !== 'accept_unreviewed_draft');
     export function useConfirm() { return async () => false; }
     export function getNovelDirectorAgentAuthorizationApi() { return globalThis.testAuthorizationApi ?? null; }
     export function formatDate(value) { return value || '-'; }
@@ -124,6 +125,26 @@ try {
   const service = {
     list(path, projectId) { serviceCalls.push(['list', path, projectId]); return [] },
     grant(input) { serviceCalls.push(['grant', input]); return { id: 'grant-1', ...input } },
+    listBookCreationGrants(path) {
+      serviceCalls.push(['listBookCreationGrants', path])
+      return [{ id: 'reserved-grant', projectId: 'not-created-yet', purpose: 'book_creation' }]
+    },
+    grantBookCreativeRights(path, projectId) {
+      serviceCalls.push(['grantBookCreativeRights', path, projectId])
+      return { id: 'creator-grant', projectId, purpose: projectId ? 'book_creator' : 'book_creation' }
+    },
+    getLibraryAuthorization(path) {
+      serviceCalls.push(['getLibraryAuthorization', path])
+      return { id: 'library-grant', status: 'active', purpose: 'library_manager' }
+    },
+    grantLibrary(path) {
+      serviceCalls.push(['grantLibrary', path])
+      return { id: 'library-grant', status: 'active', purpose: 'library_manager' }
+    },
+    revokeLibrary(path, id) {
+      serviceCalls.push(['revokeLibrary', path, id])
+      return { id, status: 'revoked', purpose: 'library_manager' }
+    },
     revoke(id, path, projectId) { serviceCalls.push(['revoke', id, path, projectId]); return null }
   }
   const context = {
@@ -169,6 +190,57 @@ try {
   assert.equal(forgedRevoke.code, 'AGENT_AUTHORIZATION_INVALID_INPUT')
   await revoke({}, { projectId: 'project-a', grantId: 'grant-1' })
   assert.deepEqual(serviceCalls.at(-1), ['revoke', 'grant-1', '/trusted/next.sqlite', 'project-a'])
+  assert.equal((await grant({}, { purpose: 'book_creator', projectId: 'project-a' })).purpose, 'book_creator')
+  assert.deepEqual(serviceCalls.at(-1), ['grantBookCreativeRights', '/trusted/next.sqlite', 'project-a'])
+  assert.equal((await grant({}, { purpose: 'book_creation' })).purpose, 'book_creation')
+  assert.deepEqual(serviceCalls.at(-1), ['grantBookCreativeRights', '/trusted/next.sqlite', undefined])
+  assert.equal((await grant({}, { purpose: 'book_creation', projectId: 'project-a' })).ok, false)
+  assert.equal((await list({}, { purpose: 'book_creation', storagePath: '/attacker.sqlite' })).ok, false)
+  assert.equal((await list({}, { purpose: 'book_creation' }))[0].projectId, 'not-created-yet')
+  await revoke({}, { purpose: 'book_creation', projectId: 'not-created-yet', grantId: 'reserved-grant' })
+  assert.deepEqual(serviceCalls.at(-1), ['revoke', 'reserved-grant', '/trusted/next.sqlite', 'not-created-yet'])
+  const callsBeforeForgery = serviceCalls.length
+  for (const [invoke, args] of [
+    [list, { purpose: 'library_manager', storagePath: '/attacker.sqlite' }],
+    [grant, { purpose: 'library_manager', userDataPath: '/other-profile' }],
+    [grant, { purpose: 'library_manager', projectId: 'project-a' }],
+    [revoke, { purpose: 'library_manager', grantId: 'library-grant', storagePath: '/attacker.sqlite' }]
+  ]) {
+    assert.equal((await invoke({}, args)).code, 'AGENT_AUTHORIZATION_INVALID_INPUT')
+  }
+  assert.equal(serviceCalls.length, callsBeforeForgery)
+  assert.equal((await grant({}, { purpose: 'library_manager' })).purpose, 'library_manager')
+  assert.deepEqual(serviceCalls.at(-1), ['grantLibrary', '/trusted/next.sqlite'])
+  assert.equal((await list({}, { purpose: 'library_manager' })).status, 'active')
+  assert.deepEqual(serviceCalls.at(-1), ['getLibraryAuthorization', '/trusted/next.sqlite'])
+  assert.equal((await revoke({}, { purpose: 'library_manager', grantId: 'library-grant' })).status, 'revoked')
+  assert.deepEqual(serviceCalls.at(-1), ['revokeLibrary', '/trusted/next.sqlite', 'library-grant'])
+
+  const libraryPanelSource = await readFile(join(repoRoot, 'src/renderer/src/views/agent/AgentLibraryAuthorizationPanel.tsx'), 'utf8')
+  await transpile(libraryPanelSource, 'library-panel.mjs', [
+    ["'../../components/ConfirmDialog'", "'./ui-stubs.mjs'"],
+    ["'../../platform/novelDirectorBridge'", "'./ui-stubs.mjs'"],
+    ["'../../utils/format'", "'./ui-stubs.mjs'"]
+  ], true)
+  const { AgentLibraryAuthorizationPanel } = await import(pathToFileURL(join(workspace, 'library-panel.mjs')).href)
+  assert.equal(renderToStaticMarkup(createElement(AgentLibraryAuthorizationPanel)), '')
+  globalThis.testAuthorizationApi = { getLibraryAuthorization() {}, grantLibrary() {}, revokeLibrary() {} }
+  assert.match(renderToStaticMarkup(createElement(AgentLibraryAuthorizationPanel)), /授予全库管理权/)
+  globalThis.testAuthorizationApi = null
+  const recordSource = await readFile(join(repoRoot, 'src/renderer/src/views/home/HomeLibraryRecords.tsx'), 'utf8')
+  await transpile(recordSource, 'library-records.mjs', [["'../../utils/format'", "'./ui-stubs.mjs'"]], true)
+  const { ArchivedProjects, LibraryProjectHistory } = await import(pathToFileURL(join(workspace, 'library-records.mjs')).href)
+  const archived = [{ id: 'project-a', name: '隔离样书', archivedAt: '2026-01-01T00:00:00.000Z' }]
+  assert.match(renderToStaticMarkup(createElement(ArchivedProjects, { projects: archived, disabled: false, onRestore() {} })), /已归档项目.*恢复项目/s)
+  const libraryHistory = renderToStaticMarkup(createElement(LibraryProjectHistory, { projects: archived, receipts: [{
+    id: 'test-edit', entity: 'project', projectId: 'project-a', operationId: 'edit-title', action: 'update',
+    before: { name: '旧书名' }, after: { name: '新书名' }, source: { reason: '改名理由' }
+  }] }))
+  assert.match(libraryHistory, /书库改动记录.*改名理由.*旧书名.*新书名/s)
+  const homeSource = await readFile(join(repoRoot, 'src/renderer/src/views/HomeView.tsx'), 'utf8')
+  assert.match(homeSource, /<AgentLibraryAuthorizationPanel \/>/)
+  assert.match(homeSource, /<ArchivedProjects/)
+  assert.match(homeSource, /<LibraryProjectHistory/)
 
   const agentViewSource = await readFile(join(repoRoot, 'src/renderer/src/views/AgentRunsView.tsx'), 'utf8')
   await writeFile(join(workspace, 'agent-view-stubs.mjs'), `
@@ -188,6 +260,7 @@ try {
       };
     }
     export function getNovelDirectorClipboardApi() { return { writeText: async () => undefined }; }
+    export function getNovelDirectorAppApi() { return { getRuntimeInfo: async () => ({ mode: 'preview', execPath: 'electron.exe' }) }; }
     export function formatDate(value) { return value || '-'; }
     export function AgentProjectAuthorizationPanel() { return null; }
   `, 'utf8')
@@ -208,14 +281,18 @@ try {
   assert.equal(isAgentCommit({ revisedBy: 'user', revisionNote: 'Codex legacy note' }), false)
   assert.equal(isAgentCommit({ revisionNote: 'Codex legacy note' }), true)
   const agentViewMarkup = renderToStaticMarkup(createElement(AgentRunsView, {
-    data: { agentRuns: [], agentActionPreviews: [], chapterCommitBundles: [], revisionCommitBundles: [] },
+    data: { agentRuns: [], agentActionPreviews: [], chapterCommitBundles: [], revisionCommitBundles: [], worldManagementReceipts: [
+      { id: 'bible-change', projectId: 'project-a', entity: 'story_bible', action: 'update', operationId: 'bible-update',
+        source: { reason: '核对章节后调整', kind: 'agent_director' }, before: { corePremise: '原设定' }, after: { corePremise: '新设定' } }
+    ] },
     project: { id: 'project-a' },
     saveData: async () => ({ ok: true }),
     onReload: async () => ({ ok: true })
   }))
   assert.match(agentViewMarkup, /读取最新结果/)
+  assert.match(agentViewMarkup, /资料改动记录.*?原设定.*?新设定/)
 
-  console.log(JSON.stringify({ ok: true, checks: 28 }, null, 2))
+  console.log(JSON.stringify({ ok: true, checks: 37 }, null, 2))
 } finally {
   await rm(workspace, { recursive: true, force: true })
 }

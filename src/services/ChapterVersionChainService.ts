@@ -332,6 +332,14 @@ function findTraceReport<T extends VersionDiagnosticReport>(
   return report
 }
 
+function findRevisionReport<T extends VersionDiagnosticReport>(
+  reports: T[], reportId: ID | undefined, entry: ChapterVersionChainEntry, commit: RevisionCommitBundle | null
+): T | null {
+  if (!commit || !reportId || commit.newChapterVersionId !== entry.version?.id || commit.afterText !== entry.body) return null
+  return reports.find(item => item.id === reportId && item.projectId === commit.projectId &&
+    item.chapterId === entry.chapterId && item.draftContentHash === draftContentHash(entry.body)) ?? null
+}
+
 export function getChapterVersionDetail(appData: AppData, versionId: ID | string): ChapterVersionDetail | null {
   const historicalVersion = appData.chapterVersions.find((version) => version.id === versionId) ?? null
   const legacyCommitId = String(versionId).startsWith('chapter-commit:')
@@ -357,6 +365,7 @@ export function getChapterVersionDetail(appData: AppData, versionId: ID | string
   const revisionCommitBundle = findRevisionCommit(appData, entry)
   const generationRunTrace = findTrace(appData, entry, chapterCommitBundle, revisionCommitBundle)
   const qualityGateReport =
+    findRevisionReport(appData.qualityGateReports, revisionCommitBundle?.qualityGateReportId, entry, revisionCommitBundle) ??
     findCommittedReport(
       appData.qualityGateReports,
       chapterCommitBundle?.qualityGateReports,
@@ -366,6 +375,7 @@ export function getChapterVersionDetail(appData: AppData, versionId: ID | string
     ) ??
     findTraceReport(appData.qualityGateReports, generationRunTrace?.qualityGateReportId, entry, chapter, generationRunTrace)
   const consistencyReviewReport =
+    findRevisionReport(appData.consistencyReviewReports, revisionCommitBundle?.consistencyReviewReportId, entry, revisionCommitBundle) ??
     findCommittedReport(
       appData.consistencyReviewReports,
       chapterCommitBundle?.consistencyReviewReports,

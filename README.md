@@ -6,7 +6,7 @@ Novel Director 是一个实验性的、本地优先的 AI 长篇小说工作台�
 
 当前版本为 `0.1.6-preview.20`，仍在试用阶段。使用真实稿件前请备份。源码更新不代表安装包已更新，包的版本和验证记录以 `release/BUILD_INFO.json` 为准。
 
-第一次使用请看 [新手教程](./docs/BEGINNER_TUTORIAL.md) 或 [快速开始](./QUICKSTART.md)。Codex 接入和项目权限见 [Agent 授权指南](./docs/AGENT_PROJECT_AUTHORIZATION.md)。
+第一次使用请看 [新手教程](./docs/BEGINNER_TUTORIAL.md) 或 [快速开始](./QUICKSTART.md)。Codex 接入、单书创作权与全库管理权见 [Agent 授权指南](./docs/AGENT_PROJECT_AUTHORIZATION.md)。
 
 版本变化见 [CHANGELOG](./CHANGELOG.md)，安装包位置见 [发行产物说明](./docs/RELEASE_ARTIFACTS.md)，后续工作见 [路线图](./ROADMAP.md)。2026-10-31 的重复计算与修订指令精简见 [性能记录](./docs/REDUNDANCY_PERFORMANCE.md)。
 
@@ -139,6 +139,8 @@ CLI 模式由 Electron 主进程在空临时目录中调用 `codex exec`，使�
 清单的 `version` 为 `1`，`apis` 下每个服务指定 `baseUrl` 和 `keyEnv`。例如 DeepSeek 使用 `https://api.deepseek.com` 与 `DEEPSEEK_API_KEY`。同一来源的兼容路径可列在 `aliases`。可选的 `desktopSavedKeyFor` 指定哪家服务能沿用旧桌面版留下的无地址密钥，外部流程仍使用对应环境变量。清单不存密钥值。
 
 同一服务可以用 `backupKeyEnv` 指定备用密钥。主密钥未设置时直接使用备用密钥。主密钥收到 HTTP 401 时，工作台在原请求时限内用同一服务的备用密钥尝试一次。限流和额度错误不会触发密钥切换。
+
+密钥默认放在 `Authorization: Bearer` 里。服务要求别的请求头时，在条目里写 `apiKeyHeader`，例如 Google Cloud Agent Platform 的 OpenAI 兼容地址用 `x-goog-api-key`；工作台会把密钥原值放进这个请求头，不再发送 `Authorization`。
 
 API Key 不应持久化到主 AppData JSON。桌面应用通过 Electron 安全存储保存密钥，renderer 进程只应知道“是否已保存密钥”，不应读取完整明文 key。
 

@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 import assert from 'node:assert/strict'
+import { spawnSync } from 'node:child_process'
 import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { isAbsolute, join, relative } from 'node:path'
 import { pathToFileURL } from 'node:url'
@@ -267,15 +268,27 @@ async function checkBackend(api, kind) {
     }
     const older = await startPlanner()
     try {
-      const newer = await startPlanner()
-      try {
-        const owned = await open()
-        older.release()
-        await assert.rejects(older.pending, { code: 'STORAGE_REVISION_CONFLICT' })
-        assert.equal((await open()).revision, owned.revision, 'An interrupted owner must not pause the executor that took over.')
-        assert.equal((await call('getPipelineProgress', { jobId: 'job-96' })).jobStatus, 'running')
-      } finally { newer.release(); await newer.pending }
-    } finally { older.release(); await older.pending.catch(() => {}) }
+      const owned = await open()
+      await assert.rejects(startPlanner, { code: 'AGENT_JOB_ALREADY_EXECUTING' })
+      const repeated = await call('retryChapterPipeline', { agentRunId, jobId: 'job-96', responseMode: 'work_item' })
+      assert.equal(repeated.alreadyRunning, true)
+      assert.equal(repeated.workItem.state, 'running')
+      assert.equal(repeated.progress.executorState, 'active')
+      assert.equal(repeated.progress.currentStep, 'generate_chapter_plan')
+      assert.equal(repeated.workItem.recoverIfStopped, undefined)
+      const bundle = pathToFileURL(join(dir, 'fixture.mjs')).href
+      const processCall = spawnSync(process.execPath, ['--input-type=module', '-e', `
+        globalThis.fetch = () => { throw new Error('Duplicate retry reached transport.'); };
+        const { AgentToolService } = await import(${JSON.stringify(bundle)});
+        const result = await AgentToolService.callTool({ name: 'agent.retryChapterPipeline', arguments: JSON.parse(process.argv[1]) });
+        console.log(JSON.stringify({ alreadyRunning: result.data.alreadyRunning, job: result.data.progress?.jobId }));
+      `, JSON.stringify({ storagePath, userDataPath, agentRunId, jobId: 'job-96' })],
+      { windowsHide: true, timeout: 10000, encoding: 'utf8' })
+      assert.ifError(processCall.error)
+      assert.equal(processCall.status, 0, processCall.stderr)
+      assert.deepEqual(JSON.parse(processCall.stdout), { alreadyRunning: true, job: 'job-96' })
+      assert.equal((await open()).revision, owned.revision, 'Duplicate retries must not touch the running checkpoint.')
+    } finally { older.release(); await older.pending }
     const finish = await open()
     assert.equal(finish.data.chapterGenerationJobs.find(j => j.id === 'job-96').status, 'failed')
     // The existing candidate can now go through normal acceptance, without forging a completed job.
@@ -303,8 +316,8 @@ try {
   const api = await import(pathToFileURL(outfile).href)
   for (const kind of ['json', 'sqlite']) await checkBackend(api, kind)
   assert.equal(requests, 2)
-  assert.equal(plannerCalls, 4)
-  console.log('2 admitted mock HTTP requests and 4 overlapping mock planner calls; 0 blocked or external requests.')
+  assert.equal(plannerCalls, 2)
+  console.log('2 admitted mock HTTP requests and 1 planner call per backend despite duplicate retries; 0 external requests.')
 } finally {
   globalThis.fetch = originalFetch
   if (originalRegistry === undefined) delete process.env.NOVEL_DIRECTOR_API_REGISTRY

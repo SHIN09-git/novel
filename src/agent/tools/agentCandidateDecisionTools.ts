@@ -229,10 +229,11 @@ export function previewAgentCandidateDecisions(data: AppData, args: Record<strin
       warnings: item.warnings.map(text)
     }
   })
+  const stale = items.some(item => item.decision === 'accept' && item.sourceStatus === 'stale')
   return {
     ...preview,
-    agentCanApply: !preview.requiresConfirmation,
-    authorization: preview.requiresConfirmation ? 'human_required' : 'no_high_risk_acceptance',
+    agentCanApply: !stale && !preview.requiresConfirmation,
+    authorization: stale ? 'stale_source' : preview.requiresConfirmation ? 'human_required' : 'no_high_risk_acceptance',
     ...(amendmentRedacted ? { amendmentRedacted: true } : {}),
     items
   }

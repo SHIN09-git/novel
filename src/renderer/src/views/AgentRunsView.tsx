@@ -1,15 +1,44 @@
 import { useEffect, useMemo, useState } from 'react'
-import type { AgentActionPreview, AgentDecision, AgentRun, AppData, ChapterCommitBundle, RevisionCommitBundle } from '../../../shared/types'
+import type { AgentActionPreview, AgentDecision, AgentRun, AppData, ChapterCommitBundle, RevisionCommitBundle, WorldManagementReceipt } from '../../../shared/types'
 import { latestQualityReportForDraft } from '../../../services/DraftDiagnosticBindingService'
 import { Header } from '../components/Layout'
 import { SectionCard, StatCard, StatusBadge, type BadgeTone } from '../components/UI'
 import { useProjectData } from '../hooks/useProjectData'
-import { getNovelDirectorClipboardApi } from '../platform/novelDirectorBridge'
+import { getNovelDirectorAppApi, getNovelDirectorClipboardApi } from '../platform/novelDirectorBridge'
 import { formatDate } from '../utils/format'
 import { AgentProjectAuthorizationPanel } from './agent/AgentProjectAuthorizationPanel'
 import type { ProjectProps } from './viewTypes'
 
 type AgentReloadResult = { ok: boolean; errorMessage?: string }
+const bookChangeLabels = { project: '项目', story_bible: '小说圣经', stage_summary: '阶段摘要' } as const
+const bookChangeActions = { create: '创建', update: '修改', set_status: '修改', archive: '归档', restore: '恢复' } as const
+
+function BookCreativeHistory({ receipts, projectId }: { receipts: WorldManagementReceipt[]; projectId: string }) {
+  const [limit, setLimit] = useState(10)
+  const changes = receipts.filter(item => item.projectId === projectId && Object.hasOwn(bookChangeLabels, item.entity))
+    .sort((a, b) => b.createdAt.localeCompare(a.createdAt) || b.id.localeCompare(a.id))
+  if (!changes.length) return null
+  return <section className="panel">
+    <h2>资料改动记录</h2>
+    {changes.slice(0, limit).map(item => {
+      const labels = item.entity as keyof typeof bookChangeLabels
+      const fields = [...new Set([...Object.keys(item.before ?? {}), ...Object.keys(item.after)])]
+        .filter(key => !['id', 'projectId', 'createdAt', 'updatedAt', 'lastOpenedAt'].includes(key) &&
+          item.before?.[key] !== item.after[key])
+      return <details key={item.id}>
+        <summary>{bookChangeLabels[labels]} · {item.source.restoredFromOperationId ? '回退' : bookChangeActions[item.action]} · {formatDate(item.createdAt)}</summary>
+        <p>{item.source.reason}</p>
+        <small>操作编号：{item.operationId}{item.source.restoredFromOperationId ? ` · 回退来源：${item.source.restoredFromOperationId}` : ''}</small>
+        {fields.map(key => <div className="agent-book-change-field" key={key}>
+          <strong>{key}</strong>
+          <div>改前：{String(item.before?.[key] ?? '未填写')}</div>
+          <div>改后：{String(item.after[key] ?? '未填写')}</div>
+        </div>)}
+      </details>
+    })}
+    {limit < changes.length ? <button className="ghost-button" type="button" onClick={() => setLimit(count => count + 10)}>显示更多</button> : null}
+  </section>
+}
 
 interface AgentRunsViewProps extends ProjectProps {
   onReload: () => Promise<AgentReloadResult>
@@ -136,11 +165,22 @@ export function AgentRunsView({ data, project, onReload }: AgentRunsViewProps) {
     }
   }
 
-  function copyCodexSetupCommand() {
-    void getNovelDirectorClipboardApi()
-      .writeText('npm.cmd run agent:setup:codex')
-      .then(() => setSetupMessage('接入命令已复制。请在项目根目录运行，随后重新打开 Codex 任务。'))
-      .catch((error) => setSetupMessage(`复制失败：${error instanceof Error ? error.message : String(error)}`))
+  async function copyCodexSetupCommand() {
+    try {
+      const runtime = await getNovelDirectorAppApi().getRuntimeInfo()
+      const packaged = runtime.mode === 'packaged'
+      const psArg = (value: string) => "'" + value.replaceAll("'", "''") + "'"
+      const executable = runtime.execPath.replaceAll('\\', '/')
+      const server = executable.slice(0, executable.lastIndexOf('/')) + '/resources/app.asar/out/agent/server.mjs'
+      const command = packaged
+        ? `codex mcp add novel-director --env ELECTRON_RUN_AS_NODE=1 --env NODE_USE_ENV_PROXY=1 -- ${psArg(executable)} ${psArg(server)}`
+        : 'npm.cmd run agent:setup:codex'
+      await getNovelDirectorClipboardApi().writeText(command)
+      setSetupMessage(packaged ? '接入命令已复制。请在 PowerShell 中运行，随后重新打开 Codex 任务。'
+        : '接入命令已复制。请在项目根目录运行，随后重新打开 Codex 任务。')
+    } catch (error) {
+      setSetupMessage(`复制失败：${error instanceof Error ? error.message : String(error)}`)
+    }
   }
 
   return (
@@ -157,6 +197,7 @@ export function AgentRunsView({ data, project, onReload }: AgentRunsViewProps) {
         chapterOrders={scoped.allChapters.map((chapter) => chapter.order)}
         dataIdentity={data}
       />
+      <BookCreativeHistory key={project.id} receipts={data.worldManagementReceipts ?? []} projectId={project.id} />
 
       <section className="agent-connect-strip">
         <div>
@@ -177,7 +218,7 @@ export function AgentRunsView({ data, project, onReload }: AgentRunsViewProps) {
       {runs.length === 0 ? (
         <section className="empty-state">
           <h2>暂无 Agent 批次</h2>
-          <p>通过 `npm.cmd run agent` 或 `npm.cmd run agent:tools` 创建批次后，这里会显示 Codex 的目标、进度和提交记录。</p>
+          <p>Codex 创建批次后，这里会显示目标、进度和提交记录。</p>
         </section>
       ) : (
         <section className="agent-runs-layout">

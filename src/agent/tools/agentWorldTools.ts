@@ -2,6 +2,7 @@ import type { AppData, ID } from '../../shared/types'
 import { WORLD_MANAGEMENT_FIELD_HELP, WorldManagementService, type WorldManagedEntity, type WorldManagementCommand, type WorldManagementResult } from '../../services/WorldManagementService'
 import { readAgentCharacterCardReview } from '../agentCharacterCardReview'
 import { AgentAuthorizationService } from '../../main/services/AgentAuthorizationService'
+import { assertProjectWritable } from '../../services/ProjectLifecycleService'
 import { redactSensitiveText } from '../../shared/errorUtils'
 import type { AgentRuntimeData } from '../AgentRuntime'
 import { reloadAgentRuntimeData, saveAgentRuntimeData } from '../AgentRuntime'
@@ -201,6 +202,7 @@ export async function applyAgentWorldAction(
       ...worldCommand,
       projectId: findProjectId(current.data, { projectId: worldCommand.projectId })
     }
+    assertProjectWritable(current.data.projects.find(project => project.id === currentCommand.projectId))
     WorldManagementService.preview(current.data, currentCommand)
     const applied = WorldManagementService.apply(current.data, currentCommand, { authorizationGrantId: grant.id })
     if (applied.result.replayed) {

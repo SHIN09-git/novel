@@ -12,12 +12,14 @@ const registryFile = join(root, 'registry.json')
 process.env.NOVEL_DIRECTOR_API_REGISTRY = registryFile
 const servers = []
 
-async function endpoint(expectedKey, model) {
+async function endpoint(expectedKey, model, keyHeader) {
   const server = createServer(async (req, res) => {
     let body = ''
     for await (const chunk of req) body += chunk
     const requested = JSON.parse(body).model
-    const valid = req.headers.authorization === 'Bearer ' + expectedKey && requested === model
+    const valid = requested === model && (keyHeader
+      ? req.headers[keyHeader] === expectedKey && req.headers.authorization === undefined
+      : req.headers.authorization === 'Bearer ' + expectedKey)
     const status = { forbidden: 403, limited: 429 }[requested] ?? (valid ? 200 : 401)
     res.writeHead(status, { 'Content-Type': 'application/json' })
     res.end(JSON.stringify(valid ? { choices: [{ message: { content: model } }] } :
@@ -45,16 +47,19 @@ try {
       }))
     } }]
   })
-  const { AIService, SecureCredentialService, MainAIJsonClient, AIClient, readApiRegistry, agentApiKey, backupKeyAfterRejection } =
+  const { AIService, SecureCredentialService, MainAIJsonClient, AIClient, readApiRegistry, agentApiKey, apiKeyHeaderFor, backupKeyAfterRejection } =
     await import('data:text/javascript;base64,' + Buffer.from(compiled.outputFiles[0].contents).toString('base64'))
   const a = await endpoint('fixture-a', 'model-a'), b = await endpoint('fixture-b', 'model-b')
+  const c = await endpoint('fixture-c', 'model-c', 'x-goog-api-key')
   const config = { version: 1, desktopSavedKeyFor: 'a', apis: {
     a: { baseUrl: a, aliases: [a + '/v1'], keyEnv: 'NOVEL_TEST_A_API_KEY' },
-    b: { baseUrl: b + '/openai', keyEnv: 'NOVEL_TEST_B_API_KEY', backupKeyEnv: 'NOVEL_TEST_B_BACKUP_API_KEY' }
+    b: { baseUrl: b + '/openai', keyEnv: 'NOVEL_TEST_B_API_KEY', backupKeyEnv: 'NOVEL_TEST_B_BACKUP_API_KEY' },
+    c: { baseUrl: c + '/openapi', keyEnv: 'NOVEL_TEST_C_API_KEY', apiKeyHeader: 'x-goog-api-key' }
   } }
   await writeFile(registryFile, JSON.stringify(config))
   process.env.NOVEL_TEST_A_API_KEY = 'fixture-a'
   process.env.NOVEL_TEST_B_API_KEY = 'fixture-b'
+  process.env.NOVEL_TEST_C_API_KEY = 'fixture-c'
   process.env.NOVEL_DIRECTOR_API_KEY = 'generic-fixture'
   const registry = await readApiRegistry()
   const desktop = new SecureCredentialService(root)
@@ -68,14 +73,26 @@ try {
   delete process.env.NOVEL_TEST_B_BACKUP_API_KEY
   const external = {
     getApiKey: async (url) => agentApiKey(registry, url, a),
-    getBackupApiKey: async (url, rejected) => backupKeyAfterRejection(registry, url, rejected)
+    getBackupApiKey: async (url, rejected) => backupKeyAfterRejection(registry, url, rejected),
+    getApiKeyHeader: async (url) => apiKeyHeaderFor(registry, url)
   }
   for (const reader of [desktop, external]) {
     const service = new AIService(reader, {}, options)
     const results = await Promise.all([service.chatCompletion(request(a + '/v1', 'model-a')),
       service.chatCompletion(request(b + '/openai', 'model-b'))])
     assert.deepEqual(results.map(r => r.content), ['model-a', 'model-b'])
+    // A route with apiKeyHeader sends the raw key there and no Authorization header.
+    assert.equal((await service.chatCompletion(request(c + '/openapi', 'model-c'))).content, 'model-c')
+    assert.equal(await reader.getApiKeyHeader(a), undefined)
   }
+  // Without the header mapping the same service rejects the key.
+  const bearerOnly = new AIService({ getApiKey: external.getApiKey }, {}, options)
+  assert.equal((await bearerOnly.chatCompletion(request(c + '/openapi', 'model-c'))).ok, false)
+  for (const apiKeyHeader of ['Authorization', 'Content-Type', 'bad header', '']) {
+    await writeFile(registryFile, JSON.stringify({ ...config, apis: { ...config.apis, c: { ...config.apis.c, apiKeyHeader } } }))
+    await assert.rejects(readApiRegistry(), /apiKeyHeader/)
+  }
+  await writeFile(registryFile, JSON.stringify(config))
   delete process.env.NOVEL_TEST_A_API_KEY
   assert.equal(await desktop.getApiKey(a + '/v1/'), 'old-desktop')
   assert.equal(await external.getApiKey(a), '')
@@ -137,7 +154,7 @@ try {
   assert.equal(await desktop.getApiKey(b + '/openai'), 'new-desktop')
   assert.equal(agentApiKey(await readApiRegistry(), a, a), 'generic-fixture')
   assert.ok((await readFile(desktop.getCredentialPath(), 'utf8')).includes('baseUrl'))
-  console.log('API registry: desktop and external routing, backup selection, aliases, missing keys, legacy binding, error and log checks passed.')
+  console.log('API registry: desktop and external routing, key header mapping, backup selection, aliases, missing keys, legacy binding, error and log checks passed.')
 } finally {
   for (const server of servers) { server.closeAllConnections(); await new Promise((ok) => server.close(ok)) }
   if (dirname(resolve(root)) === resolve(tmpdir()) && basename(root).startsWith('novel-api-registry-')) {

@@ -19,7 +19,13 @@ Novel Director 的本地目录按用途分为三层：
 
 小说项目和 SQLite 用户数据库不存放在这些目录中，整理发行产物不会移动或删除用户数据。
 
-### Preview.21 验收候选
+### Preview.22：Agent 创作与书库管理
+
+安装包和配套 `SHA256SUMS.txt` 见 [v0.1.6-preview.22](https://github.com/SHIN09-git/novel/releases/tag/v0.1.6-preview.22)。本版自带 MCP 服务；在「Agent 批次」点击「复制一键接入命令」即可注册。安装包未签名。
+
+在临时 SQLite 书库中验收了单书授权和一次跨书授权、归档恢复，以及按章审稿和门禁提交。安装包解出的 152 个文件与免安装版按 SHA-256 逐个匹配。没有调用付费模型、上传书库或附带临时测试数据。
+
+### Preview.21 验收记录
 
 `0.1.6-preview.21` 是书库恢复、项目打开、正式提交与自动备份的 Windows 验收版本，使用 Electron 44.9.1 与 better-sqlite3 13.0.3。专用分支的 [Setup 验收工作流](../.github/workflows/library-s2-installer.yml)让两台临时 Windows 机器使用同一安装包和校验文件；验收附件不等于公开 Release。下载和核对时使用同一构建的 SHA256SUMS.txt，不混用不同机器生成的未签名安装包。
 
@@ -88,6 +94,8 @@ Novel Director 的本地目录按用途分为三层：
 清理后验证：类型检查通过；完整回归 137/137 通过；生产构建通过；当前 Preview.11 安装目录的启动与 SQLite smoke 通过；`git diff --check` 通过。验证日志保存在本机 `tmp/cleanup-20260912/`。
 
 ## English
+
+For [Preview.22](https://github.com/SHIN09-git/novel/releases/tag/v0.1.6-preview.22), download the unsigned installer and `SHA256SUMS.txt` together. The packaged app includes MCP registration on the Agent Runs page. Packaged checks used disposable SQLite libraries, with no paid model calls. The 152 extracted installer files match the unpacked version by SHA-256.
 
 Novel Director keeps local build output in three clearly separated locations:
 

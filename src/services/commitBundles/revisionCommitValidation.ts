@@ -2,6 +2,7 @@ import type { AppData, RevisionCommitBundle } from '../../shared/types'
 import { canAcceptRevisionVersionStatus } from '../../shared/revisionVersionPolicy'
 import { assertRevisionSourceRecordsMatch } from '../RevisionSourceBindingService'
 import { assertRevisionFitsHardCanon } from '../HardCanonPreflight'
+import { validateRevisionCommitLinks } from './revisionCommitLinks'
 import { validateRevisionActorReferences, validateRevisionCommitActor } from './revisionCommitActor'
 import {
   assertImmutableCommit,
@@ -144,38 +145,6 @@ function validateCrossProjectCollisions(bundle: RevisionCommitBundle, existingDa
   )
 }
 
-function validateCommitLinks(bundle: RevisionCommitBundle, existingData: AppData): void {
-  if (bundle.linkedChapterCommitId) {
-    const linkedCommit = existingData.chapterCommitBundles.find(
-      (commit) => commit.commitId === bundle.linkedChapterCommitId || commit.id === bundle.linkedChapterCommitId
-    )
-    if (!linkedCommit) {
-      throw new Error(`RevisionCommitBundle references missing linkedChapterCommitId ${bundle.linkedChapterCommitId}.`)
-    }
-    if (linkedCommit.projectId !== bundle.projectId || linkedCommit.chapterId !== bundle.chapterId) {
-      throw new Error(`ChapterCommitBundle ${linkedCommit.commitId} does not match the target chapter.`)
-    }
-  }
-
-  if (bundle.linkedGenerationRunTraceId) {
-    const linkedTrace =
-      bundle.generationRunTrace?.id === bundle.linkedGenerationRunTraceId
-        ? bundle.generationRunTrace
-        : existingData.generationRunTraces.find((trace) => trace.id === bundle.linkedGenerationRunTraceId)
-    if (!linkedTrace) {
-      throw new Error(
-        `RevisionCommitBundle references missing linkedGenerationRunTraceId ${bundle.linkedGenerationRunTraceId}.`
-      )
-    }
-    if (linkedTrace.projectId !== bundle.projectId || linkedTrace.targetChapterOrder !== bundle.chapter.order) {
-      throw new Error(`GenerationRunTrace ${linkedTrace.id} does not match the target chapter.`)
-    }
-    if (bundle.generatedDraft && linkedTrace.jobId !== bundle.generatedDraft.jobId) {
-      throw new Error(`GenerationRunTrace ${linkedTrace.id} does not match the generated draft job.`)
-    }
-  }
-}
-
 function validateRevisionRecords(
   bundle: RevisionCommitBundle,
   existingData: AppData
@@ -264,7 +233,7 @@ function validateExistingData(bundle: RevisionCommitBundle, existingData: AppDat
     (version) => version.id === bundle.newChapterVersionId
   )
   assertImmutableCommit(existingChapterVersion, bundle.chapterVersion, 'ChapterVersion')
-  validateCommitLinks(bundle, existingData)
+  validateRevisionCommitLinks(bundle, existingData)
   validateRevisionRecords(bundle, existingData)
 }
 

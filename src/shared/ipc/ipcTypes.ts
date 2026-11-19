@@ -350,24 +350,23 @@ export interface GetAiCallProgressRequest {
 export type GetAiCallProgressResult = AiCallProgress | null
 export type ListAiCallProgressResult = AiCallProgress[]
 
-export interface AgentAuthorizationListRequest {
-  projectId: string
-}
+export type AgentAuthorizationListRequest = { projectId: string } | { purpose: 'book_creation' }
 
 export type AgentAuthorizationListResult = AgentAuthorizationGrant[]
 
-export interface AgentAuthorizationGrantRequest {
+export type AgentAuthorizationGrantRequest = {
   projectId: string
   actions: AgentAuthorizationAction[]
   chapterStart: number | null
   chapterEnd: number | null
-}
+} | { purpose: 'book_creator'; projectId: string } | { purpose: 'book_creation' }
 
 export type AgentAuthorizationGrantResult = AgentAuthorizationGrant
 
 export interface AgentAuthorizationRevokeRequest {
   projectId: string
   grantId: string
+  purpose?: 'book_creation'
 }
 
 export type AgentAuthorizationRevokeResult = AgentAuthorizationGrant | null

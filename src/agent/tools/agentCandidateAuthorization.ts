@@ -22,17 +22,27 @@ export async function decorateCandidateAuthorization(
 ): Promise<void> {
   if (!runtime.storagePath || !['agent.previewCandidateDecisions', 'agent.previewCandidateDecisionUndo'].includes(name)) return
   const preview = payload as CandidateAuthorizationPreview
-  if (!preview.requiresConfirmation) return
+  if (preview.authorization === 'stale_source' || preview.status === 'already_undone') return
+  const service = new AgentAuthorizationService(runtime.userDataPath)
+  const reviewedWorkflow = !preview.requiresConfirmation && await service.requiresReviewedCommits(runtime.storagePath, preview.projectId)
+  if (!preview.requiresConfirmation && !reviewedWorkflow) return
   const command = {
     projectId: preview.projectId,
     decisions: (args.decisions ?? []) as CandidateDecisionCommand['decisions'],
     ...(name.endsWith('Undo') ? { undo: { receiptId: requiredString(args, 'receiptId'), expectedFingerprint: '' } } : {})
   }
-  const grant = await new AgentAuthorizationService(runtime.userDataPath).findGrant({
+  const grant = await service.findGrant({
     storagePath: runtime.storagePath, projectId: preview.projectId,
     chapterOrders: candidateDecisionChapterOrders(runtime.data, command), actions: ['accept_high_risk_candidates']
   })
-  if (!grant) return
+  if (!grant) {
+    if (reviewedWorkflow) {
+      preview.authorization = 'author_grant_required'
+      if ('agentCanApply' in preview) preview.agentCanApply = false
+      if ('agentCanUndo' in preview) preview.agentCanUndo = false
+    }
+    return
+  }
   preview.authorization = 'project_grant'
   preview.authorizationGrantId = grant.id
   if ('agentCanApply' in preview) preview.agentCanApply = true

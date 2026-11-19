@@ -2,8 +2,9 @@ import { createHash } from 'node:crypto'
 import { mkdir, readFile, rm, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import type { AppData, ChapterGenerationStepType, ID } from '../shared/types'
-import { AGENT_PIPELINE_STEP_ORDER } from './AgentRunService'
+import { resolveAgentPipelineResumeStep } from './agentPipelineResume'
 import type { AgentRuntimeData } from './AgentRuntime'
+import { readAgentJobExecution } from './agentJobExecution'
 
 interface AgentCancellationRequest {
   jobId: ID
@@ -28,6 +29,7 @@ export interface AgentPipelineProgress {
   totalStepCount: number
   progressPercent: number
   recoverableFromStep: ChapterGenerationStepType | null
+  executorState: Awaited<ReturnType<typeof readAgentJobExecution>>
   cancellationRequested: boolean
   cancellationRequestedAt: string | null
   cancellationReason: string | null
@@ -61,17 +63,6 @@ async function readCancellationRequest(
   } catch {
     return null
   }
-}
-
-function recoverableStep(data: AppData, jobId: ID): ChapterGenerationStepType | null {
-  const steps = data.chapterGenerationSteps.filter((step) => step.jobId === jobId)
-  for (const status of ['failed', 'running', 'pending'] as const) {
-    const next = AGENT_PIPELINE_STEP_ORDER.find((type) =>
-      steps.some((step) => step.type === type && step.status === status)
-    )
-    if (next) return next
-  }
-  return null
 }
 
 export class AgentExecutionControlService {
@@ -113,7 +104,7 @@ export class AgentExecutionControlService {
 
   static async getProgress(
     data: AppData,
-    runtime: Pick<AgentRuntimeData, 'userDataPath'>,
+    runtime: Pick<AgentRuntimeData, 'userDataPath'> & Partial<Pick<AgentRuntimeData, 'storagePath'>>,
     jobId: ID,
     nowMs = Date.now()
   ): Promise<AgentPipelineProgress> {
@@ -147,7 +138,8 @@ export class AgentExecutionControlService {
       skippedStepCount,
       totalStepCount: steps.length,
       progressPercent: steps.length ? Math.round((finishedStepCount / steps.length) * 100) : 0,
-      recoverableFromStep: recoverableStep(data, jobId),
+      recoverableFromStep: resolveAgentPipelineResumeStep(data, jobId),
+      executorState: await readAgentJobExecution(runtime.storagePath, jobId),
       cancellationRequested: Boolean(cancellation),
       cancellationRequestedAt: cancellation?.requestedAt ?? null,
       cancellationReason: cancellation?.reason || null,

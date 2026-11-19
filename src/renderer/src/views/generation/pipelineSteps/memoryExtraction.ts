@@ -12,6 +12,7 @@ import {
 import { noveltyAdjustedConfidence, noveltyWarnings, serializeOutput } from '../pipelineUtils'
 import type { PipelineStepHandlerContext } from '../pipelineRunnerTypes'
 import { postDraftAnalysisFromWorking } from './postDraftAnalysis'
+import { candidateDraftBinding } from '../../../../../services/CandidateDraftSource'
 export { runChapterReviewStep } from './postDraftAnalysis'
 
 export async function runCharacterUpdateExtractionStep(ctx: PipelineStepHandlerContext) {
@@ -40,10 +41,12 @@ export async function runCharacterUpdateExtractionStep(ctx: PipelineStepHandlerC
     suggestions = sanitizeCharacterSuggestionsForPostDraft(result.data, characterIds)
   }
   const auditWarnings = noveltyWarnings(state.noveltyAuditResult)
+  const binding = candidateDraftBinding(state.draftRecord)
   const candidates: MemoryUpdateCandidate[] = suggestions.map((suggestion) => ({
     id: newId(),
     projectId: project.id,
     jobId: job.id,
+    ...binding,
     type: 'character',
     targetId: suggestion.characterId,
     proposedPatch: {
@@ -100,10 +103,12 @@ export async function runForeshadowingUpdateExtractionStep(ctx: PipelineStepHand
     usedAI = result.usedAI
   }
   const auditWarnings = noveltyWarnings(state.noveltyAuditResult)
+  const binding = candidateDraftBinding(state.draftRecord)
   const newCandidates: MemoryUpdateCandidate[] = extraction.newForeshadowingCandidates.map((candidate) => ({
     id: newId(),
     projectId: project.id,
     jobId: job.id,
+    ...binding,
     type: 'foreshadowing',
     targetId: null,
     proposedPatch: {
@@ -124,6 +129,7 @@ export async function runForeshadowingUpdateExtractionStep(ctx: PipelineStepHand
     id: newId(),
     projectId: project.id,
     jobId: job.id,
+    ...binding,
     type: 'foreshadowing',
     targetId: change.foreshadowingId,
     proposedPatch: {

@@ -10,7 +10,8 @@ import type {
 } from '../../shared/ipc/ipcTypes'
 import {
   AGENT_AUTHORIZATION_ACTIONS,
-  type AgentAuthorizationAction
+  type AgentAuthorizationAction,
+  type AgentLibraryGrant
 } from '../../shared/types/agentAuthorization'
 import { AgentAuthorizationService } from '../services/AgentAuthorizationService'
 import { safeIpcHandler } from './safeIpcHandler'
@@ -70,7 +71,15 @@ export function registerAgentAuthorizationIpcHandlers(
 ): void {
   ipcMain.handle(
     IPC_CHANNELS.AGENT_AUTHORIZATION_LIST,
-    safeIpcHandler(async (_event, request: AgentAuthorizationListRequest): Promise<AgentAuthorizationListResult> => {
+    safeIpcHandler(async (_event, request: AgentAuthorizationListRequest | { purpose: 'library_manager' }): Promise<AgentAuthorizationListResult | AgentLibraryGrant | null> => {
+      if (request && typeof request === 'object' && 'purpose' in request && request.purpose === 'library_manager') {
+        rejectUnknownFields(request, ['purpose'], '书库授权查询')
+        return service.getLibraryAuthorization(context.getStorage().getStoragePath())
+      }
+      if (request && typeof request === 'object' && 'purpose' in request && request.purpose === 'book_creation') {
+        rejectUnknownFields(request, ['purpose'], '开书授权列表请求')
+        return service.listBookCreationGrants(context.getStorage().getStoragePath())
+      }
       rejectUnknownFields(request, ['projectId'], '授权列表请求')
       const projectId = projectIdFrom(request)
       const storagePath = await trustedProjectSource(context, projectId)
@@ -80,7 +89,22 @@ export function registerAgentAuthorizationIpcHandlers(
 
   ipcMain.handle(
     IPC_CHANNELS.AGENT_AUTHORIZATION_GRANT,
-    safeIpcHandler(async (_event, request: AgentAuthorizationGrantRequest): Promise<AgentAuthorizationGrantResult> => {
+    safeIpcHandler(async (_event, request: AgentAuthorizationGrantRequest | { purpose: 'library_manager' }): Promise<AgentAuthorizationGrantResult | AgentLibraryGrant> => {
+      if (request && typeof request === 'object' && 'purpose' in request) {
+        if (request.purpose === 'library_manager') {
+          rejectUnknownFields(request, ['purpose'], '书库授权请求')
+          return service.grantLibrary(context.getStorage().getStoragePath())
+        }
+        if (request.purpose === 'book_creation') {
+          rejectUnknownFields(request, ['purpose'], '开书授权请求')
+          return service.grantBookCreativeRights(context.getStorage().getStoragePath())
+        }
+        if (request.purpose === 'book_creator') {
+          rejectUnknownFields(request, ['purpose', 'projectId'], '全书创作授权请求')
+          const projectId = projectIdFrom(request)
+          return service.grantBookCreativeRights(await trustedProjectSource(context, projectId), projectId)
+        }
+      }
       rejectUnknownFields(request, ['projectId', 'actions', 'chapterStart', 'chapterEnd'], '授权授予请求')
       const projectId = projectIdFrom(request)
       const storagePath = await trustedProjectSource(context, projectId)
@@ -97,7 +121,20 @@ export function registerAgentAuthorizationIpcHandlers(
 
   ipcMain.handle(
     IPC_CHANNELS.AGENT_AUTHORIZATION_REVOKE,
-    safeIpcHandler(async (_event, request: AgentAuthorizationRevokeRequest): Promise<AgentAuthorizationRevokeResult> => {
+    safeIpcHandler(async (_event, request: AgentAuthorizationRevokeRequest | { purpose: 'library_manager'; grantId: string }): Promise<AgentAuthorizationRevokeResult | AgentLibraryGrant> => {
+      if (request?.purpose === 'library_manager') {
+        rejectUnknownFields(request, ['purpose', 'grantId'], '撤回书库授权请求')
+        if (typeof request.grantId !== 'string' || !request.grantId.trim()) throw invalidAuthorizationInput('grantId 不能为空。')
+        return service.revokeLibrary(context.getStorage().getStoragePath(), request.grantId.trim())
+      }
+      if (request?.purpose === 'book_creation') {
+        rejectUnknownFields(request, ['purpose', 'projectId', 'grantId'], '撤回开书授权请求')
+        const projectId = projectIdFrom(request)
+        const storagePath = context.getStorage().getStoragePath()
+        const grants = await service.listBookCreationGrants(storagePath)
+        if (!grants.some(grant => grant.id === request.grantId && grant.projectId === projectId)) return null
+        return service.revoke(request.grantId, storagePath, projectId)
+      }
       rejectUnknownFields(request, ['projectId', 'grantId'], '授权撤回请求')
       const projectId = projectIdFrom(request)
       if (typeof request.grantId !== 'string' || !request.grantId.trim()) throw invalidAuthorizationInput('grantId 不能为空。')

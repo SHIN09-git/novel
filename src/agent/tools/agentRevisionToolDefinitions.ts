@@ -14,6 +14,23 @@ const schema = (properties: JsonSchema, required: string[]): JsonSchema => ({
 
 export const AGENT_REVISION_TOOL_DEFINITIONS: AgentToolDefinition[] = [
   {
+    name: 'agent.startBookRevisionBatch', riskLevel: 'write_preview',
+    description: 'Register an ordered batch of existing chapters. Pass stable chapter IDs; it opens the first revision work item and does not run AI. Each chapter must be reviewed and committed before reviewing the next.',
+    inputSchema: schema({ operationId: string, goal: string, chapterIds: { type: 'array', items: string, minItems: 1, uniqueItems: true } },
+      ['operationId', 'goal', 'chapterIds'])
+  },
+  {
+    name: 'agent.reviewRevisionVersion', riskLevel: 'write_preview',
+    description: 'Review this exact formal-chapter revision using the configured reviewer model and existing quality gate; save combined continuity evidence. Does not write chapter prose. Reuse operationId to avoid repeated review.',
+    inputSchema: schema({ ...write, ...hashes, versionId: string, expectedVersionHash: string },
+      [...writeRequired, ...hashRequired, 'versionId', 'expectedVersionHash'])
+  },
+  {
+    name: 'agent.getRevisionReview', riskLevel: 'read', annotations: { readOnlyHint: true },
+    description: 'Read a revision candidate review bound to the run and version. detail=full returns the saved quality and consistency reports.',
+    inputSchema: schema({ agentRunId: string, versionId: string, reportId: string, detail: reading.detail }, ['agentRunId', 'versionId'])
+  },
+  {
     name: 'agent.getRevisionSessions', riskLevel: 'read',
     description: 'Read project-scoped revision sessions, requests and candidates. Supply chapterId or draftId to obtain current source hashes even before creating a session. Full text requires detail=full.',
     inputSchema: schema({ ...reading, chapterId: string, draftId: string }, [])
@@ -47,9 +64,15 @@ export const AGENT_REVISION_TOOL_DEFINITIONS: AgentToolDefinition[] = [
     inputSchema: schema({ ...write, ...hashes, versionId: string, expectedVersionHash: string, body: string }, [...writeRequired, ...hashRequired, 'versionId', 'expectedVersionHash', 'body'])
   },
   {
+    name: 'agent.applyRevisionToDraft', riskLevel: 'write_preview',
+    description: 'Apply an explicitly reviewed revision candidate only to the current unaccepted draft. Invalidates old diagnostics and returns a work item for re-review. Never changes the official chapter, even when it already exists.',
+    inputSchema: schema({ ...write, ...hashes, versionId: string, expectedVersionHash: string, acceptBroaderResponse: { type: 'boolean' } },
+      [...writeRequired, ...hashRequired, 'versionId', 'expectedVersionHash'])
+  },
+  {
     name: 'agent.previewRevisionCommit', riskLevel: 'write_preview',
-    description: 'Persist an exact source/candidate-bound AgentActionPreview for any current bound candidate, including UI-created versions without Agent generation/edit history. Requires an existing chapter; no fork-edit is needed for approval. Changes no chapter/canon/memory.',
-    inputSchema: schema({ ...write, ...hashes, versionId: string, expectedVersionHash: string }, [...writeRequired, ...hashRequired, 'versionId', 'expectedVersionHash'])
+    description: 'Preview an exact revision commit. For book creative rights and revision batches, read the passing revision review and supply expectedQualityGateReportId. Changes no chapter/canon/memory.',
+    inputSchema: schema({ ...write, ...hashes, versionId: string, expectedVersionHash: string, expectedQualityGateReportId: string }, [...writeRequired, ...hashRequired, 'versionId', 'expectedVersionHash'])
   },
   {
     name: 'agent.applyApprovedRevisionCommit', riskLevel: 'write_commit',

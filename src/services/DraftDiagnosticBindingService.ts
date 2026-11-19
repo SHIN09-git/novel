@@ -1,5 +1,6 @@
 import type {
   AppData,
+  ChapterGenerationStepType,
   ConsistencyReviewReport,
   GeneratedChapterDraft,
   NoveltyAuditResult,
@@ -7,7 +8,7 @@ import type {
   RedundancyReport
 } from '../shared/types'
 
-const DIAGNOSTIC_STEP_TYPES = new Set([
+const DIAGNOSTIC_STEP_TYPES = new Set<ChapterGenerationStepType>([
   'generate_chapter_review',
   'propose_character_updates',
   'propose_foreshadowing_updates',
@@ -101,7 +102,8 @@ export function invalidateDraftDiagnosticsAfterChange(
   const draft = data.generatedChapterDrafts.find((item) => item.id === draftId)
   if (!draft || draft.body === nextBody) return data
   const jobId = draft.jobId
-  let firstInvalidStepSeen = false
+  const firstInvalidStep = [...DIAGNOSTIC_STEP_TYPES].find(type =>
+    data.chapterGenerationSteps.some(step => step.jobId === jobId && step.type === type))
   return {
     ...data,
     generatedChapterDrafts: data.generatedChapterDrafts.map((item) =>
@@ -109,8 +111,7 @@ export function invalidateDraftDiagnosticsAfterChange(
     ),
     chapterGenerationSteps: data.chapterGenerationSteps.map((step) => {
       if (step.jobId !== jobId || !DIAGNOSTIC_STEP_TYPES.has(step.type)) return step
-      if (!firstInvalidStepSeen) {
-        firstInvalidStepSeen = true
+      if (step.type === firstInvalidStep) {
         return {
           ...step,
           status: 'failed',
@@ -126,7 +127,7 @@ export function invalidateDraftDiagnosticsAfterChange(
         ? {
             ...job,
             status: 'failed',
-            currentStep: 'generate_chapter_review',
+            currentStep: firstInvalidStep ?? 'generate_chapter_review',
             errorMessage: '正文已修订，需要重新执行复盘、审稿和质量门禁。',
             updatedAt
           }

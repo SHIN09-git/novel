@@ -200,6 +200,8 @@ export interface CharacterStateChangeCandidate {
   id: ID
   projectId: ID
   jobId?: ID | null
+  sourceDraftId?: ID
+  sourceDraftContentHash?: string
   characterId: ID
   chapterId: ID | null
   chapterOrder: number | null

@@ -130,12 +130,15 @@ export interface CandidateDecisionUndoPreview {
   canRestoreConflicts: boolean
   undoReceiptId?: ID
 }
+export type CandidateDraftSourceStatus = 'current_draft' | 'current_chapter' | 'stale' | 'unverified'
+
 export interface CandidateDecisionPreviewItem extends CandidateDecisionItem {
   title: string
   summary: string
   evidence: string
   risk: 'low' | 'medium' | 'high'
   warnings: string[]
+  sourceStatus: CandidateDraftSourceStatus
   amendmentPreview?: {
     before: CandidateDecisionAmendmentSnapshot
     after: CandidateDecisionAmendmentSnapshot

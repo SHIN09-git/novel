@@ -1,6 +1,7 @@
 import type { AppData, Chapter, ChapterVersion, GeneratedChapterDraft, ID, RevisionVersion } from '../../../shared/types'
 import { invalidateDraftDiagnosticsAfterChange } from '../../../services/DraftDiagnosticBindingService'
 import { assertRevisionSourceMatches } from '../../../services/RevisionSourceBindingService'
+import { applyRevisionToPendingDraft } from '../../../services/PendingDraftRevisionService'
 
 export type RevisionWritebackSource =
   | { kind: 'chapter'; chapter: Chapter }
@@ -57,6 +58,15 @@ export function applyAcceptedRevisionWriteback(
 ): RevisionWritebackResult {
   assertRevisionSourceMatches(version, source.kind === 'draft' ? source.draft.body : source.chapter.body,
     source.kind === 'draft' ? source.linkedChapter?.body : source.chapter.body)
+  if (source.kind === 'draft' && !source.linkedChapter) {
+    return {
+      data: applyRevisionToPendingDraft(data, projectId, source.draft.id, version, timestamp),
+      wroteChapter: false,
+      updatedDraftId: source.draft.id,
+      createdChapterVersion: false,
+      message: '修订已应用到草稿，尚未正式采纳为章节。请返回流水线重新审稿后接受。'
+    }
+  }
   const base = acceptRevisionMetadata(
     {
       ...data,
@@ -86,24 +96,11 @@ export function applyAcceptedRevisionWriteback(
   const invalidated = invalidateDraftDiagnosticsAfterChange(base, source.draft.id, version.body, timestamp)
   const nextDrafts = invalidated.generatedChapterDrafts.map((draft) =>
     draft.id === source.draft.id && draft.projectId === projectId
-      ? { ...draft, body: version.body, status: source.linkedChapter ? 'accepted' as const : 'draft' as const, updatedAt: timestamp }
+      ? { ...draft, body: version.body, status: 'accepted' as const, updatedAt: timestamp }
       : draft
   )
 
-  if (!source.linkedChapter) {
-    return {
-      data: {
-        ...invalidated,
-        generatedChapterDrafts: nextDrafts
-      },
-      wroteChapter: false,
-      updatedDraftId: source.draft.id,
-      createdChapterVersion: false,
-      message: '修订已应用到草稿，尚未正式采纳为章节。请返回流水线重新审稿后接受。'
-    }
-  }
-
-  const snapshot = chapterSnapshot(projectId, source.linkedChapter, version, timestamp)
+  const snapshot = chapterSnapshot(projectId, source.linkedChapter!, version, timestamp)
   return {
     data: {
       ...invalidated,

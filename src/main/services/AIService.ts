@@ -42,6 +42,8 @@ export interface AiCredentialReader {
   isManagedEndpoint?(baseUrl: string): Promise<boolean>
   getApiKey(baseUrl: string): Promise<string>
   getBackupApiKey?(baseUrl: string, rejected: string): Promise<string>
+  /** Header name for services that do not accept `Authorization: Bearer`. */
+  getApiKeyHeader?(baseUrl: string): Promise<string | undefined>
 }
 
 export interface AIServiceLogger {
@@ -323,6 +325,7 @@ export class AIService implements IAIService {
       if (!settingsValidation.ok) return withTelemetry({ ok: false as const, error: settingsValidation.error })
 
       apiKey = providerUsesApiKey(settings.apiProvider) ? await this.credentialService.getApiKey(settings.baseUrl) : ''
+      const apiKeyHeader = apiKey ? await this.credentialService.getApiKeyHeader?.(settings.baseUrl) : undefined
       if (runController.signal.aborted) throw new AiRequestCancelledError()
       const thinkingMode = usesOfficialDeepSeekV4(settings) ? 'disabled' : 'provider_default'
       this.logger.info(
@@ -364,7 +367,7 @@ export class AIService implements IAIService {
         if (Date.now() >= deadline) throw new AiRequestTimeoutError(timeoutMs)
         attempts += 1
         this.callProgress.update(runId || undefined, callId, 'waiting_response', { attempt: attempts })
-        return this.performChatCompletion(settings, messages, apiKey, runController.signal, deadline, timeoutMs, receipts,
+        return this.performChatCompletion(settings, messages, apiKey, apiKeyHeader, runController.signal, deadline, timeoutMs, receipts,
           () => {
             responseFormatFallback = true
             this.callProgress.update(runId || undefined, callId, 'format_retry', { attempt: attempts })
@@ -431,6 +434,7 @@ export class AIService implements IAIService {
     settings: AppSettings,
     messages: ChatCompletionRequest['messages'],
     apiKey: string,
+    apiKeyHeader: string | undefined,
     signal: AbortSignal,
     deadline: number,
     totalTimeoutMs: number,
@@ -443,7 +447,8 @@ export class AIService implements IAIService {
       'Content-Type': 'application/json'
     }
     if (apiKey.trim()) {
-      headers.Authorization = `Bearer ${apiKey.trim()}`
+      if (apiKeyHeader) headers[apiKeyHeader] = apiKey.trim()
+      else headers.Authorization = `Bearer ${apiKey.trim()}`
     }
 
     const requestBody: ChatRequestBody = {

@@ -1,5 +1,6 @@
 import type { AppData, CandidateDecisionCommand, ChapterGenerationJob, MemoryUpdateCandidate, Project, QualityGateReport } from '../../../../shared/types'
 import { AuthorDecisionPolicyService } from '../../../../services/AuthorDecisionPolicyService'
+import { readCandidateDraftSource, STALE_CANDIDATE_SOURCE } from '../../../../services/CandidateDraftSource'
 import type { ConfirmFn } from '../../components/ConfirmDialog'
 import { now } from '../../utils/format'
 import type { SaveDataHandler } from '../../utils/saveDataState'
@@ -26,7 +27,7 @@ function showCannotApply(confirmAction: ConfirmFn, message: string) {
 }
 
 export function useMemoryCandidates({ data, executeCandidateDecision, project, selectedJob, qualityGateReports, saveData, confirmAction, setPipelineMessage }: UseMemoryCandidatesArgs) {
-  async function executeDecision(candidates: MemoryUpdateCandidate[], decision: 'accept' | 'reject') {
+  async function executeDecision(candidates: MemoryUpdateCandidate[], decision: 'accept' | 'reject', skippedStale = 0) {
     if (!data || !executeCandidateDecision) return false
     try {
       const { previewCandidateDecisions } = await import('../../../../services/CandidateDecisionService')
@@ -44,6 +45,7 @@ export function useMemoryCandidates({ data, executeCandidateDecision, project, s
         ...(preview.requiresConfirmation ? { confirmedHighRisk: true } : {}) })
       setPipelineMessage(decision === 'accept'
         ? [`已应用 ${candidates.length} 条记忆候选；章节草稿仍可继续审核和接受。`,
+          ...(skippedStale ? [`已跳过 ${skippedStale} 条来源正文已失效的候选。`] : []),
           ...new Set(preview.items.flatMap((item) => item.warnings))].join('\n') : '记忆候选已拒绝。')
     } catch (error) {
       setPipelineMessage(`记忆候选处理失败：${error instanceof Error ? error.message : '请重试。'}`)
@@ -105,9 +107,15 @@ export function useMemoryCandidates({ data, executeCandidateDecision, project, s
   }
 
   async function applyAllPendingCandidates(candidates: MemoryUpdateCandidate[]) {
-    const pending = candidates.filter((candidate) => candidate.status === 'pending')
+    const all = candidates.filter((candidate) => candidate.status === 'pending')
+    const pending = all.filter(candidate => !data || readCandidateDraftSource(data, candidate).status !== 'stale')
+    const skippedStale = all.length - pending.length
+    if (!pending.length && skippedStale) {
+      setPipelineMessage(STALE_CANDIDATE_SOURCE)
+      return
+    }
     if (!pending.length) return
-    if (await executeDecision(pending, 'accept')) return
+    if (await executeDecision(pending, 'accept', skippedStale)) return
 
     const actions = await import('./memoryCandidateActions')
     const applicable = pending
@@ -131,6 +139,7 @@ export function useMemoryCandidates({ data, executeCandidateDecision, project, s
       return
     }
     setPipelineMessage([`已应用 ${applicable.length} 条记忆候选；章节草稿仍可继续审核和接受。`,
+      ...(skippedStale ? [`已跳过 ${skippedStale} 条来源正文已失效的候选。`] : []),
       ...candidateWarnings(applicable.map((item) => item.candidate))].join('\n'))
     if (skipped > 0) {
       await showCannotApply(confirmAction, `已应用 ${applicable.length} 条候选，另有 ${skipped} 条因格式不安全被跳过。`)

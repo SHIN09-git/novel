@@ -7,11 +7,17 @@ import type { AgentRuntimeData } from '../AgentRuntime'
 import { saveAgentChapterCommitBundle, saveAgentRuntimeData } from '../AgentRuntime'
 import { AgentRunService } from '../AgentRunService'
 import { executeAgentChapterPipeline } from '../AgentPipelineExecutor'
+import { AgentJobAlreadyExecuting } from '../agentJobExecution'
+import { reopenPipelineRuntime } from '../agentPipelineWritebackGuard'
+import { recordAgentDraftDecision } from '../agentDraftActions'
 import { AgentExecutionControlService } from '../AgentExecutionControlService'
 import { applyAgentChapterAcceptance, previewAgentChapterAcceptance } from './agentChapterAcceptanceTools'
+import { readAgentChapterWorkItem, wantsChapterWorkItem } from './agentChapterWorkItem'
 import { withAgentActionAcknowledgement } from '../agentAcknowledgedAction'
 import { handleAgentChapterTaskWriteTool } from './agentChapterTaskTools'
 import { handleAgentWorldWriteTool } from './agentWorldTools'
+import { handleAgentBookCreativeWrite } from './agentBookCreativeTools'
+import { assertAgentWriteTargetActive } from './agentArchiveGuard'
 import type { AppData } from '../../shared/types'
 import { OPENING_READER_EMOTION_FALLBACK } from '../../services/OpeningChapterContextPolicy'
 import {
@@ -38,22 +44,32 @@ export async function handleAgentWriteTool(
   data: AppData,
   runtime: AgentRuntimeData
 ): Promise<AgentToolHandlerResult> {
+  assertAgentWriteTargetActive(name, data, args)
   const taskWrite = await handleAgentChapterTaskWriteTool(name, args, data, runtime)
   if (taskWrite.handled) return taskWrite
   const worldWrite = await handleAgentWorldWriteTool(name, args, data, runtime)
   if (worldWrite.handled) return worldWrite
+  const bookWrite = await handleAgentBookCreativeWrite(name, args, runtime)
+  if (bookWrite.handled) return bookWrite
   const revisionWrite = await handleRevisionWrite(name, args, data, runtime)
   if (revisionWrite.handled) return revisionWrite
   switch (name) {
     case 'agent.previewChapterAcceptance':
       return { handled: true, payload: await previewAgentChapterAcceptance(data, args, runtime) }
-    case 'agent.applyChapterAcceptance':
-      return { handled: true, payload: await applyAgentChapterAcceptance(data, args, runtime) }
+    case 'agent.applyChapterAcceptance': {
+      const withWorkItem = wantsChapterWorkItem(args)
+      const preview = withWorkItem ? data.agentActionPreviews.find(item => item.id === args.previewId) : undefined
+      const result = await applyAgentChapterAcceptance(data, args, runtime)
+      return { handled: true, payload: preview ? { ...result, workItem: await readAgentChapterWorkItem(runtime, {
+        projectId: preview.projectId, agentRunId: preview.agentRunId
+      }) } : result }
+    }
     case 'agent.undoCandidateDecision':
       return { handled: true, payload: await undoAgentCandidateDecision(data, args, runtime) }
     case 'agent.applyCandidateDecisions':
       return { handled: true, payload: await applyAgentCandidateDecisions(data, args, runtime) }
     case 'agent.startAgentRun': {
+      const withWorkItem = wantsChapterWorkItem(args)
       const projectId = findProjectId(data, args)
       const project = data.projects.find((item) => item.id === projectId)
       const targetChapterOrder = requiredPositiveInteger(args, 'chapterOrder')
@@ -70,9 +86,13 @@ export async function handleAgentWriteTool(
         safetyMode: safeSafetyMode(stringArg(args, 'safetyMode'))
       })
       const saved = await saveAgentRuntimeData(prepared.appData, runtime)
+      if (withWorkItem) return { handled: true, payload: { workItem: await readAgentChapterWorkItem(runtime, {
+        projectId, agentRunId: prepared.agentRun.id
+      }) } }
       return { handled: true, payload: { agentRun: prepared.agentRun, job: prepared.job, stepCount: prepared.steps.length, warning: prepared.warning, saved } }
     }
     case 'agent.runChapterPipeline': {
+      const withWorkItem = wantsChapterWorkItem(args)
       const projectId = findProjectId(data, args)
       const project = data.projects.find((item) => item.id === projectId)
       const targetChapterOrder = requiredPositiveInteger(args, 'chapterOrder')
@@ -99,6 +119,9 @@ export async function handleAgentWriteTool(
         readerEmotionTarget: stringArg(args, 'readerEmotionTarget'),
         budgetMaxTokens: typeof args.budgetMaxTokens === 'number' ? args.budgetMaxTokens : undefined
       })
+      if (withWorkItem) return { handled: true, payload: { workItem: await readAgentChapterWorkItem(runtime, {
+        projectId, agentRunId: prepared.agentRun.id
+      }) } }
       return {
         handled: true,
         payload: {
@@ -114,17 +137,35 @@ export async function handleAgentWriteTool(
       }
     }
     case 'agent.retryChapterPipeline': {
+      const withWorkItem = wantsChapterWorkItem(args)
       const agentRunId = requiredString(args, 'agentRunId')
       const jobId = requiredString(args, 'jobId')
-      const executed = await executeAgentChapterPipeline({
-        runtime,
-        agentRunId,
-        jobId,
-        pipelineMode: safePipelineMode(stringArg(args, 'pipelineMode')),
-        estimatedWordCount: stringArg(args, 'estimatedWordCount'),
-        readerEmotionTarget: stringArg(args, 'readerEmotionTarget'),
-        budgetMaxTokens: typeof args.budgetMaxTokens === 'number' ? args.budgetMaxTokens : undefined
-      })
+      let executed: Awaited<ReturnType<typeof executeAgentChapterPipeline>>
+      try {
+        executed = await executeAgentChapterPipeline({
+          runtime,
+          agentRunId,
+          jobId,
+          pipelineMode: safePipelineMode(stringArg(args, 'pipelineMode')),
+          estimatedWordCount: stringArg(args, 'estimatedWordCount'),
+          readerEmotionTarget: stringArg(args, 'readerEmotionTarget'),
+          budgetMaxTokens: typeof args.budgetMaxTokens === 'number' ? args.budgetMaxTokens : undefined
+        })
+      } catch (error) {
+        if (!(error instanceof AgentJobAlreadyExecuting)) throw error
+        const fresh = await reopenPipelineRuntime(runtime)
+        const run = fresh.data.agentRuns.find(item => item.id === agentRunId && item.createdJobIds.includes(jobId))
+        const job = run && fresh.data.chapterGenerationJobs.find(item => item.id === jobId && item.projectId === run.projectId)
+        if (!job) throw new Error('该任务不属于指定的 Agent 批次。')
+        Object.assign(runtime, fresh)
+        return { handled: true, payload: { alreadyRunning: true,
+          progress: await AgentExecutionControlService.getProgress(fresh.data, fresh, job.id),
+          ...(withWorkItem ? { workItem: await readAgentChapterWorkItem(fresh, { projectId: job.projectId, agentRunId }) } : {})
+        } }
+      }
+      if (withWorkItem) return { handled: true, payload: { workItem: await readAgentChapterWorkItem(runtime, {
+        projectId: executed.job.projectId, agentRunId
+      }) } }
       return {
         handled: true,
         payload: {
@@ -175,6 +216,7 @@ export async function handleAgentWriteTool(
       }
     }
     case 'agent.continueAgentRun': {
+      const withWorkItem = wantsChapterWorkItem(args)
       const prepared = AgentRunService.prepareSequentialChapterRun({
         appData: data,
         projectId: findProjectId(data, args),
@@ -184,6 +226,9 @@ export async function handleAgentWriteTool(
         safetyMode: safeSafetyMode(stringArg(args, 'safetyMode'))
       })
       const saved = await saveAgentRuntimeData(prepared.appData, runtime)
+      if (withWorkItem) return { handled: true, payload: { workItem: await readAgentChapterWorkItem(runtime, {
+        projectId: prepared.agentRun.projectId, agentRunId: prepared.agentRun.id
+      }) } }
       return {
         handled: true,
         payload: {
@@ -205,6 +250,12 @@ export async function handleAgentWriteTool(
       })
       const saved = await saveAgentRuntimeData(result.appData, runtime)
       return { handled: true, payload: { decision: result.decision, preview: result.preview, recommendation: result.recommendation, saved } }
+    }
+    case 'agent.recordDraftDecision': {
+      const saved = await recordAgentDraftDecision(runtime, args)
+      return { handled: true, payload: { ...saved,
+        workItem: await readAgentChapterWorkItem(runtime, { projectId: saved.projectId, agentRunId: saved.agentRunId })
+      } }
     }
     case 'agent.archiveChapter': {
       const projectId = findProjectId(data, args)
@@ -241,7 +292,8 @@ export async function handleAgentWriteTool(
       return withAgentActionAcknowledgement({ runtime, projectId: preview.projectId, chapterOrder,
         action: 'accept_draft', confirmed: hasApproval(args) || !preview.requiresHumanApproval,
         requiresGrant: preview.requiresHumanApproval
-      }, async (grant) => {
+      }, async (grant, reviewedCommitsRequired) => {
+      if (reviewedCommitsRequired) throw new Error('全书创作请使用 agent.previewChapterAcceptance 和 agent.applyChapterAcceptance 提交当前已过门禁的稿件。')
       const result = AgentCommitService.applyActionPreview({
         appData: data,
         previewId: requiredString(args, 'previewId'),

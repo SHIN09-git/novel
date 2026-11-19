@@ -274,6 +274,9 @@ export function normalizeCharacterStateChangeCandidate(value: unknown): Characte
   return {
     id: stringValue(candidate.id),
     projectId: stringValue(candidate.projectId),
+    ...(stringValue(candidate.jobId) ? { jobId: stringValue(candidate.jobId) } : {}),
+    ...(candidate.sourceDraftId !== undefined ? { sourceDraftId: stringValue(candidate.sourceDraftId) } : {}),
+    ...(candidate.sourceDraftContentHash !== undefined ? { sourceDraftContentHash: stringValue(candidate.sourceDraftContentHash) } : {}),
     characterId: stringValue(candidate.characterId),
     chapterId: stringValue(candidate.chapterId) || null,
     chapterOrder: typeof candidate.chapterOrder === 'number' ? candidate.chapterOrder : null,

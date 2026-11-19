@@ -14,7 +14,7 @@ import type {
 import { arrayOrEmpty, objectOrEmpty, stringArrayValue, stringValue } from './common'
 
 function normalizeRunMode(value: unknown): AgentRunMode {
-  return value === 'multi_chapter' || value === 'arc' ? value : 'single_chapter'
+  return value === 'multi_chapter' || value === 'arc' || value === 'book_revision' ? value : 'single_chapter'
 }
 
 function normalizeSafetyMode(value: unknown): AgentSafetyMode {
@@ -108,6 +108,7 @@ export function normalizeAgentRun(value: unknown): AgentRun {
     mode: normalizeRunMode(raw.mode),
     safetyMode: normalizeSafetyMode(raw.safetyMode),
     targetChapterOrders: numberArrayValue(raw.targetChapterOrders),
+    ...(raw.mode === 'book_revision' ? { revisionChapterIds: stringArrayValue(raw.revisionChapterIds) } : {}),
     status: normalizeRunStatus(raw.status),
     createdJobIds: stringArrayValue(raw.createdJobIds),
     createdDraftIds: stringArrayValue(raw.createdDraftIds),

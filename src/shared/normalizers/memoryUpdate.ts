@@ -266,6 +266,8 @@ export function normalizeMemoryUpdateCandidate(value: MemoryUpdateCandidate | Re
     id: stringValue(candidate.id),
     projectId: stringValue(candidate.projectId),
     jobId: stringValue(candidate.jobId),
+    ...(candidate.sourceDraftId !== undefined ? { sourceDraftId: stringValue(candidate.sourceDraftId) } : {}),
+    ...(candidate.sourceDraftContentHash !== undefined ? { sourceDraftContentHash: stringValue(candidate.sourceDraftContentHash) } : {}),
     type,
     targetId: stringValue(candidate.targetId) || null,
     proposedPatch: normalizeMemoryUpdatePatch(candidate.proposedPatch, type),

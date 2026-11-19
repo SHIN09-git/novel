@@ -41,6 +41,7 @@ export interface Project {
   createdAt: string
   updatedAt: string
   lastOpenedAt?: string | null
+  archivedAt?: string | null
 }
 
 export interface StoryBible {

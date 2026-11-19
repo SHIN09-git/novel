@@ -5,7 +5,7 @@ import type {
   AgentAuthorizationAction,
   AgentAuthorizationGrant
 } from '../../../../shared/types/agentAuthorization'
-import { AGENT_AUTHORIZATION_ACTIONS } from '../../../../shared/types/agentAuthorization'
+import { AGENT_AUTHORIZATION_ACTIONS, AGENT_BOOK_CREATIVE_ACTIONS } from '../../../../shared/types/agentAuthorization'
 import { formatDate } from '../../utils/format'
 
 const ACTION_LABELS: Record<AgentAuthorizationAction, string> = {
@@ -137,36 +137,40 @@ export function AgentProjectAuthorizationPanel({ projectId, chapterOrders, dataI
     setSelectedActions((current) => toggleAuthorizationAction(current, action))
   }
 
-  async function grant() {
+  async function grant(fullBook = false) {
     const operationContext = activeContextRef.current
     setError('')
     setMessage('')
-    if (!api || selectedActions.length === 0) return
-    const selectionError = validateAuthorizationSelection(selectedActions, scope)
+    const actions = fullBook ? [...AGENT_BOOK_CREATIVE_ACTIONS] : selectedActions
+    const requestedScope = fullBook ? 'all' : scope
+    if (!api || actions.length === 0) return
+    const selectionError = validateAuthorizationSelection(actions, requestedScope)
     if (selectionError) {
       setError(selectionError)
       return
     }
-    const range = parseAuthorizationRange(scope, chapterStart, chapterEnd)
+    const range = parseAuthorizationRange(requestedScope, chapterStart, chapterEnd)
     if (!range.ok) {
       setError(range.error)
       return
     }
     const { chapterStart: start, chapterEnd: end } = range
-    const rangeDescription = scope === 'all' ? '全部章节' : `第 ${start}-${end} 章`
-    const highRisk = selectedActions.filter((action) => HIGH_RISK_ACTIONS.has(action)).map((action) => ACTION_LABELS[action])
+    const rangeDescription = requestedScope === 'all' ? '全部章节' : `第 ${start}-${end} 章`
+    const highRisk = actions.filter((action) => HIGH_RISK_ACTIONS.has(action)).map((action) => ACTION_LABELS[action])
     const confirmed = await confirmAction({
-      title: '授予项目授权',
-      message: `将向 Agent 授予${rangeDescription}的以下权限：${selectedActions.map((action) => ACTION_LABELS[action]).join('、')}。${highRisk.length ? `其中包含高风险动作：${highRisk.join('、')}。` : ''}授权会写入当前项目的数据源绑定记录。`,
+      title: fullBook ? '授予全书创作权' : '授予项目授权',
+      message: fullBook
+        ? 'Agent 可改整本书的设定、自主审稿、修订和提交。每章须通过质量门禁，授权只限本书，可随时撤回。'
+        : `将向 Agent 授予${rangeDescription}的以下权限：${actions.map((action) => ACTION_LABELS[action]).join('、')}。${highRisk.length ? `其中包含高风险动作：${highRisk.join('、')}。` : ''}授权会写入当前项目的数据源绑定记录。`,
       confirmLabel: '授予授权'
     })
     if (!confirmed) return
     if (!isAuthorizationContextCurrent(activeContextRef.current, operationContext)) return
     setSubmitting(true)
     try {
-      const created = await api.grant({
+      const created = await api.grant(fullBook ? { projectId, purpose: 'book_creator' } : {
         projectId,
-        actions: selectedActions,
+        actions,
         chapterStart: start,
         chapterEnd: end
       })
@@ -281,6 +285,7 @@ export function AgentProjectAuthorizationPanel({ projectId, chapterOrders, dataI
               </div>
 
               <div className="row-actions agent-authorization-submit">
+                <button className="ghost-button" type="button" disabled={submitting || loading || grants.some(item => item.purpose && item.status === 'active')} onClick={() => void grant(true)}>授予全书创作权</button>
                 <button className="primary-button" type="button" disabled={submitting || loading || selectedActions.length === 0} onClick={() => void grant()}>授予授权</button>
                 {!selectedActions.length ? <span className="muted">请选择至少一项动作，系统不会自动勾选全部。</span> : null}
               </div>
@@ -296,7 +301,7 @@ export function AgentProjectAuthorizationPanel({ projectId, chapterOrders, dataI
               {grants.length ? grants.map((grantItem) => (
                 <article key={grantItem.id} className={`agent-authorization-row ${grantItem.status === 'revoked' ? 'revoked' : ''}`}>
                   <div>
-                    <strong>{formatAuthorizationRange(grantItem)}</strong>
+                    <strong>{grantItem.purpose ? '全书创作权' : formatAuthorizationRange(grantItem)}</strong>
                     <p>{grantItem.actions.map((action) => ACTION_LABELS[action]).join('、')}</p>
                     <small>{grantItem.status === 'active' ? `授予于 ${formatDate(grantItem.createdAt)}` : `已撤回于 ${formatDate(grantItem.revokedAt ?? grantItem.updatedAt)}`}</small>
                   </div>

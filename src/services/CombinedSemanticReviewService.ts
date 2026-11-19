@@ -80,7 +80,7 @@ function consistencyIssue(
  */
 export function deriveConsistencyReviewFromQualityGate(
   report: QualityGateReport,
-  draft: GeneratedChapterDraft
+  draft: Pick<GeneratedChapterDraft, 'id'> | null
 ): { qualityGateReport: QualityGateReport; consistencyReviewReport: ConsistencyReviewReport } {
   const base = qualityReportWithoutHardCanon(report)
   const mapped = base.issues.flatMap((issue, index) => {
@@ -104,7 +104,7 @@ export function deriveConsistencyReviewFromQualityGate(
       projectId: report.projectId,
       jobId: report.jobId,
       chapterId: report.chapterId,
-      draftId: draft.id,
+      draftId: draft?.id ?? null,
       draftContentHash: report.draftContentHash ?? null,
       promptContextSnapshotId: report.promptContextSnapshotId ?? null,
       issues,

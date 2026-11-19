@@ -1,6 +1,6 @@
 # Agent 项目授权与章节自主流程
 
-本文面向使用 Agent 页的作者，以及通过 Novel Director 工具工作的 Codex。它说明当前 W08 项目授权模型、章节任务编辑、章节采纳和世界资料写入的实际边界。
+本文说明作者如何给 Codex 授权，以及 Agent 如何开书、编辑资料、逐章创作和提交修订。
 
 > 本文描述当前仓库中的接口。WorldTools 仍在完善，调用前应以 MCP 标准 `tools/list` 返回的当前 descriptor 为准。`AgentToolService.listTools()` 是内部方法，不是名为 `agent.listTools` 的注册工具。文中的 ID、路径和作品内容都是模板或虚构示例，不代表真实项目，也不应直接当作作品设定使用。
 
@@ -13,6 +13,23 @@
 ## 一、作者如何授予和撤回
 
 项目授权由作者在 Agent 页的“项目授权”面板中授予或撤回。Codex 和普通工具调用不能自行给自己授权。
+
+### 全库管理权
+
+在项目列表点 **授予全库管理权**。一次授权覆盖当前书库中已有和以后新建的作品。Agent 可直接开书、修改书名和简介、编辑小说圣经与其他创作资料、归档和恢复项目，无需逐本授权。权限不包含永久删除、其他数据库文件、其他本地配置或应用设置。
+
+归档保留正文、草稿、版本和审稿记录，默认不在项目列表的在写作品中显示。Agent 可继续读取归档作品；继续写作或修订前需先恢复。作者可从「已归档项目」恢复，也可请 Agent 按「书库改动记录」的操作编号回退。项目资料的回退只恢复当时改动的字段；同一字段有后续改动时不会覆盖。
+
+最终审核时，在项目列表点「读取最新书库」，从「书库改动记录」核对项目变动。进入作品后，使用「资料改动记录」和「版本历史」查看设定变动、正文、审稿证据和版本。批量创作和修订仍是每章审稿、通过质量门禁、提交后再继续。撤回全库管理权不撤回作者另行授予的单书权限，也不会撤销已提交的结果。
+
+### 全书创作权
+
+- **已有作品**：打开作品，在 Agent 页的“项目授权”点击“授予全书创作权”。
+- **新作品**：在项目列表点击“授权 Agent 开书”。Agent 用 `agent.listBookCreationSlots` 取得预留项目编号，再调用 `agent.createProject` 开书。该授权只开一本书，开完继续覆盖同一本书，不用再授权一次。
+
+Agent 可以修改本书任务、角色、伏笔、时间线、HardCanon、剧情导向、小说圣经和阶段摘要，按既有流程处理候选，以及逐章提交正文和修订。作者不需要逐步确认；最终可在桌面版本历史核对正文和审稿证据，在 Agent 页的“资料改动记录”核对小说圣经和阶段摘要的修改前后及理由。权限不延伸到其他书或应用设置，也不允许跳过逐章门禁。
+
+要撤回，打开该书的“项目授权”；尚未开书时可从项目列表撤回。已提交的改动和历史保留。
 
 一次授权由以下范围共同确定：
 
@@ -37,7 +54,7 @@ Agent 页目前可授予的动作如下：
 
 作者可以只勾选当前需要的动作，不需要一次开放全部能力。授权后，明确支持该授权机制的 apply 工具可以在范围内连续执行，不要求每次重复确认。撤回会阻止后续的新写入，但不会删除或回滚已经提交的数据。
 
-对于未经完整审稿的采纳，请在同一条授权中同时包含 `accept_draft` 和 `accept_unreviewed_draft`。当前授权匹配要求一条有效授权覆盖请求所需的全部动作，不能把两个动作拆在两条授权中再合并使用。
+没有启用过全库管理权或全书创作权时，如需开放未经完整审稿的旧采纳流程，请在同一条授权中同时包含 `accept_draft` 和 `accept_unreviewed_draft`。授权匹配要求一条有效授权覆盖请求所需的全部动作，不能把两个动作拆在两条授权中再合并使用。
 
 ## 二、授权保存在哪里
 
@@ -58,7 +75,7 @@ Agent 页右上角的“读取最新结果”用于手动接收 Codex 或其他�
 
 项目授权没有替换所有既有确认流程，也没有引入角色、令牌或多级审批平台。
 
-- 仍带有 `confirm` 或 `approvalToken` 参数的既有工具，继续遵循原来的普通确认语义。
+- 没有启用过全库管理权或全书创作权的项目，既有工具继续遵循原有的普通确认语义。启用后，Agent 的正式提交及其他纳入授权的旧写入入口不能用 `confirm` 或 `approvalToken` 代替当前授权；撤回后也不会退回旧的确认方式。
 - 新的授权型 apply 工具不把调用方传入的 `confirm: true` 当作作者授权证明。
 - 已获得项目授权的动作可以在其范围内自主执行；超出范围时应停下并请作者调整授权。
 - read 和通常的 preview 不需要项目授权。正式写入是否需要授权，以该 apply 工具的当前定义为准。
@@ -69,14 +86,22 @@ Agent 页右上角的“读取最新结果”用于手动接收 Codex 或其他�
 
 一次连续创作可以覆盖 5 章、10 章或几十章；系统没有“每次最多 2 到 3 章”的硬限制。当前 `agent.continueAgentRun` 的 `chapterCount` 接口允许 1 到 1000，但每章仍应独立完成以下流程，不能用一次审阅或一次采纳替代整批章节的判断：
 
+已有批次时先读 [章节工作单](./AGENT_TOOL_API.md#可恢复章节工作单)，不要重新登记。执行、重试和采纳时可传 `responseMode: "work_item"`，把工作单直接接到下一环节；旧工具仍可独立使用。
+
 1. **生成当前章**：新章节可用 `agent.runChapterPipeline` 创建并执行；连续运行可先用 `agent.continueAgentRun` 登记目标章节。该调用只创建首章 job，不会自动创建后续 job 或自动续跑队列。使用返回的当前 `agentRunId` 和 `jobId` 调用 `agent.retryChapterPipeline`；首章正式提交后，再在同一 run 中通过任务编辑创建下一章 job。
-2. **读取正文与审阅材料**：用 `agent.getDraftText` 且显式传 `detail: "full"` 读取正文，并读取生产状态、诊断、完整 trace 和采纳建议。
+2. **读取正文与审阅材料**：按工作单的 `draft.read` 读取完整正文，再看同版的审稿证据；有疑问时用 `agent.getDraftReviewReport` 展开报告，或另读完整 Trace。旧流程可分别读取生产状态、诊断和采纳建议。
 3. **自主作出明确决定**：Codex 必须基于正文和报告明确选择采纳、修订、重试或暂停，并记录具体理由。报告是证据，不代替决定。
 4. **preview 后 apply**：采纳或其他正式写入先生成绑定当前正文、报告和 revision 的 preview，再使用 preview 返回的 hash/revision apply。
 5. **处理候选更新**：人物状态、伏笔、HardCanon、记忆等候选保持独立审核；采纳章节不会自动把候选写成 canon。
 6. **进入下一章**：正式提交后重新读取当前项目状态和下一章目标，再开始下一章。
 
 `agent.continueAgentRun` 只记录较长目标范围并准备首章，不是自动队列执行器。Agent 应按“生成 -> 阅读/审阅 -> 明确决定 -> preview/apply -> 下一章”的顺序推进；下一章 job 由 `agent.applyChapterTaskEdit` 在同一 run 中创建，再交给返回的 `agent.retryChapterPipeline` 执行。
+
+### 跨章修订与回退
+
+用 `agent.startBookRevisionBatch` 登记要改的正式章节 ID 和目标。系统按书中章序排列；重连用 `agent.getChapterWorkItem` 取得当前章。读原文后，生成修订稿或用 `agent.createManualRevisionVersion` 保存已有稿；再用 `agent.reviewRevisionVersion` 调用工作台审稿模型。核对报告后，用 `agent.previewRevisionCommit` 绑定这次通过门禁的报告，再调用 `agent.applyApprovedRevisionCommit`。未通过、本章稿件变动或审稿依据改变时，先处理本章，不能拿旧报告继续。
+
+回退正文时，从版本链读取历史正文，把它保存为本章的新修订候选，走同一条审稿和提交链。系统新增版本，保留恢复前的正文、历史版本和此次审稿证据。
 
 ## 五、章节任务编辑
 
@@ -208,7 +233,7 @@ apply 成功后，按返回值调用：
 
 ### 已完成审稿，但 Codex 不同意报告结论
 
-只要审稿材料完整，就使用 `mode: "reviewed"`。即使质量报告为未通过，Codex 仍可在拥有 `accept_draft` 授权时明确选择采纳；理由必须说明为何不同意阻断结论。系统保留原报告的 `passed: false` 或 blocked 状态，不伪称审稿通过。
+只要审稿材料完整，就使用 `mode: "reviewed"`。**全库管理权和全书创作权**都要求当前稿通过门禁，且不能用占位审稿报告提交。未使用这两种授权的项目保留原有例外：拥有 `accept_draft` 权限时，可以说明为何不同意阻断结论。系统保留原报告的 `passed: false` 或 blocked 状态。
 
 ```json
 {
@@ -229,7 +254,7 @@ apply 成功后，按返回值调用：
 
 ### 审稿尚未完成
 
-只有在审稿材料确实不完整时才使用 `mode: "unreviewed"`，并且同一条授权必须同时包含 `accept_draft` 和 `accept_unreviewed_draft`：
+全库管理权和全书创作权都不支持 `mode: "unreviewed"`。其他项目只有在审稿材料确实不完整、且同一条授权同时包含 `accept_draft` 和 `accept_unreviewed_draft` 时才可使用：
 
 ```json
 {
@@ -268,6 +293,8 @@ apply 示例：
 已经提交成功的 `operationId` 再次调用时只返回原提交结果，必要时补齐提交审计元数据。它不会重新执行世界变更，也不会把当前正文恢复成旧 draft。撤回授权同样不会让这种已提交重试“复活”旧正文。
 
 ## 七、世界资料工具
+
+小说圣经和阶段摘要由 `agent.previewBookReferenceEdit` 预览，再用 `agent.applyBookReferenceEdit` 提交。用 `agent.getWorldActionHistory` 查每次改了什么。回退时以原操作编号重新预览和提交；如果同一条资料随后已被改过，系统会请 Agent 先核对当前内容，不会覆盖那次修改。详细参数见 [工具说明](./AGENT_TOOL_API.md#全书创作入口)。
 
 当前 6 个世界资料工具是资料读取 `agent.getWorldRecords`、`agent.getWorldRecord`，操作记录读取 `agent.getWorldActionReceipt`、`agent.getWorldActionHistory`，以及 `agent.previewWorldAction`、`agent.applyWorldAction`。可用参数和每种实体的 `patch` 字段白名单以当前安装版本的 MCP `tools/list` 为准。世界实体包括 `character`、`character_state`、`foreshadowing`、`timeline_event`、`hard_canon`、`story_direction`；支持的写动作是 `create`、`update`、`set_status` 和 `archive`，不提供 delete。角色和时间线没有归档状态，不能对此二类调用 `set_status` 或 `archive`。
 
@@ -365,6 +392,8 @@ node scripts/validate-agent-authorization-ui.mjs
 node scripts/validate-agent-project-grant-workflow.mjs
 node scripts/validate-agent-chapter-task-tools.mjs --require-native
 node scripts/validate-agent-director-journey.mjs
+node scripts/validate-agent-director-journey.mjs --book-creative --sqlite
+node scripts/validate-agent-director-journey.mjs --library-management --sqlite
 node scripts/validate-agent-world-tools.mjs
 node scripts/validate-agent-pipeline-execution.mjs
 ```
@@ -388,6 +417,10 @@ Registered MCP clients perform `tools/list` discovery through the protocol. From
 ## 1. Granting and revoking access
 
 The author grants or revokes access in the Agent page's Project Authorization panel. Codex and ordinary tool calls cannot grant access to themselves.
+
+In the project list, **授予全库管理权** grants library management for every current and future book in that data file. The Agent can create books, edit project details and references, and archive or restore books. Archives keep manuscripts, drafts, versions, and reviews. Archived books remain readable; restore one before editing it. The grant excludes permanent deletion, other libraries and application settings. Use **书库改动记录** to audit project changes. A project revert restores only the affected fields and refuses to replace later changes to them.
+
+For an existing book, choose **授予全书创作权** in Project Authorization. To authorize a new book, choose **授权 Agent 开书** in the project list and let the Agent create the reserved project. The same grant then covers that book, including Story Bible, stage summaries, and reviewed chapter revisions. It does not cover other projects or app settings. The author can review commits and the before/after reference edit history without confirming each operation.
 
 A grant is matched against all of the following:
 
@@ -414,7 +447,7 @@ The “读取最新结果” button on the Agent page manually adopts results wr
 
 ## 3. Compatibility with ordinary confirmation
 
-Existing tools that still expose `confirm` or `approvalToken` retain their existing confirmation behavior. Caller-provided confirmation is not proof of a project grant. Grant-aware apply tools can run repeatedly within the granted scope without asking for confirmation on every operation; out-of-scope writes must stop and ask the author for an appropriate grant.
+Existing tools that still expose `confirm` or `approvalToken` retain their legacy confirmation behavior for projects that have not opted into library management or full-book creator rights. Covered writes in an opted-in project require an active grant, even after revocation. Grant-aware applies run without separate author confirmation for each operation.
 
 This is not a new role, token, or multi-stage permission platform. Read operations and ordinary previews do not require a project grant. The current apply definition determines whether a formal write consumes one.
 
@@ -441,9 +474,9 @@ After apply, use the returned `nextExecution` to call `agent.retryChapterPipelin
 
 `agent.previewChapterAcceptance` binds the decision to the exact run, job, draft body, review reports, and current revision. `agent.applyChapterAcceptance` commits that preview under the applicable grant.
 
-When review is complete, use `mode: "reviewed"`. Codex may explicitly disagree with a failed or blocked report and accept under `accept_draft`, but it must record a concrete reason. The original failed status remains intact; the system does not claim that review passed.
+When review is complete, use `mode: "reviewed"`. Under library management or full-book creator rights, the exact draft or revision needs a passing quality gate and real review evidence. Other projects retain the existing reviewed exception: Codex may disagree with a failed or blocked report under `accept_draft`, but must record why. The original failed status remains intact.
 
-When review is genuinely incomplete, use `mode: "unreviewed"`. This requires one grant containing both `accept_draft` and `accept_unreviewed_draft`. A completed review cannot be mislabeled as unreviewed. Neither mode automatically accepts pending canon candidates.
+Outside the creator workflow, `mode: "unreviewed"` is only for genuinely incomplete review. It requires one grant containing both `accept_draft` and `accept_unreviewed_draft`. Neither mode automatically accepts pending canon candidates.
 
 Retrying an already committed operation only returns the existing commit and, when needed, repairs missing audit metadata. It does not replay world changes or restore an old draft over the current chapter body, even if the grant was later revoked.
 

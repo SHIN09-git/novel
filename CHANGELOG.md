@@ -2,6 +2,12 @@
 
 ## 简体中文
 
+### 0.1.6-preview.22 - Agent 创作与书库管理
+
+- 新增全书创作权和全库管理权。作者可以授权 Agent 开书、跨项目管理、归档和恢复；小说圣经、阶段摘要及正式版本的改动仍可追溯。
+- 章节工作单可恢复到当前稿和审稿证据。批量写作与修订仍按章审稿，质量门禁通过后才能提交。修复 SQLite 修订提交未加载本次审稿报告的问题。
+- Windows 成品自带 MCP 服务，工作台可复制接入 Codex 的命令，无需源码或独立 Node 环境。
+
 ### 0.1.6-preview.20 - 长篇完稿核查与收尾
 
 - 超过字数上限的可读草稿会保留；有明确证据的截断片段不能采纳。作者可对成稿核查禁词、角色动作，并决定哪些确证违规必须先修。
@@ -212,6 +218,12 @@
 ---
 
 ## English
+
+### 0.1.6-preview.22 - Agent Authoring and Library Management
+
+- Grant an Agent full-book authoring or library management access. Authorized Agents can create, archive and restore books and work across projects; reference edits and manuscript versions retain a history.
+- Resume a chapter from its current draft and review evidence. Batch writing and revision still use per-chapter review and quality checks. SQLite revision submission loads the reports for the revision being committed.
+- The Windows build includes the MCP server and a Codex setup command in Agent Runs. No source checkout or separate Node installation is needed.
 
 ### 0.1.6-preview.20 - Long-Manuscript Checks and Finishing Tools
 

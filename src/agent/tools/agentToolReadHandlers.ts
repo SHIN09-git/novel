@@ -1,10 +1,17 @@
 import { AgentDecisionService } from '../AgentDecisionService'
+import { AgentExecutionControlService } from '../AgentExecutionControlService'
+import type { AgentRuntimeData } from '../AgentRuntime'
+import { AgentAuthorizationService } from '../../main/services/AgentAuthorizationService'
+import { readAgentChapterWorkItem } from './agentChapterWorkItem'
+import { readAgentRevisionReview } from '../revision/agentRevisionReview'
+import { listAgentBookCreationSlots, previewAgentBookReferenceEdit } from './agentBookCreativeTools'
 import { handleRevisionRead } from '../revision/agentRevisionReads'
 import { handleAgentChapterTaskReadTool } from './agentChapterTaskTools'
 import { handleAgentWorldReadTool } from './agentWorldTools'
 import { getAgentDecisionInbox, previewAgentCandidateDecisions } from './agentCandidateDecisionTools'
 import { getAgentCandidateDecisionHistory, previewAgentCandidateDecisionUndo } from './agentCandidateUndoTools'
 import { AgentReadableSummaryService } from '../AgentReadableSummaryService'
+import { AGENT_DRAFT_REPORT_KINDS, assertAgentDraftContent, readAgentDraftReviewReport } from '../agentDraftReview'
 import { compact, redactSensitiveText } from '../agentReadableText'
 import type { AppData, ID } from '../../shared/types'
 import {
@@ -61,6 +68,8 @@ export function handleAgentReadTool(
   const revisionRead = handleRevisionRead(name, args, data)
   if (revisionRead.handled) return revisionRead
   switch (name) {
+    case 'agent.getRevisionReview':
+      return { handled: true, payload: readAgentRevisionReview(data, args) }
     case 'agent.getCandidateDecisionHistory':
       return { handled: true, payload: getAgentCandidateDecisionHistory(data, args) }
     case 'agent.previewCandidateDecisionUndo':
@@ -83,8 +92,24 @@ export function handleAgentReadTool(
       return { handled: true, payload: AgentReadableSummaryService.getChapterVersionChain(data, findProjectId(data, args), requiredPositiveInteger(args, 'chapterOrder')) }
     case 'agent.getChapterText':
       return { handled: true, payload: AgentReadableSummaryService.getChapterText(data, findProjectId(data, args), requiredPositiveInteger(args, 'chapterOrder'), readOptions(args)) }
-    case 'agent.getDraftText':
-      return { handled: true, payload: AgentReadableSummaryService.getDraftText(data, requiredString(args, 'draftId'), readOptions(args)) }
+    case 'agent.getDraftText': {
+      const id = requiredString(args, 'draftId')
+      if (args.expectedDraftContentHash !== undefined) {
+        const draft = data.generatedChapterDrafts.find(item => item.id === id)
+        if (!draft) throw new Error(`Draft not found: ${id}`)
+        assertAgentDraftContent(draft, requiredString(args, 'expectedDraftContentHash'))
+      }
+      return { handled: true, payload: AgentReadableSummaryService.getDraftText(data, id, readOptions(args)) }
+    }
+    case 'agent.getDraftReviewReport': {
+      const kind = AGENT_DRAFT_REPORT_KINDS.find(item => item === args.kind)
+      if (!kind) throw new Error('Unknown draft review report kind.')
+      return { handled: true, payload: readAgentDraftReviewReport(data, {
+        projectId: findProjectId(data, args), jobId: requiredString(args, 'jobId'), draftId: requiredString(args, 'draftId'), kind,
+        expectedDraftContentHash: args.expectedDraftContentHash === undefined ? undefined : requiredString(args, 'expectedDraftContentHash'),
+        reportId: args.reportId === undefined ? undefined : requiredString(args, 'reportId')
+      }) }
+    }
     case 'agent.getPromptSnapshot':
       return { handled: true, payload: getPromptSnapshot(data, requiredString(args, 'snapshotId'), args) }
     case 'agent.getGenerationPrompt':
@@ -110,5 +135,32 @@ export function handleAgentReadTool(
       return { handled: true, payload: AgentDecisionService.summarizeAgentRun(data, requiredString(args, 'agentRunId')) }
     default:
       return { handled: false }
+  }
+}
+
+export async function handleAgentRuntimeReadTool(
+  name: string, args: Record<string, unknown>, runtime: AgentRuntimeData
+): Promise<AgentToolHandlerResult> {
+  const { data, storagePath, userDataPath } = runtime
+  switch (name) {
+    case 'agent.listBookCreationSlots':
+      return { handled: true, payload: await listAgentBookCreationSlots(runtime, args) }
+    case 'agent.previewBookReferenceEdit':
+      return { handled: true, payload: previewAgentBookReferenceEdit(runtime, args) }
+    case 'agent.getChapterWorkItem':
+      return { handled: true, payload: await readAgentChapterWorkItem(runtime, args) }
+    case 'agent.getProjectAuthorization': {
+      const projectId = findProjectId(data, args)
+      const authority = new AgentAuthorizationService(userDataPath)
+      const grants = storagePath ? await authority.list(storagePath, projectId) : []
+      const library = storagePath ? await authority.getLibraryAuthorization(storagePath) : null
+      return { handled: true, payload: { projectId, grants, ...(library ? {
+        libraryGrant: { id: library.id, purpose: library.purpose, createdAt: library.createdAt }
+      } : {}) } }
+    }
+    case 'agent.getPipelineProgress':
+      return { handled: true, payload: await AgentExecutionControlService.getProgress(data, runtime, requiredString(args, 'jobId')) }
+    default:
+      return handleAgentReadTool(name, args, data)
   }
 }

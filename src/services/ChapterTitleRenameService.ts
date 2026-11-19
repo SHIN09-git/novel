@@ -6,6 +6,7 @@ import { stableDecisionJson } from './candidateDecisionPrimitives'
 
 export interface ChapterTitleState {
   projectId: string
+  projectArchived?: boolean
   chapters: Pick<Chapter, 'id' | 'order' | 'projectId' | 'title' | 'archivedAt'>[]
   receipts: ChapterTitleReceipt[]
 }
@@ -55,6 +56,7 @@ function newTitle(old: string, title: string | undefined, mode: ChapterTitleRena
 
 export function chapterTitleRows(state: ChapterTitleState, command: ChapterTitleRename): ChapterTitleRow[] {
   if (state.projectId !== command.projectId) throw new Error('改名目标不属于当前项目。')
+  if (state.projectArchived) throw new Error('项目已归档，请先恢复项目。')
   const targets = new Map<string, ChapterTitleState['chapters'][number]>()
   const ambiguous = new Set<string>()
   for (const chapter of state.chapters) {

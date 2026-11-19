@@ -22,7 +22,7 @@ import { AIService as MainAITransportService } from '../main/services/AIService'
 import { AIHttpClient } from '../main/services/AIHttpClient'
 import { appendProjectUsageAttempts } from '../storage/projectUsageJournal'
 import { CodexCliService } from '../main/services/CodexCliService'
-import { agentApiKey, apiEndpoint, backupKeyAfterRejection, readApiRegistry, type ApiRegistry } from '../main/services/ApiRegistry'
+import { agentApiKey, apiEndpoint, apiKeyHeaderFor, backupKeyAfterRejection, readApiRegistry, type ApiRegistry } from '../main/services/ApiRegistry'
 import { DiagnosticsService } from '../main/services/DiagnosticsService'
 import { TokenBucketRateLimiter } from '../main/RateLimiter'
 import { projectData } from '../renderer/src/utils/projectData'
@@ -31,10 +31,15 @@ import { parseOutput, type PipelineRuntimeOptions } from '../renderer/src/views/
 import type { PipelineDiagnosticsAdapter } from '../renderer/src/views/generation/pipelineRunnerTypes'
 import { saveAgentRuntimeData, type AgentRuntimeData } from './AgentRuntime'
 import { AGENT_PIPELINE_STEP_ORDER, AgentRunService } from './AgentRunService'
+import { resolveAgentPipelineResumeStep } from './agentPipelineResume'
 import { AgentExecutionControlService } from './AgentExecutionControlService'
 import { checkPipelineRunTarget, describePendingRunTarget, firstPendingRunTarget, isMultiChapterRun } from './agentBatchWriteback'
 import { BATCH_EXECUTION_PREFIX, batchModelRequestGuard, guardModelCalls, pauseInterruptedBatchAttempt, reopenPipelineRuntime } from './agentPipelineWritebackGuard'
 import { StorageRevisionConflictError } from '../storage/StorageService'
+import { claimAgentJobExecution } from './agentJobExecution'
+import { latestAgentDraft } from './agentDraftActions'
+
+export { resolveAgentPipelineResumeStep } from './agentPipelineResume'
 
 export interface ExecuteAgentChapterPipelineInput {
   /** Older callers pass a snapshot here. Execution always reopens the persisted run. */
@@ -74,39 +79,6 @@ function now(): string {
 
 function newId(prefix: string): ID {
   return `${prefix}-${randomUUID()}`
-}
-
-export function resolveAgentPipelineResumeStep(
-  data: AppData,
-  jobId: ID,
-  requestedStep?: ChapterGenerationStepType,
-  requestedMode?: PipelineMode
-): ChapterGenerationStepType | null {
-  const steps = data.chapterGenerationSteps.filter((step) => step.jobId === jobId)
-  if (requestedStep) {
-    return steps.some((step) => step.type === requestedStep) ? requestedStep : null
-  }
-  const job = data.chapterGenerationJobs.find((item) => item.id === jobId)
-  const recipe = job
-    ? PipelineRecipeService.resolveRecipe(
-        requestedMode
-          ? undefined
-          : job.pipelineRecipe ?? job.pipelineRecipeId ?? job.pipelineMode,
-        requestedMode ?? job.pipelineMode ?? 'standard'
-      )
-    : null
-  const executableSteps = recipe
-    ? new Set(PipelineRecipeService.resolveExecutionPlan(recipe, requestedMode ?? job?.pipelineMode ?? 'standard').steps
-        .filter((decision) => decision.run)
-        .map((decision) => decision.type))
-    : null
-  for (const status of ['failed', 'running', 'pending'] as const) {
-    const next = AGENT_PIPELINE_STEP_ORDER.find((type) =>
-      executableSteps?.has(type) !== false && steps.some((step) => step.type === type && step.status === status)
-    )
-    if (next) return next
-  }
-  return null
 }
 
 function outputForRestart(step: ChapterGenerationStep, fromStep: ChapterGenerationStepType): string {
@@ -264,6 +236,7 @@ export function createHeadlessTransport(settings: AppData['settings'], registry:
   const transportService = new MainAITransportService(
     { getApiKey: async (baseUrl) => agentApiKey(registry, baseUrl, settings.baseUrl),
       getBackupApiKey: async (baseUrl, rejected) => backupKeyAfterRejection(registry, baseUrl, rejected),
+      getApiKeyHeader: async (baseUrl) => apiKeyHeaderFor(registry, baseUrl),
       isManagedEndpoint: async (baseUrl) => registry.has(apiEndpoint(baseUrl)) },
     {
       openai: new TokenBucketRateLimiter(60, 1),
@@ -352,8 +325,24 @@ export async function executeAgentChapterPipeline(
   input: ExecuteAgentChapterPipelineInput,
   dependencies: AgentPipelineExecutorDependencies = {}
 ): Promise<ExecuteAgentChapterPipelineResult> {
+  if (!input.runtime.storagePath) throw new Error('没有可继续执行的书库。')
+  const release = await claimAgentJobExecution(input.runtime.storagePath, input.jobId)
+  try {
+    return await executeClaimedAgentChapterPipeline(input, dependencies)
+  } finally {
+    await release()
+  }
+}
+
+async function executeClaimedAgentChapterPipeline(
+  input: ExecuteAgentChapterPipelineInput,
+  dependencies: AgentPipelineExecutorDependencies
+): Promise<ExecuteAgentChapterPipelineResult> {
   const runtime = await reopenPipelineRuntime(input.runtime)
   const { run, job } = checkPipelineRunTarget(runtime.data, input.agentRunId, input.jobId)
+  if (latestAgentDraft(runtime.data, job.projectId, job.id)?.status === 'rejected') {
+    throw new Error('当前草稿已拒绝。请从章节工作单重新准备本章任务。')
+  }
   const executionId = isMultiChapterRun(run) ? BATCH_EXECUTION_PREFIX + randomUUID() : undefined
   try {
     const result = await executeLoadedPipeline(input, dependencies, runtime, run, job, executionId)

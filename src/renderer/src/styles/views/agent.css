@@ -18,6 +18,12 @@
   color: var(--agent-action-text);
 }
 
+.agent-book-change-field {
+  padding-block: 0.4rem;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+
 .agent-authorization-panel {
   border: 1px solid var(--line);
   border-radius: var(--radius-lg);

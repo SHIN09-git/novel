@@ -4,6 +4,7 @@ import type { ChapterTitleCommit, ChapterTitlePreview, ChapterTitleRename } from
 import type { ChapterTitleWriteResult } from '../shared/ipc/ipcTypes'
 import { replayNeedsReload, StorageRevisionConflictError } from '../shared/storageRevisionConflict'
 import type { ProjectUsageReport } from '../shared/projectUsage'
+import type { AgentLibraryGrant } from '../shared/types/agentAuthorization'
 import type {
   ChatCompletionRequest,
   CancelAiCallResult,
@@ -285,6 +286,14 @@ const novelDirector = {
       invokeOrThrow<DiagnosticsEvaluateQualityGateResult>(IPC_CHANNELS.DIAGNOSTICS_EVALUATE_QUALITY_GATE, request)
   },
   agentAuthorization: {
+    getLibraryAuthorization: () =>
+      invokeOrThrow<AgentLibraryGrant | null>(IPC_CHANNELS.AGENT_AUTHORIZATION_LIST, { purpose: 'library_manager' }),
+    grantLibrary: () =>
+      invokeOrThrow<AgentLibraryGrant>(IPC_CHANNELS.AGENT_AUTHORIZATION_GRANT, { purpose: 'library_manager' }),
+    revokeLibrary: (grantId: string) =>
+      invokeOrThrow<AgentLibraryGrant | null>(IPC_CHANNELS.AGENT_AUTHORIZATION_REVOKE, {
+        purpose: 'library_manager', grantId: assertText(grantId, 'grantId')
+      }),
     list: (projectId: string) =>
       invokeOrThrow<AgentAuthorizationListResult>(IPC_CHANNELS.AGENT_AUTHORIZATION_LIST, {
         projectId: assertText(projectId, 'projectId')
@@ -292,12 +301,15 @@ const novelDirector = {
     grant: (request: AgentAuthorizationGrantRequest) =>
       invokeOrThrow<AgentAuthorizationGrantResult>(IPC_CHANNELS.AGENT_AUTHORIZATION_GRANT, {
         ...request,
-        projectId: assertText(request.projectId, 'projectId')
+        ...('projectId' in request ? { projectId: assertText(request.projectId, 'projectId') } : {})
       }),
+    listBookCreationGrants: () =>
+      invokeOrThrow<AgentAuthorizationListResult>(IPC_CHANNELS.AGENT_AUTHORIZATION_LIST, { purpose: 'book_creation' }),
     revoke: (request: AgentAuthorizationRevokeRequest) =>
       invokeOrThrow<AgentAuthorizationRevokeResult>(IPC_CHANNELS.AGENT_AUTHORIZATION_REVOKE, {
         projectId: assertText(request.projectId, 'projectId'),
-        grantId: assertText(request.grantId, 'grantId')
+        grantId: assertText(request.grantId, 'grantId'),
+        ...(request.purpose ? { purpose: request.purpose } : {})
       })
   }
 }

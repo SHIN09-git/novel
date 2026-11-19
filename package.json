@@ -1,6 +1,6 @@
 {
   "name": "novel-director",
-  "version": "0.1.6-preview.21.1",
+  "version": "0.1.6-preview.22",
   "productName": "Novel Director",
   "description": "AI long-form novel creation management desktop MVP",
   "license": "MIT",
@@ -9,7 +9,7 @@
   "type": "module",
   "scripts": {
     "dev": "electron-vite dev",
-    "build": "tsc --noEmit && electron-vite build",
+    "build": "tsc --noEmit && electron-vite build && node scripts/build-packaged-agent.mjs",
     "dist:win": "node scripts/run-dist-win.mjs",
     "smoke": "node scripts/run-smoke-preview.mjs",
     "smoke:packaged": "node scripts/smoke-packaged-app.mjs",

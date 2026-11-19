@@ -3,6 +3,7 @@ import type { AgentDecision, AppData, RevisionSession, RevisionVersion } from '.
 import { draftContentHash } from '../../services/DraftDiagnosticBindingService'
 import { assertRevisionSourceMatches } from '../../services/RevisionSourceBindingService'
 import { isChapterArchived } from '../../services/ChapterLifecycleService'
+import { assertProjectWritable } from '../../services/ProjectLifecycleService'
 import { AgentRunService } from '../AgentRunService'
 import { requiredString } from '../tools/agentToolArguments'
 
@@ -31,6 +32,8 @@ export interface RevisionAudit {
   contextHash?: string
   aiRunId?: string
   modelConfigHash?: string
+  qualityGateReportId?: string
+  consistencyReviewReportId?: string
 }
 
 const auditPrefix = 'agent-revision-v1:'
@@ -108,10 +111,11 @@ export function resolveRevisionSource(data: AppData, projectId: string, chapterI
     projectId, chapterId, sourceDraftId, sourceJobId: draft?.jobId ?? null, sourceContentHash: draftContentHash(body),
     sourceChapterContentHash: chapter ? draftContentHash(chapter.body) : null
   }
-  return { source, body, chapter, draft }
+  return { source, body, chapter, draft, project: data.projects.find(item => item.id === projectId) }
 }
 
 export function assertRevisionWritable(source: ReturnType<typeof resolveRevisionSource>): void {
+  assertProjectWritable(source.project)
   if (source.chapter && isChapterArchived(source.chapter)) throw new Error('Restore the archived chapter before revising it.')
   if (!source.body.trim()) throw new Error('Revision source body is empty.')
 }

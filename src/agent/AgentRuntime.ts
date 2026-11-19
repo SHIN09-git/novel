@@ -17,6 +17,7 @@ import { StorageRevisionConflictError } from '../storage/StorageService'
 import { libraryStores, writeNewLibrary } from '../main/libraryFiles'
 import { AgentAuthorizationService } from '../main/services/AgentAuthorizationService'
 import { candidateDecisionChapterOrders } from './agentAuthorizationScope'
+import { assertProjectWritable } from '../services/ProjectLifecycleService'
 import { resolveAgentRuntimeStoragePath, storageSourceForPath, type AgentLibraryChoice, type AgentRuntimeLoadOptions } from './agentLibraryChoice'
 
 export { resolveAgentRuntimeStoragePath, type AgentRuntimeLoadOptions } from './agentLibraryChoice'
@@ -174,6 +175,7 @@ export async function saveAgentCandidateDecision(
     if (!previous) {
       // Assess the current storage snapshot; CAS pins it to the short write.
       if (expectedRevision !== runtime.revision || expectedRevision !== current.revision) throw new StorageRevisionConflictError()
+      assertProjectWritable(current.data.projects.find(project => project.id === command.projectId))
       if (command.actor.agentRunId && !current.data.agentRuns.some((run) => run.id === command.actor.agentRunId && run.projectId === command.projectId)) {
         throw new Error(`AgentRun does not belong to project: ${command.actor.agentRunId}`)
       }
@@ -188,18 +190,20 @@ export async function saveAgentCandidateDecision(
     const write = (authorizedCommand: CandidateDecisionCommand) => storage.executeCandidateDecision(authorizedCommand, expectedRevision)
     // The authority lock also serializes revocation with this one short commit.
     // It is never held while a provider generates or reviews prose.
-    const result = requiresGrant
-      ? await new AgentAuthorizationService(runtime.userDataPath).withAuthorization({
+    const result = !previous
+      ? await new AgentAuthorizationService(runtime.userDataPath).withCommitAuthority({
           storagePath: storage.getStoragePath(), projectId: command.projectId,
           chapterOrders: candidateDecisionChapterOrders(current.data, command),
           actions: ['accept_high_risk_candidates']
-        }, (grant) => write({ ...command, confirmedHighRisk: true, authorizationGrantId: grant.id })).catch((error: unknown) => {
+        }, !requiresGrant, (grant) => write(grant
+          ? { ...command, ...(requiresGrant ? { confirmedHighRisk: true } : {}), authorizationGrantId: grant.id }
+          : command)).catch((error: unknown) => {
           if (error instanceof Error && 'code' in error && error.code === 'AGENT_AUTHORIZATION_REQUIRED') {
-            throw new CandidateDecisionError('High-risk candidate acceptance or undo requires a trusted human path or an active project grant; client confirmation flags cannot authorize it.', 'AGENT_CANDIDATE_AUTHORIZATION_REQUIRED')
+            throw new CandidateDecisionError('This candidate decision or undo requires a trusted human path or an active author grant; client confirmation flags cannot authorize it.', 'AGENT_CANDIDATE_AUTHORIZATION_REQUIRED')
           }
           throw error
         })
-      : await write(previous?.authorizationGrantId
+      : await write(previous.authorizationGrantId
           ? { ...command, confirmedHighRisk: true, authorizationGrantId: previous.authorizationGrantId }
           : command)
     if (result.replayed) {

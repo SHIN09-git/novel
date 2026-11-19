@@ -20,6 +20,8 @@ npm.cmd run agent:setup:codex
 4. 正式采纳、修订写回和高风险候选处理必须经过 action preview、revision 校验和事务化 commit。预览变化后再提交，不能把自填 `confirm`、口头推断或旧授权当成权限。
 5. 用 `agent.getProjectAuthorization` 核对作者在桌面授予的项目权限。角色硬状态、伏笔、HardCanon、世界规则和记忆更新只有在授权范围内才能决定并提交；未获授权时保留人工确认。
 
+全库管理权由作者在项目列表授予。用 `agent.getLibraryAuthorization` 核对。启用后，使用明确的项目 ID 跨作品操作；开书时不传项目 ID。归档和恢复也要预览并提交。归档作品仍可读取，恢复后才能继续写作。批量工作仍逐章审稿并通过质量门禁，不用一次结果代表整批。
+
 任务、世界资料编辑和授权撤回见 [项目授权指南](./docs/AGENT_PROJECT_AUTHORIZATION.md)。只读工具必须只读打开现有数据，不初始化 schema、不切换 WAL、不写入用户数据。
 
 ## `lieflat-less-ai-tone` 的使用边界

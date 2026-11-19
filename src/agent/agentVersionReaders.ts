@@ -77,6 +77,7 @@ export function getVersionDetail(
   const chapter = requireReadableChapter(data, projectId, chapterOrder)
   const entry = buildChapterVersionChain(data, chapter.id).find((item) => item.id === versionId) ?? null
   if (!entry) throw new Error(`Version not found: ${versionId}`)
+  const revision = data.revisionCommitBundles.find(item => item.projectId === projectId && item.newChapterVersionId === entry.version?.id)
   const canon = options.detail === 'full' || options.includeDiagnostics ? currentHardCanonAudit(data, {
     projectId, chapterId: chapter.id, chapterOrder, body: entry.body
   }) : null
@@ -91,7 +92,11 @@ export function getVersionDetail(
     createdAt: entry.createdAt,
     linkedChapterCommitId: entry.linkedChapterCommitId,
     linkedRevisionCommitId: entry.linkedRevisionCommitId,
-    linkedGenerationRunTraceId: entry.linkedGenerationRunTraceId
+    linkedGenerationRunTraceId: entry.linkedGenerationRunTraceId,
+    ...(revision?.qualityGateReportId ? { revisionReview: {
+      tool: 'agent.getRevisionReview', arguments: { projectId, agentRunId: revision.actor?.agentRunId,
+        versionId: revision.revisionVersionId, reportId: revision.qualityGateReportId, detail: 'full' }
+    } } : {})
   })
 }
 

@@ -2,7 +2,7 @@ import { safeStorage } from 'electron'
 import { randomUUID } from 'node:crypto'
 import { mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
-import { apiEndpoint, backupKeyAfterRejection, readApiRegistry, routeKey, sameApiEndpoint, type ApiRegistry } from './services/ApiRegistry'
+import { apiEndpoint, apiKeyHeaderFor, backupKeyAfterRejection, readApiRegistry, routeKey, sameApiEndpoint, type ApiRegistry } from './services/ApiRegistry'
 
 interface CredentialFile {
   apiKey?: string
@@ -54,6 +54,10 @@ export class SecureCredentialService {
       backupAvailable: Boolean(route?.backupKeyEnv && process.env[route.backupKeyEnv]?.trim()),
       storedForEndpoint: storedForEndpoint(file, registry, baseUrl)
     }
+  }
+
+  async getApiKeyHeader(baseUrl: string): Promise<string | undefined> {
+    return apiKeyHeaderFor(await readApiRegistry(), baseUrl)
   }
 
   async getBackupApiKey(baseUrl: string, rejected: string): Promise<string> {

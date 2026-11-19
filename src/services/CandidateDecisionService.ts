@@ -18,6 +18,7 @@ import { CandidateDecisionError, stableDecisionJson as stableJson, decisionFinge
   CANDIDATE_DECISION_COLLECTIONS, validateDecisionEnvelope } from './candidateDecisionPrimitives'
 import { captureCandidateDecisionEffects } from './candidateDecisionEffects'
 import { applyCandidateDecisionUndo } from './CandidateDecisionUndoService'
+import { readCandidateDraftSource, STALE_CANDIDATE_SOURCE } from './CandidateDraftSource'
 export { CandidateDecisionError, CANDIDATE_DECISION_COLLECTIONS } from './candidateDecisionPrimitives'
 const compact = (text: string) => text.replace(/\s+/g, ' ').trim().slice(0, 700)
 
@@ -151,15 +152,21 @@ export function previewCandidateDecisions(data: AppData, input: {
     const original = prepared.audit ? describeCandidate(data, { ...prepared.selection, amendment: undefined }, originalCandidate) : edited
     const warnings = [...original.warnings, ...edited.warnings.filter((warning) => !original.warnings.includes(warning))]
     const risk = higherRisk(original.risk, edited.risk)
+    const { status: sourceStatus } = readCandidateDraftSource(data, originalCandidate)
+    if (sourceStatus === 'stale' && !warnings.includes(STALE_CANDIDATE_SOURCE)) warnings.push(STALE_CANDIDATE_SOURCE)
+    // Preserve fingerprints issued before source binding for unverified legacy records.
+    const source = sourceStatus === 'unverified' ? {} : { sourceStatus }
     const fingerprintInput = prepared.audit
-      ? { context: targetContext(data, prepared.selection, candidate), originalCandidate, amendment: prepared.selection.amendment, risk, warnings }
-      : { context: targetContext(data, prepared.selection, candidate), risk, warnings }
+      ? { context: targetContext(data, prepared.selection, candidate), originalCandidate, amendment: prepared.selection.amendment, risk, warnings, ...source }
+      : { context: targetContext(data, prepared.selection, candidate), risk, warnings, ...source }
     return { ...prepared.selection, expectedFingerprint: fingerprint(fingerprintInput),
       title: selection.kind === 'memory' ? '记忆更新' : '角色状态变化',
-      summary: compact(edited.summary), evidence: compact(candidate.evidence || ''), risk, warnings,
+      summary: compact(edited.summary), evidence: compact(candidate.evidence || ''), risk, warnings, sourceStatus,
       ...(prepared.audit ? { amendmentPreview: { before: prepared.audit.before, after: prepared.audit.after } } : {}) }
   })
-  return { projectId: input.projectId, items, requiresConfirmation: items.some((item) => item.decision === 'accept' && item.risk === 'high') }
+  return { projectId: input.projectId, items,
+    requiresConfirmation: !items.some(item => item.decision === 'accept' && item.sourceStatus === 'stale') &&
+      items.some(item => item.decision === 'accept' && item.risk === 'high') }
 }
 
 function validateStateTarget(data: AppData, candidate: CharacterStateChangeCandidate) {
@@ -233,6 +240,9 @@ export function applyCandidateDecisionCommand(data: AppData, command: CandidateD
   const previewSelections = decisions.map(({ kind, candidateId, decision, amendment }) =>
     ({ kind, candidateId, decision, ...(amendment ? { amendment } : {}) }))
   const preview = previewCandidateDecisions(data, { projectId: command.projectId, decisions: previewSelections })
+  if (preview.items.some(item => item.decision === 'accept' && item.sourceStatus === 'stale')) {
+    throw new CandidateDecisionError(STALE_CANDIDATE_SOURCE, 'CANDIDATE_SOURCE_STALE')
+  }
   for (let index = 0; index < preview.items.length; index++) {
     if (preview.items[index].expectedFingerprint !== decisions[index].expectedFingerprint) {
       throw new CandidateDecisionError('候选或关联记录已改变，请重新查看后确认。', 'CANDIDATE_PREVIEW_STALE')

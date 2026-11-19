@@ -117,7 +117,7 @@ export default function App() {
     )
   }
 
-  const currentProject = data.projects.find((project) => project.id === currentProjectId) ?? null
+  const currentProject = data.projects.find((project) => project.id === currentProjectId && !project.archivedAt) ?? null
 
   function renderCurrentView(activeData: AppData, activeProject: Project) {
     switch (view) {
@@ -276,7 +276,7 @@ export default function App() {
           <Suspense fallback={<div className="view-loading">正在加载页面...</div>}>{renderCurrentView(data, currentProject)}</Suspense>
         </ErrorBoundary>
       </Shell> : <Suspense fallback={<div className="view-loading">正在加载项目列表...</div>}>
-        <HomeView data={data} saveData={saveData} touchProject={touchProject} importData={importStoredData} setProjectId={setCurrentProjectId} setView={setView} />
+        <HomeView data={data} saveData={saveData} touchProject={touchProject} importData={importStoredData} setProjectId={setCurrentProjectId} setView={setView} onReload={reloadAfterStorageConflict} />
       </Suspense>}
       {hasStorageConflict || needsWritebackCheck
         ? <StorageConflictNotice onReload={reloadAfterStorageConflict} writeback={needsWritebackCheck && !hasStorageConflict} /> : null}

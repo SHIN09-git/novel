@@ -7,13 +7,14 @@ import { buildRevisionAiContext } from '../../renderer/src/views/revision/revisi
 import { findRewriteRange } from '../../renderer/src/components/aiRewriteResultModel'
 import { looksLikeFullChapterRevision } from '../../renderer/src/utils/revisionMerge'
 import { createHeadlessTransport } from '../AgentPipelineExecutor'
+import { assertRevisionBatchTarget } from '../agentBatchWriteback'
 import { agentApiKey, apiEndpoint, readApiRegistry } from '../../main/services/ApiRegistry'
 import { reloadAgentRuntimeData, saveAgentRuntimeData, type AgentRuntimeData } from '../AgentRuntime'
 import { findProjectId, requiredString } from '../tools/agentToolArguments'
 import { readRevisionVersion } from './agentRevisionReads'
 import {
   assertRevisionWritable, checkKnownAgentSource, checkRevisionFields, checkSourceHashes, commandIdentity, recordRevisionOperation,
-  replayRevisionOperation, resolveRevisionSource, revisionFingerprint, revisionHashFields, revisionSession,
+  replayRevisionOperation, resolveRevisionSource, revisionFingerprint, revisionHashFields, revisionRun, revisionSession,
   revisionWriteFields, type RevisionAudit
 } from './agentRevisionModel'
 
@@ -35,6 +36,7 @@ export async function generateAgentRevisionVersion(
   if (revisionFingerprint(request) !== requiredString(args, 'expectedRequestHash')) throw new Error('Revision request changed.')
   const resolved = resolveRevisionSource(data, projectId, session.chapterId, session.sourceDraftId)
   assertRevisionWritable(resolved)
+  assertRevisionBatchTarget(data, revisionRun(data, projectId, identity.agentRunId), session.chapterId)
   checkSourceHashes(resolved.source, args)
   checkKnownAgentSource(data, resolved.source, 'request', request.id, revisionFingerprint(request))
   if (request.sourceDraftContentHash && request.sourceDraftContentHash !== resolved.source.sourceContentHash) throw new Error('Revision request belongs to an older source.')
@@ -88,6 +90,7 @@ export async function generateAgentRevisionVersion(
   const current = await reloadAgentRuntimeData(runtime)
   const replay = replayRevisionOperation(current.data, projectId, identity)
   if (replay?.versionId) return { ...readRevisionVersion(current.data, projectId, replay.versionId), replayed: true }
+  assertRevisionWritable(resolveRevisionSource(current.data, projectId, session.chapterId, session.sourceDraftId))
   const currentSession = revisionSession(current.data, projectId, session.id)
   if (revisionFingerprint(currentSession) !== revisionFingerprint(session) ||
     revisionFingerprint(current.data.revisionRequests.find((item) => item.id === request.id)) !== audit.requestHash) {

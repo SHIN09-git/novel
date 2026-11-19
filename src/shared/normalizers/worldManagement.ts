@@ -1,8 +1,9 @@
 import type { WorldManagementReceipt } from '../types/worldManagement'
 import { arrayOrEmpty, objectOrEmpty, stringValue } from './common'
 
-const entities = new Set(['character', 'character_state', 'foreshadowing', 'timeline_event', 'hard_canon', 'story_direction'])
-const actions = new Set(['create', 'update', 'set_status', 'archive'])
+const entities = new Set(['character', 'character_state', 'foreshadowing', 'timeline_event', 'hard_canon', 'story_direction',
+  'project', 'story_bible', 'stage_summary'])
+const actions = new Set(['create', 'update', 'set_status', 'archive', 'restore'])
 
 function validTimestamp(value: string): boolean {
   return Boolean(value) && Number.isFinite(Date.parse(value))
@@ -34,6 +35,7 @@ export function normalizeWorldManagementReceipts(value: unknown): WorldManagemen
       source: {
         kind: 'agent_director', reason,
         ...(stringValue(source.agentRunId) ? { agentRunId: stringValue(source.agentRunId) } : {}),
+        ...(stringValue(source.restoredFromOperationId) ? { restoredFromOperationId: stringValue(source.restoredFromOperationId) } : {}),
         ...(requestedAt && validTimestamp(requestedAt) ? { requestedAt } : {})
       },
       authorizationGrantId,
