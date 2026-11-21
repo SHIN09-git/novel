@@ -1,4 +1,5 @@
 import type { ApiProvider, ID } from './base'
+import type { ReasoningEffort } from '../reasoningEffort'
 import type { ChapterTask } from './project'
 
 export type PipelineMode = 'conservative' | 'standard' | 'aggressive'
@@ -61,6 +62,7 @@ export interface PipelineAIModelConfig {
   codexCliPath: string
   codexCliModel: string
   temperature: number
+  reasoningEffort?: ReasoningEffort | null
   maxTokens: number
   retryEnabled: boolean
   maxRetries: number

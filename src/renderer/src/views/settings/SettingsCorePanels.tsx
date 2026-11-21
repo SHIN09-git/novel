@@ -4,6 +4,7 @@ import { Field, NumberInput, SelectField, TextInput, Toggle } from '../../compon
 import { getNovelDirectorAiApi } from '../../platform/novelDirectorBridge'
 import type { SaveDataOutcome } from '../../utils/saveDataState'
 import type { SettingsCredentialController } from './useSettingsCredentials'
+import { ReasoningEffortField } from './ReasoningEffortField'
 
 interface SettingsCorePanelsProps {
   settings: AppSettings
@@ -168,6 +169,7 @@ export function SettingsCorePanels({ settings, updateSettings, credentials, work
             hint={isCodexCli ? 'Codex CLI 不提供完全等价的 max_tokens 参数；工作台会把它作为输出长度约束写入任务。' : undefined}
             onChange={(maxTokens) => updateSettings({ maxTokens: maxTokens ?? 8000 })}
           />
+          <ReasoningEffortField config={settings} onChange={reasoningEffort => void updateSettings({ reasoningEffort })} />
           <NumberInput
             label="单次 AI 调用超时（秒）"
             value={Math.round(settings.requestTimeoutMs / 1000)}

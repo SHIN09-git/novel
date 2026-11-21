@@ -4,6 +4,7 @@ import { constants as fsConstants } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { basename, extname, isAbsolute, join, resolve } from 'node:path'
 import type { ChatCompletionRequest, ChatCompletionResult, CodexCliStatusResult } from '../../shared/ipc/ipcTypes'
+import type { ReasoningEffort } from '../../shared/reasoningEffort'
 
 interface CodexCliLogger {
   info(message: string): void
@@ -15,6 +16,7 @@ interface CodexCliCompletionInput {
   model: string
   messages: ChatCompletionRequest['messages']
   maxTokens: number
+  reasoningEffort?: ReasoningEffort | null
   signal: AbortSignal
   timeoutMs: number
   onDispatch?: () => void
@@ -319,6 +321,7 @@ export class CodexCliService {
       outputPath
     ]
     if (model) args.push('--model', model)
+    if (input.reasoningEffort) args.push('-c', `model_reasoning_effort="${input.reasoningEffort}"`)
     args.push('-')
 
     this.logger.info(

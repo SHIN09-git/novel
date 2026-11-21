@@ -109,6 +109,7 @@ import { normalizeAgentActionPreview, normalizeAgentRun } from './agent'
 import { normalizeWorldManagementReceipts } from './worldManagement'
 import { normalizeChapterTask, normalizeChapterTaskEdit, normalizePipelineMode, normalizePipelineRecipeReference } from './generation'
 import { normalizePipelineAIRoleConfigs, normalizePipelineAIRunConfig } from './pipelineRunConfig'
+import { isReasoningEffort } from '../reasoningEffort'
 
 const LEGACY_DEFAULT_AI_TIMEOUT_MS = 120_000
 
@@ -462,6 +463,7 @@ export function normalizeAppData(input: Partial<AppData>): AppData {
           : DEFAULT_SETTINGS.apiProvider,
       codexCliPath: stringValue(rawSettings.codexCliPath) || DEFAULT_SETTINGS.codexCliPath,
       codexCliModel: stringValue(rawSettings.codexCliModel),
+      reasoningEffort: isReasoningEffort(rawSettings.reasoningEffort) ? rawSettings.reasoningEffort : null,
       requestTimeoutMs: normalizeRequestTimeoutMs(rawSettings.requestTimeoutMs),
       pipelineModelRoles: normalizePipelineAIRoleConfigs(rawSettings.pipelineModelRoles),
       apiKey: legacyApiKey,

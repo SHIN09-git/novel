@@ -74,6 +74,10 @@ try {
         export { AIHttpClient } from './src/main/services/AIHttpClient';
         export { AiCallProgressStore } from './src/main/services/AiCallProgressStore';
         export { MainAIJsonClient } from './src/main/services/MainAIJsonClient';
+        export { createPipelineAIRunConfig, resolvePipelineRoleSettings } from './src/services/PipelineRunContextService';
+        export { validateChatCompletionRequest } from './src/main/ipc/aiChatValidation';
+        export { normalizeAppData } from './src/shared/defaults';
+        export { estimateForSettings } from './src/renderer/src/views/projectUsage/usageEstimateText';
       `,
       resolveDir: repoRoot,
       loader: 'ts'
@@ -86,7 +90,8 @@ try {
     external: ['electron'],
     logLevel: 'silent'
   })
-  const { AIHttpClient, AIService, AiCallProgressStore, MainAIJsonClient } = await import(pathToFileURL(outfile).href)
+  const { AIHttpClient, AIService, AiCallProgressStore, MainAIJsonClient, createPipelineAIRunConfig,
+    resolvePipelineRoleSettings, validateChatCompletionRequest, normalizeAppData, estimateForSettings } = await import(pathToFileURL(outfile).href)
 
   await test('official OpenAI reasoning models use the completion-token limit on both JSON attempts', async () => {
     const cases = [
@@ -103,6 +108,7 @@ try {
         postWithFallback: async (url, body, _headers, fallback, options) => {
           assert.equal(url, baseUrl.replace(/\/+$/, '') + '/chat/completions')
           for (const payload of [body, fallback]) {
+            assert.ok(!Object.hasOwn(payload, 'reasoning_effort'))
             assert.equal(payload.max_completion_tokens, modern ? 800 : undefined)
             assert.equal(payload.max_tokens, modern ? undefined : 800)
             assert.equal(payload.temperature, modern ? undefined : 0.3)
@@ -117,6 +123,47 @@ try {
         settings: { apiProvider: 'openai', baseUrl, modelName, temperature: 0.3, maxTokens: 800 }
       }))
       assert.equal(result.ok, true, result.error)
+    }
+  })
+
+  await test('reasoning settings survive save, role overrides and retries without changing old snapshots', () => {
+    const saved = normalizeAppData({ settings: settings({ reasoningEffort: 'high',
+      pipelineModelRoles: { prose: { reasoningEffort: 'low' }, extraction: { reasoningEffort: null } } }) }).settings
+    const frozen = JSON.parse(JSON.stringify(createPipelineAIRunConfig(saved)))
+    const later = { ...saved, reasoningEffort: 'medium' }
+    for (const [role, expected] of [['reviewer', 'high'], ['prose', 'low'], ['extraction', null]]) {
+      assert.equal(resolvePipelineRoleSettings(frozen, later, role).reasoningEffort, expected)
+    }
+    assert.equal(resolvePipelineRoleSettings(settings(), later, 'prose').reasoningEffort, null)
+    assert.equal(normalizeAppData({ settings: { reasoningEffort: 'invalid' } }).settings.reasoningEffort, null)
+    assert.throws(() => validateChatCompletionRequest(request('run', 'call', { settings: { reasoningEffort: 'invalid' } })), /推理强度/)
+  })
+
+  await test('both request bodies and the cost estimate use the selected effort and the same output limit', async () => {
+    for (const [modelName, baseUrl, effort, maxTokens, budget, key] of [
+      ['o3', 'https://api.openai.com/v1', 'low', 100, 8192, 'max_completion_tokens'],
+      ['deepseek-flash', 'https://api.deepseek.com/v1', 'medium', 8000, 16384, 'max_tokens'],
+      ['custom-model', 'https://compatible.example/v1', 'high', 8000, 32768, 'max_tokens'],
+      ['custom-model', 'https://compatible.example/v1', 'high', 40000, 40000, 'max_tokens']
+    ]) {
+      const service = serviceWith(AIService, {
+        postWithFallback: async (_url, body, _headers, fallback) => {
+          for (const payload of [body, fallback]) {
+            assert.equal(payload.reasoning_effort, effort)
+            assert.equal(payload[key], budget)
+            assert.equal(payload.temperature, undefined)
+            assert.deepEqual(payload.thinking, modelName === 'deepseek-flash' ? { type: 'enabled' } : undefined)
+          }
+          return response()
+        }
+      })
+      const req = validateChatCompletionRequest(request('run', 'call', { settings: {
+        baseUrl, modelName, maxTokens, apiProvider: 'compatible', reasoningEffort: effort
+      } }))
+      const estimate = estimateForSettings(req.settings, {}, req.messages)
+      assert.equal(estimate.outputTokens.max, budget)
+      const res = await service.chatCompletion(req)
+      assert.equal(res.ok, true, res.error)
     }
   })
 

@@ -1,5 +1,6 @@
 import type { ChatCompletionRequest } from '../../shared/ipc/ipcTypes'
 import type { ApiProvider } from '../../shared/types'
+import { isReasoningEffort } from '../../shared/reasoningEffort'
 import { usagePhases, type ProjectUsageContext, type UsagePhase } from '../../shared/projectUsage'
 import { ValidationError, validateNumber, validateString, validateUrl } from '../../shared/validation'
 
@@ -70,6 +71,9 @@ export function validateChatCompletionRequest(request: ChatCompletionRequest): C
   }
   const apiProvider = validateApiProvider(settings.apiProvider)
   const isCodexCli = apiProvider === 'codex_cli'
+  if (settings.reasoningEffort != null && !isReasoningEffort(settings.reasoningEffort)) {
+    throw new ValidationError('推理强度只支持 low、medium 或 high。')
+  }
 
   return {
     settings: {

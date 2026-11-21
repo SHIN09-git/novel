@@ -14,6 +14,7 @@ import type { CandidateDecisionReceipt } from './candidateDecision'
 import type { ChapterTitleReceipt } from './chapterTitle'
 import type { QuickRewriteDraft } from './quickRewrite'
 import type { WorldManagementReceipt } from './worldManagement'
+import type { ReasoningEffort } from '../reasoningEffort'
 
 export interface PromptVersion {
   id: ID
@@ -56,6 +57,7 @@ export interface AppSettings {
   codexCliPath: string
   codexCliModel: string
   temperature: number
+  reasoningEffort?: ReasoningEffort | null
   maxTokens: number
   retryEnabled: boolean
   maxRetries: number

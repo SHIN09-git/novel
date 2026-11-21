@@ -1,6 +1,8 @@
 import type { AppSettings, PipelineAIModelConfig, PipelineAIRole, PipelineAIRoleConfigs } from '../../../../shared/types'
 import type { ApiProvider } from '../../../../shared/types/base'
 import { Field, NumberInput, SelectField, TextInput, Toggle } from '../../components/FormFields'
+import { ReasoningEffortField } from './ReasoningEffortField'
+import { normalizePipelineAIModelConfig } from '../../../../shared/normalizers/pipelineRunConfig'
 
 interface WorkflowRoleDefinition {
   id: PipelineAIRole
@@ -17,18 +19,7 @@ const WORKFLOW_ROLES: WorkflowRoleDefinition[] = [
 ]
 
 function defaultOverride(settings: AppSettings): PipelineAIModelConfig {
-  return {
-    apiProvider: settings.apiProvider,
-    baseUrl: settings.baseUrl,
-    modelName: settings.modelName,
-    codexCliPath: settings.codexCliPath,
-    codexCliModel: settings.codexCliModel,
-    temperature: settings.temperature,
-    maxTokens: settings.maxTokens,
-    requestTimeoutMs: settings.requestTimeoutMs,
-    retryEnabled: settings.retryEnabled,
-    maxRetries: settings.maxRetries
-  }
+  return normalizePipelineAIModelConfig({}, settings)
 }
 
 function providerOptions() {
@@ -164,6 +155,7 @@ export function WorkflowModelProfileSettings({
                       max={128000}
                       onChange={(maxTokens) => updateRole(role.id, { maxTokens: maxTokens ?? settings.maxTokens })}
                     />
+                    <ReasoningEffortField config={effective} onChange={reasoningEffort => updateRole(role.id, { reasoningEffort })} />
                     <NumberInput
                       label="单次调用超时（秒）"
                       value={Math.round(effective.requestTimeoutMs / 1000)}

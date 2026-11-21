@@ -2,6 +2,11 @@
 
 ## 简体中文
 
+### 0.1.6-preview.22.1 - 按环节设置推理强度
+
+- 在「设置 → AI 模型接入」选择低、中、高，或保留「不指定」。可只给审稿设为高，正文继续继承默认；重试沿用该次运行保存的设置。
+- 显式选档时，HTTP 请求为推理和正文共用的输出预算设置下限；调用前的费用估算使用同一上限。Codex CLI 仅传递本次调用的推理强度，不修改 CLI 配置。
+
 ### 0.1.6-preview.22 - Agent 创作与书库管理
 
 - 新增全书创作权和全库管理权。作者可以授权 Agent 开书、跨项目管理、归档和恢复；小说圣经、阶段摘要及正式版本的改动仍可追溯。
@@ -218,6 +223,11 @@
 ---
 
 ## English
+
+### 0.1.6-preview.22.1 - Per-role reasoning effort
+
+- Set low, medium or high effort globally or for one workflow role. Leave it unspecified to keep existing behavior. Retries use the run's saved settings.
+- HTTP completion limits and cost estimates include reasoning headroom when an effort is selected. Codex CLI receives a per-call override without changing its configuration.
 
 ### 0.1.6-preview.22 - Agent Authoring and Library Management
 

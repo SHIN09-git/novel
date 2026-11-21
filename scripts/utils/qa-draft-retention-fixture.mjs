@@ -81,13 +81,24 @@ export async function startStub(spec) {
         assert(bytes < 1024 * 1024, 'Unexpectedly large fixture request')
         chunks.push(chunk)
       }
-      const { model, messages, response_format } = JSON.parse(Buffer.concat(chunks).toString('utf8'))
+      const wire = JSON.parse(Buffer.concat(chunks).toString('utf8'))
+      const { model, messages, response_format } = wire
       assert(Array.isArray(messages))
       const prompt = messages.map(m => m.content).join('\n')
+      // A single model for all roles tests routing independently of the selected model name.
+      let route = model
+      if (spec.sharedModel) {
+        assert.equal(model, spec.sharedModel)
+        route = prompt.includes('请根据下方唯一的 ChapterTask 写出完整的小说第一章。') || prompt.includes('You are drafting a novel chapter') ? 'retention-prose'
+          : prompt.includes('You are a continuity editor') || prompt.includes('overallScore') ? 'retention-reviewer'
+          : prompt.includes('foreshadowingExtraction') ? 'retention-extraction' : 'unknown'
+        call.parameters = Object.fromEntries(['reasoning_effort', 'max_tokens', 'max_completion_tokens', 'temperature']
+          .filter(key => Object.hasOwn(wire, key)).map(key => [key, wire[key]]))
+      }
       Object.assign(call, { model, responseFormat: response_format?.type ?? null, promptSha256: hash(prompt),
         containsExactBody: prompt.includes(spec.body), hasTarget: prompt.includes(spec.target) })
       let content, finish = 'stop'
-      if (model === 'retention-prose') {
+      if (route === 'retention-prose') {
         call.kind = 'prose'
         const dispatch = calls.filter(c => c.kind === 'prose').length
         assert(dispatch === 1 || (spec.negative === 'empty' && dispatch === 2 && !response_format),
@@ -96,17 +107,17 @@ export async function startStub(spec) {
         if (spec.negative === 'broken') content = '[' + content + ',' // Intact inner object in a broken outer envelope.
         if (spec.negative === 'empty') content = ''
         finish = spec.finish
-      } else if (model === 'retention-extraction' && prompt.includes('foreshadowingExtraction')) {
+      } else if (route === 'retention-extraction' && prompt.includes('foreshadowingExtraction')) {
         call.kind = 'extraction'
         content = JSON.stringify(extraction)
-      } else if (model === 'retention-reviewer' && prompt.includes('You are a continuity editor')) {
+      } else if (route === 'retention-reviewer' && prompt.includes('You are a continuity editor')) {
         call.kind = 'consistency'
         if (spec.overflow && calls.filter(c => c.kind === 'consistency').length === 1) {
           await failureBarrier // The independent reader inspects committed SQLite before this 503 is sent.
           return reply(503, { error: { message: 'P0A_QA_REVIEW_OFFLINE' } })
         }
         content = JSON.stringify(consistency)
-      } else if (model === 'retention-reviewer' && prompt.includes('overallScore')) {
+      } else if (route === 'retention-reviewer' && prompt.includes('overallScore')) {
         call.kind = 'quality'
         content = JSON.stringify(quality)
       } else {

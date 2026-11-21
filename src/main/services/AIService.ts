@@ -15,6 +15,7 @@ import { diagnoseAiConnection } from '../utils/connectionDiagnosis'
 import { AiHttpError, AiRequestCancelledError, AiRequestTimeoutError, describeAiRetryError, isRetryableAiError } from '../utils/aiErrors'
 import { AIHttpClient } from './AIHttpClient'
 import { apiEndpoint } from './ApiRegistry'
+import { effectiveCompletionTokens, isReasoningEffort, type ReasoningEffort } from '../../shared/reasoningEffort'
 import { AiCallProgressStore } from './AiCallProgressStore'
 import { AiUsageReceipts, type UsageJournal } from './AiUsageReceipts'
 import { parseAiResponse, readAiResponseMetadata } from './AIResponseParser'
@@ -68,8 +69,9 @@ type ChatRequestBody = {
   model: string
   messages: ChatCompletionRequest['messages']
   response_format?: { type: 'json_object' }
-  thinking?: { type: 'disabled' }
-} & ({ max_completion_tokens: number } | { temperature: number; max_tokens: number })
+  thinking?: { type: 'enabled' | 'disabled' }
+  reasoning_effort?: ReasoningEffort
+} & ({ max_completion_tokens: number } | { temperature?: number; max_tokens: number })
 
 function usesOfficialDeepSeekV4(settings: AppSettings): boolean {
   if (!/^deepseek-(?:flash|v4-(?:flash|flash-vision-exp|pro))$/i.test(settings.modelName.trim())) return false
@@ -81,11 +83,14 @@ function usesOfficialDeepSeekV4(settings: AppSettings): boolean {
 }
 
 function chatGenerationParameters(settings: AppSettings) {
+  const effort = settings.reasoningEffort
+  const maxTokens = effectiveCompletionTokens(settings.maxTokens, effort)
+  const reasoning = effort ? { reasoning_effort: effort } : {}
   const modernOpenAIModel = /^(?:gpt-[56]|o[134])(?:[.-]|$)/i.test(settings.modelName.trim())
   if (modernOpenAIModel && apiEndpoint(settings.baseUrl) === 'https://api.openai.com/v1') {
-    return { max_completion_tokens: settings.maxTokens }
+    return { max_completion_tokens: maxTokens, ...reasoning }
   }
-  return { temperature: settings.temperature, max_tokens: settings.maxTokens }
+  return { ...(!effort && { temperature: settings.temperature }), max_tokens: maxTokens, ...reasoning }
 }
 
 function sanitizeAiErrorText(
@@ -162,6 +167,9 @@ export class AIService implements IAIService {
   }
 
   validateSettings(settings: AppSettings): ValidationResult {
+    if (settings.reasoningEffort != null && !isReasoningEffort(settings.reasoningEffort)) {
+      return { ok: false, error: '推理强度只支持 low、medium 或 high。' }
+    }
     if (settings.apiProvider === 'codex_cli') {
       if (!(settings.codexCliPath || 'codex').trim()) return { ok: false, error: 'Codex CLI 路径不能为空。' }
     } else {
@@ -327,7 +335,7 @@ export class AIService implements IAIService {
       apiKey = providerUsesApiKey(settings.apiProvider) ? await this.credentialService.getApiKey(settings.baseUrl) : ''
       const apiKeyHeader = apiKey ? await this.credentialService.getApiKeyHeader?.(settings.baseUrl) : undefined
       if (runController.signal.aborted) throw new AiRequestCancelledError()
-      const thinkingMode = usesOfficialDeepSeekV4(settings) ? 'disabled' : 'provider_default'
+      const thinkingMode = settings.reasoningEffort ?? (usesOfficialDeepSeekV4(settings) ? 'disabled' : 'provider_default')
       this.logger.info(
         `AI request: provider=${settings.apiProvider}, model=${requestedModel}, messages=${messages.length}, thinking=${thinkingMode}`
       )
@@ -344,6 +352,7 @@ export class AIService implements IAIService {
           model: settings.codexCliModel || '',
           messages,
           maxTokens: settings.maxTokens,
+          reasoningEffort: settings.reasoningEffort,
           signal: runController.signal,
           onDispatch: () => receipts.start(''),
           onTurnFinished: metadata => receipts.observe(readAiResponseMetadata(metadata)),
@@ -456,7 +465,7 @@ export class AIService implements IAIService {
       messages,
       ...chatGenerationParameters(settings),
       response_format: { type: 'json_object' },
-      ...(usesOfficialDeepSeekV4(settings) ? { thinking: { type: 'disabled' as const } } : {})
+      ...(usesOfficialDeepSeekV4(settings) ? { thinking: { type: settings.reasoningEffort ? 'enabled' : 'disabled' } } : {})
     }
     const { response_format: _responseFormat, ...fallbackBody } = requestBody
 

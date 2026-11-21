@@ -56,7 +56,7 @@ let prompt = ''
 for await (const chunk of process.stdin) prompt += chunk.toString('utf8')
 const outputIndex = args.indexOf('--output-last-message')
 const outputPath = outputIndex >= 0 ? args[outputIndex + 1] : ''
-const result = JSON.stringify({ ok: true, model, hasSystem: prompt.includes('系统指令'), hasUser: prompt.includes('用户任务') })
+const result = JSON.stringify({ ok: true, model, overrides: args.filter((_, i) => args[i - 1] === '-c'), hasSystem: prompt.includes('系统指令'), hasUser: prompt.includes('用户任务') })
 if (outputPath) await writeFile(outputPath, result, 'utf8')
 else console.log(result)
 `,
@@ -115,6 +115,7 @@ async function main() {
         { role: 'user', content: '生成测试结果。' }
       ],
       maxTokens: 800,
+      reasoningEffort: 'medium',
       signal: controller.signal,
       timeoutMs: 5_000
     })
@@ -122,6 +123,7 @@ async function main() {
     const parsed = JSON.parse(result.content)
     check('stdin prompt reaches Codex CLI', parsed.hasSystem && parsed.hasUser)
     check('optional CLI model is passed through', parsed.model === 'fixture-model')
+    check('per-call reasoning effort reaches the CLI', parsed.overrides.includes('model_reasoning_effort="medium"'))
     check('prompt forbids file/tool side effects', /不要读取本机文件、执行命令、修改工作区/.test(formatCodexCliPrompt([], 100)))
     check('logs do not contain prompt content', logs.every((line) => !line.includes('生成测试结果')))
 

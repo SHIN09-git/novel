@@ -85,6 +85,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   codexCliPath: 'codex',
   codexCliModel: '',
   temperature: 0.8,
+  reasoningEffort: null,
   maxTokens: 8000,
   retryEnabled: true,
   maxRetries: 3,

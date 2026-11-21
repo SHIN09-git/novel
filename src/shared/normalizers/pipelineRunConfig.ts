@@ -4,6 +4,7 @@ import type {
   PipelineAIRoleConfigs,
   ResolvedPipelineAIRunConfig
 } from '../types/generation'
+import { isReasoningEffort } from '../reasoningEffort'
 
 export const PIPELINE_AI_ROLES: readonly PipelineAIRole[] = Object.freeze([
   'planner', 'prose', 'extraction', 'reviewer', 'revision'
@@ -31,6 +32,8 @@ export function normalizePipelineAIModelOverride(value: unknown): Partial<Pipeli
     if ((field === 'maxTokens' || field === 'requestTimeoutMs') && Number.isInteger(number) && number > 0) result[field] = number
   }
   if (typeof raw.retryEnabled === 'boolean') result.retryEnabled = raw.retryEnabled
+  // Missing inherits the base; explicit null keeps the provider's default for this role.
+  if (raw.reasoningEffort === null || isReasoningEffort(raw.reasoningEffort)) result.reasoningEffort = raw.reasoningEffort
   return result
 }
 
@@ -53,6 +56,7 @@ export function normalizePipelineAIModelConfig(value: unknown, fallback: Pipelin
     codexCliPath: fallback.codexCliPath,
     codexCliModel: fallback.codexCliModel,
     temperature: fallback.temperature,
+    reasoningEffort: fallback.reasoningEffort ?? null,
     maxTokens: fallback.maxTokens,
     retryEnabled: fallback.retryEnabled,
     maxRetries: fallback.maxRetries,

@@ -1,4 +1,5 @@
 import type { AppSettings, Project } from '../../../../shared/types'
+import { effectiveCompletionTokens } from '../../../../shared/reasoningEffort'
 import { estimateProjectUsage, type PreparedUsageInput, type ProjectUsageEstimate } from '../../../../services/ProjectUsagePricing'
 
 const amountFormat = new Intl.NumberFormat('zh-CN', { maximumSignificantDigits: 7 })
@@ -7,7 +8,7 @@ export const formatUsageAmount = (n: number) => amountFormat.format(n)
 export function estimateForSettings(settings: AppSettings, project: Project, messages: PreparedUsageInput['messages']) {
   return estimateProjectUsage({ provider: settings.apiProvider, endpoint: settings.baseUrl,
     model: settings.apiProvider === 'codex_cli' ? settings.codexCliModel : settings.modelName,
-    rates: project.modelRates, messages, maxTokens: settings.maxTokens })
+    rates: project.modelRates, messages, maxTokens: effectiveCompletionTokens(settings.maxTokens, settings.reasoningEffort) })
 }
 
 export function usageEstimateText(estimate: ProjectUsageEstimate, subject: string): string {
