@@ -2,6 +2,8 @@ import { loadAgentProjectOverview } from '../AgentProjectOverviewRuntime'
 import { getNextChapterTarget, getProjectDigest, listProjects } from '../agentProjectSummaries'
 import { findProjectId, stringArg } from './agentToolArguments'
 import { readAgentBookProgress } from './agentBookProgressRead'
+import { exportManuscriptRange } from './agentExportManuscriptRange'
+import { preflightDraftText } from './agentDraftPreflight'
 import { readAgentBookContinuity } from './agentBookContinuityRead'
 import { readAgentStageSummaries, readAgentStoryBible } from './agentBookReferenceRead'
 import { estimateAgentProjectUsage, readAgentProjectUsage } from './agentProjectUsageRead'
@@ -16,9 +18,11 @@ export async function handleAgentOverviewReadTool(
   name: string, args: Record<string, unknown>
 ): Promise<AgentToolCallResult | null> {
   switch (name) {
+    case 'agent.preflightDraftText': return preflightDraftText(args)
     case 'agent.getProjectUsage': return readAgentProjectUsage(args)
     case 'agent.estimateProjectUsage': return estimateAgentProjectUsage(args)
     case 'agent.getBookProgress': return readAgentBookProgress(args)
+    case 'agent.exportManuscriptRange': return exportManuscriptRange(args)
     case 'agent.getBookContinuityReport': return readAgentBookContinuity(args)
     case 'agent.getStoryBible': return readAgentStoryBible(args)
     case 'agent.getStageSummaries': return readAgentStageSummaries(args)

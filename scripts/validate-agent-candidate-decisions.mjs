@@ -26,15 +26,15 @@ try {
         export { loadAgentRuntimeData, saveAgentRuntimeData } from './src/agent/AgentRuntime';
         export { handleAgentWriteTool } from './src/agent/tools/agentToolWriteHandlers';
         export { normalizeAppData } from './src/shared/defaults';
-        export { createStorageService } from './src/storage/SqliteStorageService';
-        export { JsonStorageService } from './src/storage/JsonStorageService';
+        export { createExistingLibraryStorage, createNewLibraryStorage } from './src/storage/SqliteStorageService';
       `,
       resolveDir: repoRoot, loader: 'ts'
     },
     outfile, bundle: true, platform: 'node', format: 'esm', target: 'node22',
     external: ['better-sqlite3', 'electron'], logLevel: 'silent'
   })
-  const { AgentToolService, loadAgentRuntimeData, saveAgentRuntimeData, handleAgentWriteTool, normalizeAppData, createStorageService, JsonStorageService } = await import(pathToFileURL(outfile).href)
+  const { AgentToolService, loadAgentRuntimeData, saveAgentRuntimeData, handleAgentWriteTool, normalizeAppData,
+    createExistingLibraryStorage, createNewLibraryStorage } = await import(pathToFileURL(outfile).href)
   const evidence = `A verified event. ${'Evidence context. '.repeat(70)}END_OF_EVIDENCE`
   function memory(id, overrides = {}) {
     return {
@@ -79,8 +79,9 @@ try {
     await mkdir(dir)
     const storagePath = join(dir, sqlite ? 'data.sqlite' : 'data.json')
     if (sqlite) {
-      const storage = createStorageService(storagePath)
-      try { await storage.save(data) } finally { storage.close?.() }
+      await writeFile(storagePath, '', { flag: 'wx' })
+      const storage = createNewLibraryStorage(storagePath, data)
+      try { await storage.loadSnapshot() } finally { storage.close() }
     } else {
       await writeFile(storagePath, JSON.stringify(data), 'utf8')
     }
@@ -96,7 +97,7 @@ try {
       ...extra
     })
     const withStorage = async (run) => {
-      const storage = sqlite ? createStorageService(storagePath) : new JsonStorageService(storagePath)
+      const storage = createExistingLibraryStorage(storagePath)
       try { return await run(storage) } finally { storage.close?.() }
     }
     const edit = (change) => withStorage(async (storage) => {
@@ -165,6 +166,45 @@ try {
     assert.ok(preview.data.items.every((item) => item.expectedFingerprint))
     assert.equal(preview.storage.revision, compact.storage.revision)
     assert.equal(await readFile(h.paths.storagePath, 'utf8'), before)
+  })
+  await test('stale extraction is archived without rejection; inbox kinds round-trip through preview', async () => {
+    const data = fixture()
+    data.memoryUpdateCandidates.push(memory('replaced', { sourceDraftId: 'd', sourceDraftContentHash: 'old-body' }))
+    data.generatedChapterDrafts.push({ id: 'd', projectId: 'p1', jobId: 'job1', body: '新版正文。', status: 'draft', createdAt: timestamp, updatedAt: timestamp })
+    const h = await harness(data)
+    const before = await readFile(h.paths.storagePath, 'utf8')
+    const inbox = await h.call('getDecisionInbox', { detail: 'full' })
+    assert.ok(!inbox.data.groups.flatMap(g => g.memoryCandidateIds).includes('replaced'))
+    const archived = await h.call('getDecisionInbox', { staleOnly: true })
+    assert.deepEqual(archived.data.groups.flatMap(g => g.candidateIds), ['replaced'])
+    const decisions = inbox.data.groups.flatMap(g => g.candidates)
+      .filter(c => ['m1', 's1'].includes(c.id)).map(c => select(c.kind, c.id))
+    assert.equal(decisions.length, 2)
+    const preview = await h.preview(decisions)
+    assert.deepEqual(new Set(preview.data.items.map(i => i.kind)), new Set(['memory', 'character_state']))
+    assert.equal(await readFile(h.paths.storagePath, 'utf8'), before)
+  })
+  await test('preflight checks unsaved prose with chapter-scoped HardCanon and no database writes', async () => {
+    const data = fixture()
+    data.hardCanonPacks.find(p => p.projectId === 'p1').items.push({
+      id: 'rule', projectId: 'p1', title: '禁止雾印', content: '正文禁止雾印', category: 'prohibition',
+      priority: 'must', status: 'active', createdAt: timestamp, updatedAt: timestamp,
+      check: { kind: 'literal', mode: 'terms', terms: ['雾印'], enforcement: 'block', maxPerChapter: 0, fromChapter: 2 }
+    })
+    for (const sqlite of [false, true]) {
+      const h = await harness(data, sqlite)
+      const before = await h.snapshot()
+      const run = async (body, chapterOrder = 2) => (await h.call('preflightDraftText', { body, chapterOrder })).data
+      const body = '门上有一道雾印。'
+      const hit = await run(body)
+      assert.equal(hit.visibleCharacterCount, body.length)
+      assert.equal(hit.blocked, true)
+      assert.equal(hit.findings[0].excerpt, body.slice(hit.findings[0].start, hit.findings[0].end))
+      assert.equal((await run(body, 1)).blocked, false)
+      assert.equal((await run('她停在开口前')).blocked, false)
+      assert.ok((await run('{"body":"残稿')).formatError)
+      assert.deepEqual(await h.snapshot(), before)
+    }
   })
   await test('mixed decisions persist through storage; omitted timestamp is stable across fresh-request retry', async () => {
     const h = await harness()

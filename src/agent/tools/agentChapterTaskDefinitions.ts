@@ -1,4 +1,6 @@
 import type { AgentToolDefinition, JsonSchema } from './agentToolTypes'
+import { chapterTaskProperties } from './chapterTaskProperties'
+import { TASK_TEXT_FIELDS } from '../../shared/chapterTaskConstraints'
 
 const string = { type: 'string', minLength: 1 }
 const nullableString = { type: ['string', 'null'], minLength: 1 }
@@ -14,14 +16,8 @@ const task: JsonSchema = {
   type: 'object',
   additionalProperties: false,
   description: 'Complete replacement chapter task, as used by the UI task editor.',
-  properties: Object.fromEntries([
-    'goal', 'conflict', 'suspenseToKeep', 'allowedPayoffs', 'forbiddenPayoffs',
-    'endingHook', 'readerEmotion', 'targetWordCount', 'styleRequirement'
-  ].map((field) => [field, { type: 'string' }])),
-  required: [
-    'goal', 'conflict', 'suspenseToKeep', 'allowedPayoffs', 'forbiddenPayoffs',
-    'endingHook', 'readerEmotion', 'targetWordCount', 'styleRequirement'
-  ]
+  properties: chapterTaskProperties,
+  required: [...TASK_TEXT_FIELDS]
 }
 const edit = {
   ...project,

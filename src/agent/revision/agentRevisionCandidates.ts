@@ -1,4 +1,5 @@
 import type { AppData, RevisionRequest, RevisionVersion } from '../../shared/types'
+import { readActorTag } from '../../shared/agentActorTag'
 import { selectRevisionSession, createRevisionSourceSnapshot } from '../../renderer/src/views/revision/revisionSessionModel'
 import { revisionTypeOptions } from '../../renderer/src/views/revision/revisionTypeCatalog'
 import { findRewriteRange } from '../../renderer/src/components/aiRewriteResultModel'
@@ -24,7 +25,7 @@ export async function createAgentRevisionRequest(data: AppData, args: Record<str
   const chapterId = args.chapterId === undefined ? draft?.chapterId ?? '' : requiredString(args, 'chapterId')
   const resolved = resolveRevisionSource(data, projectId, chapterId, draftId)
   assertRevisionWritable(resolved)
-  assertRevisionBatchTarget(data, revisionRun(data, projectId, identity.agentRunId), chapterId)
+  assertRevisionBatchTarget(data, revisionRun(data, projectId, identity.agentRunId), chapterId, 'prepare')
   checkSourceHashes(resolved.source, args)
   const type = args.type === undefined ? 'custom' : requiredString(args, 'type')
   const selectedType = revisionTypeOptions.find((item) => item.value === type)
@@ -58,14 +59,16 @@ export async function createAgentRevisionRequest(data: AppData, args: Record<str
 }
 
 export async function createManualAgentRevisionVersion(data: AppData, args: Record<string, unknown>, runtime: AgentRuntimeData) {
-  checkRevisionFields(args, [...revisionWriteFields, ...revisionHashFields, 'requestId', 'expectedRequestHash', 'body', 'changedSummary'])
+  checkRevisionFields(args, [...revisionWriteFields, ...revisionHashFields, 'requestId', 'expectedRequestHash', 'body', 'changedSummary', 'actorTag'])
+  const actorTag = readActorTag(args.actorTag)
   const projectId = findProjectId(data, args)
-  const identity = commandIdentity(args, 'create_manual_revision_version', projectId)
+  const identity = commandIdentity(actorTag === undefined ? args : { ...args, actorTag }, 'create_manual_revision_version', projectId)
   const prior = replayRevisionOperation(data, projectId, identity)
   if (prior?.versionId) return { ...readRevisionVersion(data, projectId, prior.versionId), replayed: true }
   const request = data.revisionRequests.find((item) => item.id === requiredString(args, 'requestId'))
   if (!request) throw new Error('RevisionRequest not found.')
   const session = revisionSession(data, projectId, request.sessionId)
+  assertRevisionBatchTarget(data, revisionRun(data, projectId, identity.agentRunId), session.chapterId, 'prepare')
   if (session.status !== 'active') throw new Error('RevisionSession is no longer active.')
   if (revisionFingerprint(request) !== requiredString(args, 'expectedRequestHash')) throw new Error('Revision request changed.')
   const resolved = resolveRevisionSource(data, projectId, session.chapterId, session.sourceDraftId)
@@ -78,6 +81,7 @@ export async function createManualAgentRevisionVersion(data: AppData, args: Reco
   if (body === resolved.body) throw new Error('Manual revision body matches the source.')
   const timestamp = new Date().toISOString()
   const version: RevisionVersion = {
+    ...(actorTag ? { actorTag } : {}),
     id: `${identity.id}-version`, sessionId: session.id, requestId: request.id,
     title: `${resolved.draft?.title ?? resolved.chapter?.title ?? 'Revision'} - ${request.type}`,
     body, changedSummary: args.changedSummary === undefined ? '' : rawRevisionText(args, 'changedSummary'), risks: '', preservedFacts: '',
@@ -91,7 +95,7 @@ export async function createManualAgentRevisionVersion(data: AppData, args: Reco
     commandHash: identity.hash, source: resolved.source, sessionId: session.id, requestId: request.id,
     requestHash: revisionFingerprint(request), versionId: version.id, versionHash: revisionFingerprint(version)
   }
-  const next = recordRevisionOperation({ ...data, revisionVersions: [...data.revisionVersions, version] }, identity.id, audit, requiredString(args, 'reason'))
+  const next = recordRevisionOperation({ ...data, revisionVersions: [...data.revisionVersions, version] }, identity.id, audit, requiredString(args, 'reason'), actorTag)
   const saved = await saveAgentRuntimeData(next, runtime)
   return { ...readRevisionVersion(next, projectId, version.id), saved, replayed: false }
 }
@@ -103,6 +107,7 @@ export async function editAgentRevisionVersion(data: AppData, args: Record<strin
   const prior = replayRevisionOperation(data, projectId, identity)
   if (prior?.versionId) return { ...readRevisionVersion(data, projectId, prior.versionId), replayed: true }
   const { version, session, request } = revisionVersion(data, projectId, requiredString(args, 'versionId'))
+  assertRevisionBatchTarget(data, revisionRun(data, projectId, identity.agentRunId), session.chapterId, 'prepare')
   if (session.status !== 'active' || !['draft', 'pending'].includes(version.status)) throw new Error('Only active draft/pending revision versions can be edited.')
   if (revisionFingerprint(version) !== requiredString(args, 'expectedVersionHash')) throw new Error('Revision candidate changed before editing.')
   const resolved = resolveRevisionSource(data, projectId, session.chapterId, session.sourceDraftId)
@@ -112,7 +117,8 @@ export async function editAgentRevisionVersion(data: AppData, args: Record<strin
   checkSourceHashes(resolved.source, args)
   const body = rawRevisionText(args, 'body')
   const timestamp = new Date().toISOString()
-  const nextVersion: RevisionVersion = { ...version, id: `${identity.id}-version`, body, status: 'draft', createdAt: timestamp, updatedAt: timestamp }
+  const { actorTag: _parentTag, ...parent } = version
+  const nextVersion: RevisionVersion = { ...parent, id: `${identity.id}-version`, body, status: 'draft', createdAt: timestamp, updatedAt: timestamp }
   if (data.revisionVersions.some((item) => item.id === nextVersion.id)) throw new Error('Revision version ID collision.')
   const audit: RevisionAudit = {
     schemaVersion: 1, actor: { kind: 'agent', agentRunId: identity.agentRunId }, operation: 'edit_revision_version',

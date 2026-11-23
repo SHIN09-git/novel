@@ -317,7 +317,7 @@ export function GenerationPipelineView({
   return (
     <div className="generation-view">
       <GenerationPipelineConsole
-        taskEditor={<PipelineTaskEditor key={`${project.id}:${selectedJob?.id ?? `new-${targetChapterOrder}`}`} {...taskEditor} onDirtyChange={setTaskDirty} />}
+        taskEditor={<PipelineTaskEditor key={`${project.id}:${selectedJob?.id ?? `new-${targetChapterOrder}`}`} {...taskEditor} characters={scoped.characters} onDirtyChange={setTaskDirty} />}
         selectedJob={selectedJob}
         headerTitle="章节生产流水线"
         headerDescription="把上下文构建、任务书、正文草稿、复盘、记忆候选和一致性审稿串成可见流程。"

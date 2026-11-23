@@ -15,6 +15,7 @@ import type {
   PromptVersion
 } from '../../../shared/types'
 import { createEmptyChapterTask, defaultModulesForMode } from '../../../shared/defaults'
+import { readTaskConstraints } from '../../../shared/chapterTaskConstraints'
 import { ContextNeedPlannerService } from '../../../services/ContextNeedPlannerService'
 import { projectCharacterStatesAtChapter } from '../../../services/characterState/stateAsOf'
 import { resolveContinuityBridge } from '../../../services/ContinuityService'
@@ -44,15 +45,8 @@ import { PromptControlPanel } from './promptBuilder/PromptControlPanel'
 import { PromptEditorPanel } from './promptBuilder/PromptEditorPanel'
 import { PromptHistoryPanels } from './promptBuilder/PromptHistoryPanels'
 import { PromptManualForeshadowingPanel } from './promptBuilder/PromptManualForeshadowingPanel'
-import {
-  restorePromptBuilderFromSnapshot,
-  restorePromptBuilderFromVersion
-} from './promptBuilder/promptBuilderHistoryState'
-import {
-  toggleNeedPlanCharacter,
-  toggleNeedPlanForeshadowing,
-  updateForeshadowingTreatmentOverrides
-} from './promptBuilder/promptBuilderNeedPlan'
+import { restorePromptBuilderFromSnapshot, restorePromptBuilderFromVersion } from './promptBuilder/promptBuilderHistoryState'
+import { toggleNeedPlanCharacter, toggleNeedPlanForeshadowing, updateForeshadowingTreatmentOverrides } from './promptBuilder/promptBuilderNeedPlan'
 import { usePromptBuilderHistoryActions } from './promptBuilder/usePromptBuilderHistoryActions'
 import { PromptWorkspaceTabs, type PromptWorkspaceTab } from './promptBuilder/PromptWorkspaceTabs'
 import { createPromptBuilderSnapshotBinding, type PromptBuilderSnapshotBinding } from './promptBuilder/promptBuilderSnapshotConsistency'
@@ -225,7 +219,7 @@ export function PromptBuilderView({ data, project, saveData, onSendToPipeline }:
         targetChapterOrder,
         mode,
         modules,
-        task,
+        task: { ...task, ...readTaskConstraints(task) },
         selectedCharacterIds,
         selectedForeshadowingIds,
         foreshadowingTreatmentOverrides,
@@ -242,7 +236,11 @@ export function PromptBuilderView({ data, project, saveData, onSendToPipeline }:
       confirmLabel: '重新构建'
     })) return
     clearHistoryFeedback()
-    const result = buildPromptResult()
+    let result: BuildPromptResult
+    try { result = buildPromptResult() } catch (error) {
+      setWorkspaceMessage(error instanceof Error ? error.message : String(error))
+      return
+    }
     setPrompt(result.finalPrompt)
     setPromptVersionSource(null)
     setPromptBinding(createPromptBuilderSnapshotBinding({
@@ -447,7 +445,7 @@ export function PromptBuilderView({ data, project, saveData, onSendToPipeline }:
           <PromptWorkspaceTabs activeTab={activeTab} onChange={setActiveTab} />
           <fieldset className="prompt-content-fieldset" disabled={isSaving}>
           <div id="prompt-workspace-panel-task" role="tabpanel" aria-labelledby="prompt-workspace-tab-task" hidden={activeTab !== 'task'}>
-            <PromptChapterTaskPanel task={task} onTaskChange={(value) => { setTask(value); setNeedsRebuild(Boolean(prompt.trim())) }} />
+            <PromptChapterTaskPanel task={task} characters={scoped.characters} onTaskChange={(value) => { setTask(value); setNeedsRebuild(Boolean(prompt.trim())) }} />
           </div>
           <div id="prompt-workspace-panel-editor" role="tabpanel" aria-labelledby="prompt-workspace-tab-editor" hidden={activeTab !== 'editor'}>
             <PromptEditorPanel prompt={prompt} snapshotNote={snapshotNote} onPromptChange={(value) => { setPrompt(value); setPromptManuallyEdited(true) }} onSnapshotNoteChange={setSnapshotNote} />

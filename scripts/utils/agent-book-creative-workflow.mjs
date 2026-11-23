@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict'
+import { verifyStagedErrata } from './agent-staged-errata.mjs'
 
 export const rejectedRevisionMarker = '这是专供模拟审稿退回的末段标记。'
 
@@ -65,7 +66,7 @@ export async function checkGenerationGate({ call, snapshot, storage, projectId, 
   await storage.saveIfCurrent(snapshotBefore.data, state.revision)
 }
 
-export async function verifyBookRevisionBatch({ call, snapshot, projectId, grant, authority, storagePath, modelRequests }) {
+export async function verifyBookRevisionBatch({ call, snapshot, projectId, grant, authority, storagePath, modelRequests, stagedErrata, storage }) {
   const modelStart = modelRequests.length
   const original = (await snapshot()).data
   const chapters = original.chapters.filter(item => item.projectId === projectId)
@@ -178,6 +179,7 @@ export async function verifyBookRevisionBatch({ call, snapshot, projectId, grant
     versionId: restoreCommit.newChapterVersionId, detail: 'full' })).data
   assert.equal(restoredDetail.metadata.revisionReview.arguments.reportId, restoreReview.reportId)
 
+  if (stagedErrata) await verifyStagedErrata({ call, snapshot, projectId, storage, buildRequest, makeVersion, commands, modelRequests })
   if (grant.purpose === 'library_manager') await authority.revokeLibrary(storagePath, grant.id)
   else await authority.revoke(grant.id, storagePath, projectId)
   const denied = { projectId, operationId: 'creative-revoked-edit', reason: '授权已撤回，不能继续写入。',

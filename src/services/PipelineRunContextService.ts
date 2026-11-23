@@ -43,6 +43,21 @@ export function resolvePipelineRoleSettings(
   return resolvePipelineRunSettings(config, fallback, role)
 }
 
+/** An explicit channel changes routing only; a settings refresh replaces the whole role profile. */
+export function refreshFailedRole(config: PipelineAIRunConfig | undefined | null, settings: AppSettings, role: PipelineAIRole,
+  channel?: { id: string; apiProvider: 'compatible'; baseUrl: string; modelName: string } | { id: string; apiProvider: 'codex_cli' }) {
+  const previous = normalizePipelineAIRunConfig(config, DEFAULT_SETTINGS) ?? createPipelineAIRunConfig(settings)
+  const saved = createPipelineAIRunConfig(settings).roles[role]
+  const current = !channel ? saved : channel.apiProvider === 'compatible'
+    ? { ...previous.roles[role], apiProvider: channel.apiProvider, baseUrl: channel.baseUrl, modelName: channel.modelName }
+    : { ...previous.roles[role], apiProvider: channel.apiProvider, codexCliPath: saved.codexCliPath, codexCliModel: saved.codexCliModel }
+  const label = (model: typeof current) => model.apiProvider + '/' +
+    (model.apiProvider === 'codex_cli' ? model.codexCliModel || 'default' : model.modelName)
+  return { config: { ...previous, roles: { ...previous.roles, [role]: current } },
+    evidence: channel ? `本次任务切换 ${role} 通道（${channel.id}）：${label(previous.roles[role])} → ${label(current)}`
+      : `本次任务从已保存设置刷新 ${role} 通道：${label(previous.roles[role])} → ${label(current)}` }
+}
+
 const PIPELINE_STEP_ROLES: Partial<Record<ChapterGenerationStepType, PipelineAIRole>> = {
   generate_chapter_plan: 'planner',
   generate_chapter_draft: 'prose',

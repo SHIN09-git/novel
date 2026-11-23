@@ -1,5 +1,18 @@
 import { parseWithFallback } from './AIJsonParser'
 
+/** Checks prose format, not the presence of a closing punctuation mark. */
+export function draftBodyFormatError(body: string): string | null {
+  const trimmed = body.trim()
+  if (!trimmed) return '正文生成结果为空。'
+  if (/^(?:```(?:json)?\s*)?(?:\{\s*(?:"|$)|\[\s*(?:\{|["\]]|$))/.test(trimmed)) {
+    return 'AI 返回的是未解析完成的 JSON，而不是可用正文，可能已被截断。'
+  }
+  if (/【(?:世界规则|人物心理|主线推进|本章目标|角色节拍)】/.test(trimmed) || /^(本章目标|必须推进的冲突|角色节拍)：/m.test(trimmed)) {
+    return 'AI 返回的是大纲/任务书摘要，不是章节正文。'
+  }
+  return null
+}
+
 export function startsWithNumberedProseLabel(text: string): boolean {
   return /^\[\s*\d[^,[\]{}"'\\\r\n]*\]\s*[,，:：;；。!?！？]?\s*[\p{L}“‘]/u.test(text)
 }

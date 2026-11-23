@@ -2,6 +2,12 @@
 
 ## 简体中文
 
+### 0.1.6-preview.23 - 接笔
+
+- Agent 可在正式章节计划就绪后接手写正文，交稿后继续使用工作台审稿和质量门禁。模型步骤失败可为本次任务切换登记通道，无需修改全局设置或重写已保存的正文。
+- 逐章采纳、定名和处理明确选中的候选可在一次预览后一起提交。跨章精校可参考同批次的相邻候选；局部勘误只审改动，机械硬规则仍核对全章。
+- 新增正文预检、连续章段导出、写景季节提示筛选和可选的交稿署名。详见 [Agent 工具说明](./docs/AGENT_TOOL_API.md)。
+
 ### 0.1.6-preview.22.1 - 按环节设置推理强度
 
 - 在「设置 → AI 模型接入」选择低、中、高，或保留「不指定」。可只给审稿设为高，正文继续继承默认；重试沿用该次运行保存的设置。
@@ -223,6 +229,11 @@
 ---
 
 ## English
+
+### 0.1.6-preview.23 - The Handoff
+
+- Hand a planned chapter to an Agent for prose, then resume the usual review and quality gate. Retry a failed model step on another registered channel without rewriting the draft or changing global settings.
+- Commit a reviewed draft, its final title and explicit candidate decisions together. Revision batches can review staged neighbours and scoped corrections. See the [Agent tool guide](./docs/AGENT_TOOL_API.md) for preflight, range export and attribution.
 
 ### 0.1.6-preview.22.1 - Per-role reasoning effort
 

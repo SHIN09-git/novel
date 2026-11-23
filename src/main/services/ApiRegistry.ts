@@ -1,6 +1,7 @@
 import { readFile } from 'node:fs/promises'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
+import { redactSensitiveText } from '../../shared/errorUtils'
 
 export interface ApiRoute {
   id: string
@@ -9,6 +10,8 @@ export interface ApiRoute {
   /** Header that carries the raw key. Absent means `Authorization: Bearer`. */
   apiKeyHeader?: string
   legacyDesktopKey: boolean
+  /** Only present for an explicitly declared, selectable chat-completions route. */
+  agentChat?: { baseUrl: string; modelName: string }
 }
 
 export type ApiRegistry = ReadonlyMap<string, ApiRoute>
@@ -29,12 +32,11 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 export async function readApiRegistry(): Promise<ApiRegistry> {
   const path = process.env.NOVEL_DIRECTOR_API_REGISTRY || join(homedir(), '.config', 'ai', 'api-registry.json')
-  const routes = new Map<string, ApiRoute>()
   let raw: string
   try {
     raw = await readFile(path, 'utf8')
   } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return routes
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return new Map()
     throw new Error(`无法读取 API 清单 ${path}`)
   }
   let config: unknown
@@ -43,6 +45,11 @@ export async function readApiRegistry(): Promise<ApiRegistry> {
   } catch {
     throw new Error(`API 清单不是有效的 JSON：${path}`)
   }
+  return parseApiRegistry(config)
+}
+
+export function parseApiRegistry(config: unknown): ApiRegistry {
+  const routes = new Map<string, ApiRoute>()
   if (!isRecord(config) || config.version !== 1 || !isRecord(config.apis)) {
     throw new Error('API 清单需要 version: 1 和 apis 对象。')
   }
@@ -64,12 +71,17 @@ export async function readApiRegistry(): Promise<ApiRegistry> {
         ['authorization', 'content-type', 'content-length', 'host', 'cookie'].includes(item.apiKeyHeader.toLowerCase()))) {
       throw new Error(`API 清单中 ${id} 的 apiKeyHeader 必须是一个自定义请求头名称。`)
     }
+    const base = apiEndpoint(item.baseUrl)
+    const model = typeof item.model === 'string' ? item.model.trim() : ''
+    const selectable = item.protocol === 'openai-chat-completions' && item.path === '/chat/completions' &&
+      /^[\p{L}\p{N}][\p{L}\p{N}_.:/+-]{0,127}$/u.test(model) && !model.includes('://') &&
+      !keyName.test(model) && redactSensitiveText(model) === model
     const route: ApiRoute = {
       id, keyEnv: item.keyEnv, backupKeyEnv: item.backupKeyEnv,
       ...(item.apiKeyHeader ? { apiKeyHeader: item.apiKeyHeader } : {}),
+      ...(selectable ? { agentChat: { baseUrl: base, modelName: model } } : {}),
       legacyDesktopKey: id === config.desktopSavedKeyFor
     }
-    const base = apiEndpoint(item.baseUrl)
     for (const address of [item.baseUrl, ...(item.aliases ?? [])]) {
       const endpoint = typeof address === 'string' ? apiEndpoint(address) : ''
       const url = endpoint ? new URL(endpoint) : undefined

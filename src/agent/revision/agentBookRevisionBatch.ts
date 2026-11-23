@@ -7,7 +7,8 @@ import { findProjectId, requiredString } from '../tools/agentToolArguments'
 import { checkRevisionFields, revisionCommonFields } from './agentRevisionModel'
 
 export async function startAgentBookRevisionBatch(runtime: AgentRuntimeData, args: Record<string, unknown>) {
-  checkRevisionFields(args, [...revisionCommonFields, 'operationId', 'goal', 'chapterIds'])
+  checkRevisionFields(args, [...revisionCommonFields, 'operationId', 'goal', 'chapterIds', 'stageNeighbors'])
+  if (args.stageNeighbors !== undefined && typeof args.stageNeighbors !== 'boolean') throw new Error('stageNeighbors 必须为布尔值。')
   const { data, storagePath, userDataPath } = runtime
   if (!storagePath) throw new Error('没有可写入的书库。')
   const projectId = findProjectId(data, args)
@@ -30,13 +31,14 @@ export async function startAgentBookRevisionBatch(runtime: AgentRuntimeData, arg
   }, async grant => {
     const existing = data.agentRuns.find(item => item.id === id)
     if (existing) {
-      if (existing.projectId !== projectId || existing.mode !== 'book_revision' || existing.goal !== goal ||
+      if (existing.projectId !== projectId || existing.mode !== 'book_revision' || existing.goal !== goal || !!existing.stageNeighbors !== (args.stageNeighbors === true) ||
         decisionFingerprint(existing.revisionChapterIds) !== decisionFingerprint(chapterIds)) throw new Error('该批次操作编号已用于其他目标。')
       return { projectId, agentRunId: id, replayed: true }
     }
     const now = new Date().toISOString()
     const run: AgentRun = { id, projectId, goal, mode: 'book_revision', safetyMode: 'autonomous', targetChapterOrders: chapterOrders,
-      revisionChapterIds: chapterIds, status: 'paused', createdJobIds: [], createdDraftIds: [], createdCommitIds: [],
+      revisionChapterIds: chapterIds, ...(args.stageNeighbors === true ? { stageNeighbors: true } : {}),
+      status: 'paused', createdJobIds: [], createdDraftIds: [], createdCommitIds: [],
       pendingHumanReviewItemIds: [], warnings: [], summary: '逐章审稿、通过门禁并提交修订。', startedAt: now, updatedAt: now,
       schemaVersion: 1, completedAt: null,
       decisions: [{ id: `${id}-start`, agentRunId: id, projectId, step: 'start_book_revision_batch', action: 'revise_draft',

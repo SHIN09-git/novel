@@ -1,3 +1,5 @@
+import { draftBodyFormatError } from '../../../../services/ChapterDraftEnvelopeService'
+import { TASK_TEXT_FIELDS } from '../../../../shared/chapterTaskConstraints'
 import type {
   AppData,
   ChapterTask,
@@ -92,27 +94,25 @@ export function pipelineChapterTask(
   }
 }
 
-const CHAPTER_TASK_PROMPT_FIELDS = [
-  'goal',
-  'conflict',
-  'suspenseToKeep',
-  'allowedPayoffs',
-  'forbiddenPayoffs',
-  'endingHook',
-  'readerEmotion',
-  'targetWordCount',
-  'styleRequirement'
-] as const satisfies readonly (keyof ChapterTask)[]
+// Old manual snapshots supplied prompt text only. Opt in for snapshots with explicit task boundaries.
+export function constrainedSnapshotTask(snapshot: PromptContextSnapshot | null) {
+  const task = snapshot?.chapterTask
+  return snapshot?.moduleSelection?.chapterTask !== false && task && (task.povPolicy || task.storyTimeWindow || task.mustOpenWithBeat) ? task : null
+}
 
 export function assertChapterTaskPresentInPrompt(
   prompt: string,
   chapterTask: ChapterTask,
   stage: 'plan' | 'draft'
 ): void {
-  const missingFields = CHAPTER_TASK_PROMPT_FIELDS.filter((field) => {
+  const missingFields: string[] = TASK_TEXT_FIELDS.filter((field) => {
     const value = chapterTask[field].trim()
     return value.length > 0 && !prompt.includes(value)
   })
+  const { povPolicy: pov, storyTimeWindow: time, mustOpenWithBeat: beat } = chapterTask
+  if (pov && ![pov.mode, pov.povCharacterId, ...pov.perceptionChannels].every(v => prompt.includes(v))) missingFields.push('povPolicy')
+  if (time && ![time.date, time.weekday ?? '', time.range].every(v => prompt.includes(v))) missingFields.push('storyTimeWindow')
+  if (beat && !prompt.includes(beat)) missingFields.push('mustOpenWithBeat')
   if (missingFields.length === 0) return
   throw new Error(
     `显式章节任务契约未完整进入${stage === 'plan' ? '计划生成前' : '正文生成前'} Prompt；缺失字段：${missingFields.join(', ')}。请重新开始该章节任务，避免静默丢失修订要求。`
@@ -127,13 +127,8 @@ export function minimumDraftTokens(expectedWordCount: string): number {
 
 export function validateGeneratedChapterDraft(body: string, expectedWordCount: string, strict: boolean): string | null {
   const trimmed = body.trim()
-  if (!trimmed) return '正文生成结果为空。'
-  if (/^(?:```(?:json)?\s*)?(?:\{\s*(?:"|$)|\[\s*(?:\{|["\]]|$))/.test(trimmed)) {
-    return 'AI 返回的是未解析完成的 JSON，而不是可用正文，可能已被截断。'
-  }
-  if (/【(?:世界规则|人物心理|主线推进|本章目标|角色节拍)】/.test(trimmed) || /^(本章目标|必须推进的冲突|角色节拍)：/m.test(trimmed)) {
-    return 'AI 返回的是大纲/任务书摘要，不是章节正文。'
-  }
+  const formatError = draftBodyFormatError(trimmed)
+  if (formatError) return formatError
   if (strict) {
     const tokenEstimate = TokenEstimator.estimate(trimmed)
     const minTokens = minimumDraftTokens(expectedWordCount)

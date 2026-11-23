@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto'
+import { readTaskConstraints } from '../shared/chapterTaskConstraints'
 import type {
   AgentDecision,
   AgentRun,
@@ -35,6 +36,7 @@ export const AGENT_PIPELINE_STEP_ORDER: ChapterGenerationStepType[] = [
 ]
 
 export interface PrepareAgentChapterRunInput {
+  proseMode?: 'agent_handoff'
   appData: AppData
   projectId: ID
   targetChapterOrder: number
@@ -175,10 +177,11 @@ export class AgentRunService {
     const pipelineMode = pipelineModeForSafetyMode(input.safetyMode)
     const pipelineRecipe = PipelineRecipeService.resolveRecipe(undefined, pipelineMode)
     const job: ChapterGenerationJob = {
+      ...(input.proseMode ? { proseMode: input.proseMode } : {}),
       id: jobId,
       projectId,
       targetChapterOrder,
-      chapterTaskSnapshot: input.chapterTaskSnapshot ? { ...input.chapterTaskSnapshot } : null,
+      chapterTaskSnapshot: input.chapterTaskSnapshot ? { ...input.chapterTaskSnapshot, ...readTaskConstraints(input.chapterTaskSnapshot) } : null,
       promptContextSnapshotId: null,
       contextSource: 'auto',
       aiRunConfig,

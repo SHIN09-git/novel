@@ -78,10 +78,12 @@ function readRevisionBatchWriteback(data: AppData, run: RunTargets, book?: Retur
   return { lastReceipt, pending: null }
 }
 
-export function assertRevisionBatchTarget(data: AppData, run: AgentRun, chapterId: ID): void {
+export function assertRevisionBatchTarget(data: AppData, run: AgentRun, chapterId: ID, phase: 'review_or_commit' | 'prepare' = 'review_or_commit'): void {
   if (run.mode !== 'book_revision') return
   if (run.status === 'cancelled' || !run.revisionChapterIds?.includes(chapterId)) throw new Error('该章节不在可执行的修订批次中。')
   const pending = firstPendingRunTarget(data, run)
+  if (phase === 'prepare' && run.stageNeighbors && pending?.chapterId &&
+    run.revisionChapterIds.indexOf(chapterId) >= run.revisionChapterIds.indexOf(pending.chapterId)) return
   if (!pending || pending.chapterId !== chapterId) throw new Error(pending
     ? `请先完成第 ${pending.chapterOrder} 章的审稿和修订提交。` : '本批修订已全部提交。')
 }

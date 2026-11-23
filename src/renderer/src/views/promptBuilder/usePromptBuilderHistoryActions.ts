@@ -12,6 +12,7 @@ import type {
   PromptVersion
 } from '../../../../shared/types'
 import { useRef, useState } from 'react'
+import { readTaskConstraints } from '../../../../shared/chapterTaskConstraints'
 import { PromptLintService } from '../../../../services/PromptLintService'
 import { TokenEstimator } from '../../../../services/TokenEstimator'
 import { useConfirm } from '../../components/ConfirmDialog'
@@ -134,6 +135,7 @@ export function usePromptBuilderHistoryActions(options: PromptBuilderHistoryOpti
             moduleSelection: options.promptVersionSource?.moduleSelection ?? options.modules,
             chapterTask: options.promptVersionSource?.task ?? options.task
           }
+      readTaskConstraints(binding.chapterTask)
       const savedResult = await options.saveData((current) => ({
         ...current,
         promptVersions: [

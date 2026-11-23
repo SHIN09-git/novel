@@ -1,6 +1,7 @@
 import type { AppData, ChapterGenerationJob, ChapterGenerationStep, ChapterPlan, ContextBudgetProfile, ContextSelectionResult, GenerationRunTrace, PromptBlockOrderItem } from '../../shared/types'
 import type { PrepareChapterTaskEditInput } from '../ChapterTaskEditService'
 import { TokenEstimator } from '../TokenEstimator'
+import { taskConstraintLines } from '../promptFormatters/chapterTaskConstraints'
 import { PromptLintService } from '../PromptLintService'
 import { PromptCompositionMetricsService } from '../PromptCompositionMetricsService'
 import { fieldLine, inferPromptBlockOrderFromPrompt } from '../promptFormatters/promptUtils'
@@ -57,7 +58,8 @@ export async function prepareTaskContext(data: AppData, input: PrepareChapterTas
   if (reuse) {
     const labels = ['本章目标', '本章必须推进的冲突', '本章必须保留的悬念', '本章允许回收的伏笔', '本章禁止回收的伏笔', '本章结尾钩子', '本章读者应该产生的情绪', '本章预计字数', '文风要求']
     const values = [task.goal, task.conflict, task.suspenseToKeep, task.allowedPayoffs, task.forbiddenPayoffs, task.endingHook, task.readerEmotion, task.targetWordCount, task.styleRequirement]
-    let prompt = replaceSection(oldContext.finalPrompt, /本章任务契约/, labels.map((label, index) => fieldLine(`${label}：`, values[index])).filter(Boolean).join('\n'))
+    const taskLines = [...labels.map((label, index) => fieldLine(`${label}：`, values[index])), ...taskConstraintLines(task, job.targetChapterOrder === 1)]
+    let prompt = replaceSection(oldContext.finalPrompt, /本章任务契约/, taskLines.filter(Boolean).join('\n'))
     if (prompt && impact.changedFields.includes('styleRequirement')) {
       prompt = replaceSection(prompt, /风格要求|StyleEnvelope/, [fieldLine('文风要求：', task.styleRequirement), '风格只作为表达滤镜，不得覆盖上一章衔接、本章任务、角色硬状态和伏笔规则。'].filter(Boolean).join('\n'))
     }

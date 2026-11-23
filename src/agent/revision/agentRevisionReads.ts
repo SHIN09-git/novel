@@ -17,7 +17,8 @@ export function readRevisionVersion(data: AppData, projectId: string, id: string
   catch (error) { sourceError = error instanceof Error ? error.message : String(error) }
   return {
     projectId, session, request: { ...request, instruction: text(request.instruction), targetRange: text(request.targetRange) },
-    version: { ...version, title: text(version.title), body: text(version.body), changedSummary: text(version.changedSummary),
+    version: { ...version, ...(version.actorTag ? { actorTag: redactSensitiveText(version.actorTag, [data.settings.apiKey]) } : {}),
+      title: text(version.title), body: text(version.body), changedSummary: text(version.changedSummary),
       risks: text(version.risks), preservedFacts: text(version.preservedFacts) },
     versionHash: revisionFingerprint(version), requestHash: revisionFingerprint(request), currentSource, sourceError,
     stale: !currentSource || version.sourceContentHash !== currentSource.sourceContentHash ||

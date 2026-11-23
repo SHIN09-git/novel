@@ -32,6 +32,7 @@ const REFERENCE_COLLECTION_BY_KEY: Partial<Record<string, AppDataArrayKey>> = {
   newlyRequiredChapterIds: 'chapters',
   revisionChapterIds: 'chapters',
   characterId: 'characters',
+  povCharacterId: 'characters',
   participantCharacterIds: 'characters',
   selectedCharacterIds: 'characters',
   relatedCharacterIds: 'characters',

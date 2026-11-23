@@ -11,6 +11,7 @@ import type {
 import { validateString } from '../../shared/validation'
 import { normalizeHardCanonAudit } from '../../shared/normalizers/hardCanonAudit'
 import type { ChapterTask } from '../../shared/types'
+import { CHAPTER_TASK_FIELDS, TASK_TEXT_FIELDS, readTaskConstraints } from '../../shared/chapterTaskConstraints'
 import type { DiagnosticsService } from '../services/DiagnosticsService'
 import { validateChatCompletionRequest } from './aiChatValidation'
 import { safeIpcHandler } from './safeIpcHandler'
@@ -39,18 +40,6 @@ function optionalBoolean(value: unknown, fieldName: string): boolean | undefined
   return value
 }
 
-const CHAPTER_TASK_FIELDS = [
-  'goal',
-  'conflict',
-  'suspenseToKeep',
-  'allowedPayoffs',
-  'forbiddenPayoffs',
-  'endingHook',
-  'readerEmotion',
-  'targetWordCount',
-  'styleRequirement'
-] as const satisfies readonly (keyof ChapterTask)[]
-
 function optionalChapterTask(value: unknown, fieldName: string): ChapterTask | null | undefined {
   if (value === undefined || value === null) return value
   if (typeof value !== 'object' || Array.isArray(value)) throw new Error(`${fieldName} must be an object.`)
@@ -58,14 +47,14 @@ function optionalChapterTask(value: unknown, fieldName: string): ChapterTask | n
   const allowed = new Set<string>(CHAPTER_TASK_FIELDS)
   const unknown = Object.keys(raw).filter((field) => !allowed.has(field))
   if (unknown.length) throw new Error(`${fieldName} contains unsupported fields: ${unknown.join(', ')}.`)
-  const task = Object.fromEntries(CHAPTER_TASK_FIELDS.map((field) => [
+  const task = Object.fromEntries(TASK_TEXT_FIELDS.map((field) => [
     field,
     raw[field] === undefined
       ? ''
       : validateString(raw[field], `${fieldName}.${field}`, { minLength: 0, maxLength: 50_000, trim: false })
   ])) as unknown as ChapterTask
   if (!task.goal.trim()) throw new Error(`${fieldName}.goal is required.`)
-  return task
+  return { ...task, ...readTaskConstraints(raw) }
 }
 
 export function registerDiagnosticsIpcHandlers(diagnosticsService: DiagnosticsService): void {

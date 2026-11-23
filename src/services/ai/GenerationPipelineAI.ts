@@ -1,4 +1,5 @@
 import { AIClient } from './AIClient'
+import { taskConstraintLines } from '../promptFormatters/chapterTaskConstraints'
 import type {
   AIResult,
   Character,
@@ -91,6 +92,7 @@ export function buildAuthoritativeOpeningDraftPrompt(
     '请根据下方唯一的 ChapterTask 写出完整的小说第一章。',
     '只输出严格 JSON：{"title":"","body":""}。body 必须是完整正文，不是提纲、总结、节拍表或任务说明。',
     '把 ChapterTask 当作创作简报，不要在正文中复述字段名、百分比、禁令或其他任务措辞。',
+    ...taskConstraintLines(chapterTask, true),
     '任务中的禁止项只用于划定边界，不要在正文中用否定叙述逐条证明自己遵守了它们。',
     lengthAim
       ? `字数按去除空白后的可见字符计；本次以约 ${lengthAim} 个可见字符为创作落点，允许范围仍以 ChapterTask 为准，不要贴着下限。用人物之间的默契、小摩擦和有因果的生活过程自然展开，不靠重复家务、解释任务或新增剧情凑字。`
@@ -135,6 +137,7 @@ export function chapterPlanMessages(context: string, options: PlanPromptOptions)
       ? 'No existing foreshadowing is selected for this opening chapter. Do not add, hint at, advance, or explain any unlisted clue.'
       : 'Foreshadowing treatment modes in context are binding: hidden/pause must not be used by default; hint stays subtle; advance cannot reveal truth; payoff alone may resolve.',
     'The authoritative chapter task below is the immutable creative contract for this job. Preserve every specific instruction. If context contains generic or stale direction that conflicts with it, the authoritative chapter task wins.',
+    ...taskConstraintLines(chapterTask, isOpeningChapter).filter(line => !context.includes(line)),
     `Authoritative chapter task:\n${JSON.stringify(chapterTask, null, 2)}`,
     `Target chapter: ${options.targetChapterOrder}`,
     `Expected word count: ${chapterTask.targetWordCount || options.estimatedWordCount}`,
@@ -183,6 +186,7 @@ export function chapterDraftMessages(chapterPlan: ChapterPlan, context: string, 
       ? 'Keep behavior consistent only with the task-listed relationship and immediate situation; do not infer a pre-existing dramatic arc or carried state.'
       : 'Do not make characters suddenly OOC. Preserve current dramatic state.',
     'The authoritative chapter task below is the immutable creative contract for this job. Follow every specific instruction. If the generated chapter plan or context conflicts with it, the authoritative chapter task wins.',
+    ...taskConstraintLines(chapterTask, isOpeningChapter).filter(line => !context.includes(line)),
     `Authoritative chapter task:\n${JSON.stringify(chapterTask, null, 2)}`,
     `Mode: ${options.mode}`,
     `Target chapter: ${options.targetChapterOrder}`,
@@ -224,7 +228,7 @@ export class GenerationPipelineAI {
       endingHook: chapterTask.endingHook || '以新的行动压力、信息差或角色选择收束本章。',
       readerEmotionTarget: chapterTask.readerEmotion || options.readerEmotionTarget || '期待、紧张、好奇',
       estimatedWordCount: chapterTask.targetWordCount || options.estimatedWordCount,
-      openingContinuationBeat: isOpeningChapter ? '按本章任务从自然生活场景建立开场，不伪造前情。' : '直接承接上一章最后一幕，不重新开场。',
+      openingContinuationBeat: chapterTask.mustOpenWithBeat || (isOpeningChapter ? '按本章任务从自然生活场景建立开场，不伪造前情。' : '直接承接上一章最后一幕，不重新开场。'),
       carriedPhysicalState: isOpeningChapter ? '不存在上一章身体状态；只建立任务明确要求的当下状态。' : '延续上一章结尾的身体状态。',
       carriedEmotionalState: isOpeningChapter ? '不存在上一章情绪余波；按任务指定的情绪基线开场。' : '延续上一章结尾的情绪余波。',
       unresolvedMicroTensions: isOpeningChapter ? '不存在上一章未释放张力；不要自行补造前情。' : '保留上一章未释放的小张力。',

@@ -204,6 +204,7 @@ export function RevisionComparisonPanel({
               <details className="revision-version-meta">
                 <summary>修改摘要与审稿提示</summary>
                 <p><strong>修改摘要：</strong>{selectedVersionForView.changedSummary || '暂无'}</p>
+                {selectedVersionForView.actorTag && <p><strong>修订来源：</strong>{selectedVersionForView.actorTag}</p>}
                 <p><strong>风险提示：</strong>{selectedVersionForView.risks || '暂无'}</p>
                 <p><strong>保留事实：</strong>{selectedVersionForView.preservedFacts || '暂无'}</p>
               </details>

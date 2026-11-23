@@ -1,4 +1,5 @@
 import { createEmptyChapterTask } from '../../shared/defaults'
+import { CHAPTER_TASK_FIELDS, TASK_TEXT_FIELDS, readTaskConstraints } from '../../shared/chapterTaskConstraints'
 import type { AppData, ChapterTask, ID } from '../../shared/types'
 import type { AgentReadDetail, AgentReadOptions } from '../AgentReadableSummaryService'
 
@@ -49,18 +50,6 @@ export function requiredPositiveInteger(
   return value
 }
 
-const CHAPTER_TASK_STRING_FIELDS = [
-  'goal',
-  'conflict',
-  'suspenseToKeep',
-  'allowedPayoffs',
-  'forbiddenPayoffs',
-  'endingHook',
-  'readerEmotion',
-  'targetWordCount',
-  'styleRequirement'
-] as const satisfies readonly (keyof ChapterTask)[]
-
 export function chapterTaskArg(
   args: Record<string, unknown>,
   key = 'chapterTask',
@@ -73,11 +62,11 @@ export function chapterTaskArg(
   }
 
   const raw = value as Record<string, unknown>
-  const allowedFields = new Set<string>(CHAPTER_TASK_STRING_FIELDS)
+  const allowedFields = new Set<string>(CHAPTER_TASK_FIELDS)
   const unknownFields = Object.keys(raw).filter((field) => !allowedFields.has(field))
   if (unknownFields.length > 0) throw new Error(`${key} contains unsupported fields: ${unknownFields.join(', ')}.`)
-  const task: ChapterTask = { ...createEmptyChapterTask(), ...fallback }
-  for (const field of CHAPTER_TASK_STRING_FIELDS) {
+  const task: ChapterTask = { ...createEmptyChapterTask(), ...fallback, ...readTaskConstraints(raw) }
+  for (const field of TASK_TEXT_FIELDS) {
     const fieldValue = raw[field]
     if (fieldValue === undefined) continue
     if (typeof fieldValue !== 'string') throw new Error(`${key}.${field} must be a string.`)

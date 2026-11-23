@@ -72,6 +72,7 @@ export function taskText(task?: Partial<ChapterTask> | null): string {
   if (!task) return ''
   return [
     task.goal,
+    task.mustOpenWithBeat,
     task.conflict,
     task.suspenseToKeep,
     task.allowedPayoffs,

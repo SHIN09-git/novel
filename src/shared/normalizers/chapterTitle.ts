@@ -5,6 +5,13 @@ const text = (v: unknown): v is string => typeof v === 'string' && v.trim().leng
 const hash = (v: unknown): v is string => typeof v === 'string' && /^[0-9a-f]{64}$/.test(v)
 export const isTitlePrefixMode = (v: unknown) => v === 'manual' || v === 'keep' || v === 'strip'
 
+export function normalizeManualChapterTitle(value: unknown): string {
+  if (typeof value !== 'string' || !value.trim() || /[\u0000-\u001f\u007f\u2028\u2029]/u.test(value)) {
+    throw new Error('请为所选章节填写非空的单行标题。')
+  }
+  return value.trim()
+}
+
 export function normalizeChapterTitleReceipts(value: unknown): ChapterTitleReceipt[] {
   if (!Array.isArray(value)) return []
   const result: ChapterTitleReceipt[] = []

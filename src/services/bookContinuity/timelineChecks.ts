@@ -1,7 +1,7 @@
 import type { Chapter, TimelineEvent } from '../../shared/types'
 import { isTimelineDay, timelineChapterFor, timelineChapterIndex } from '../../shared/normalizers/timeline'
 import type { BookAuditContext, BookAuditEvidence, BookAuditFinding } from './types'
-import { locateTimeQuote, readTimelinePassages, seasonNames, timeClues, timeExcerpt, timeNoteShift, type TimeKind } from './timelineText'
+import { isAmbientSeasonHint, locateTimeQuote, readTimelinePassages, seasonNames, timeClues, timeExcerpt, timeNoteShift, type TimeKind } from './timelineText'
 
 const labels = { season: '季节', countdown: '倒计时' }
 interface Reading {
@@ -129,6 +129,7 @@ export function auditBookTimeline(ctx: BookAuditContext): BookAuditFinding[] {
       for (const kind of ['season', 'countdown'] as const) {
         if ((kind === 'season' ? line.seasonAt : line.countdownAt) < 0 || used[kind].has(line.at)) continue
         findings.push({ kind, status: 'needs_evidence', atChapterOrder: chapter.order, title: `第 ${chapter.order} 章${labels[kind]}线索`,
+          ...(kind === 'season' && isAmbientSeasonHint(line) ? { ambientSeasonHint: true } : {}),
           reason: '这句现存正文未关联已核实的时间记录，只作为线索，不参与跨章推算。', evidence: [ctx.evidence(chapter, timeExcerpt(line, kind))] })
       }
     }

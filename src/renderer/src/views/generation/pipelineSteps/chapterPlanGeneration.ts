@@ -6,6 +6,7 @@ import {
 import { appendGenerationRunTraceAiCall } from '../../../utils/runTrace'
 import {
   assertChapterTaskPresentInPrompt,
+  constrainedSnapshotTask,
   pipelineChapterTask,
   serializeOutput
 } from '../pipelineUtils'
@@ -33,7 +34,7 @@ function assertAuthoritativeAgentPlan(
 
 export async function runGenerateChapterPlanStep(ctx: PipelineStepHandlerContext) {
   const { env, state, job, step, options, activeStoryDirectionGuide } = ctx
-  const chapterTask = pipelineChapterTask(env.project, options, activeStoryDirectionGuide, job.chapterTaskSnapshot)
+  const chapterTask = pipelineChapterTask(env.project, options, activeStoryDirectionGuide, job.chapterTaskSnapshot ?? constrainedSnapshotTask(ctx.snapshot))
   if (job.chapterTaskSnapshot) assertChapterTaskPresentInPrompt(state.context, chapterTask, 'plan')
   if (options.targetChapterOrder === 1 && job.chapterTaskSnapshot) {
     state.plan = buildAuthoritativeOpeningPlan(chapterTask)

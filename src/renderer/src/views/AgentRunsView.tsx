@@ -91,10 +91,10 @@ function commitLabel(commit: ChapterCommitBundle | RevisionCommitBundle): string
   return `修订提交 ${commit.revisionCommitId}`
 }
 
-function findRunJobChapters(data: AppData, run: AgentRun): Array<{ jobId: string; chapterOrder: number; status: string; draftCount: number; qualityScore: number | null }> {
+function findRunJobChapters(data: AppData, run: AgentRun) {
   return run.createdJobIds.map((jobId) => {
     const job = data.chapterGenerationJobs.find((item) => item.id === jobId)
-    const drafts = data.generatedChapterDrafts.filter((draft) => draft.jobId === jobId)
+    const drafts = data.generatedChapterDrafts.filter((draft) => draft.projectId === run.projectId && draft.jobId === jobId)
     const latestDraft = [...drafts].sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))[0] ?? null
     const quality = latestDraft
       ? latestQualityReportForDraft(data.qualityGateReports.filter((report) => report.jobId === jobId), latestDraft)
@@ -104,6 +104,7 @@ function findRunJobChapters(data: AppData, run: AgentRun): Array<{ jobId: string
       chapterOrder: job?.targetChapterOrder ?? 0,
       status: job?.status ?? 'missing',
       draftCount: drafts.length,
+      actorTag: latestDraft?.actorTag,
       qualityScore: quality?.overallScore ?? null
     }
   }).filter((item) => item.chapterOrder > 0 || item.jobId).sort((a, b) => a.chapterOrder - b.chapterOrder || a.jobId.localeCompare(b.jobId))
@@ -289,6 +290,7 @@ export function AgentRunsView({ data, project, onReload }: AgentRunsViewProps) {
                       </div>
                       <p>Job: {item.jobId}</p>
                       <p>草稿 {item.draftCount} 个{item.qualityScore !== null ? ` · 质量 ${item.qualityScore}` : ''}</p>
+                      {item.actorTag && <small>最近草稿来源：{item.actorTag}</small>}
                     </article>
                   )) : <p className="muted">这个批次尚未创建章节 Job。</p>}
                 </div>
@@ -335,6 +337,7 @@ export function AgentRunsView({ data, project, onReload }: AgentRunsViewProps) {
                           <span>{formatDate(decision.createdAt)}</span>
                         </div>
                         <p>{decision.reason}</p>
+                        {decision.actorTag && <p>修订来源：{decision.actorTag}</p>}
                         {decision.evidence.length ? <small>{decision.evidence.slice(0, 3).join(' / ')}</small> : null}
                       </article>
                     ))}

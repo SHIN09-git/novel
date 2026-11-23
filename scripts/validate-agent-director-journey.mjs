@@ -1,7 +1,9 @@
 #!/usr/bin/env node
 import assert from 'node:assert/strict'
-import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
-import { isAbsolute, join, relative } from 'node:path'
+import { execFileSync } from 'node:child_process'
+import { appendFileSync, existsSync } from 'node:fs'
+import { mkdir, mkdtemp, realpath, rm, writeFile } from 'node:fs/promises'
+import { dirname, isAbsolute, join, relative, resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { build } from 'esbuild'
 import { repoRoot } from './utils/repo-root.mjs'
@@ -10,20 +12,40 @@ import { assertStaleCandidates, leaveStoppedClaim, oldEnding, revisedEnding, ver
 import { checkGenerationGate, openBookWithOneGrant, rejectedRevisionMarker, verifyBookRevisionBatch } from './utils/agent-book-creative-workflow.mjs'
 import { openLibraryWithOneGrant, verifyArchiveAndHistory } from './utils/agent-library-management.mjs'
 import { mockAgentEndpoint, openPackagedAgentJourney } from './utils/packaged-agent-journey.mjs'
+import { openReviewRecovery } from './fixtures/agent-director-review-recovery.mjs'
 
 const tempRoot = join(repoRoot, 'tmp')
-await mkdir(tempRoot, { recursive: true })
-const directory = await mkdtemp(join(tempRoot, 'agent-director-journey-'))
 const originalFetch = globalThis.fetch
 const originalApiKey = process.env.NOVEL_DIRECTOR_API_KEY
 const originalRegistry = process.env.NOVEL_DIRECTOR_API_REGISTRY
 const priorityFixes = process.argv.includes('--priority-fixes')
 const libraryManagement = process.argv.includes('--library-management')
 const bookCreative = libraryManagement || process.argv.includes('--book-creative')
-const useWorkItems = priorityFixes || bookCreative || process.argv.includes('--work-items')
+const nativeProse = process.argv.includes('--agent-prose')
+const settlement = process.argv.includes('--chapter-settlement')
+const useWorkItems = priorityFixes || bookCreative || nativeProse || settlement || process.argv.includes('--work-items')
 const useSqlite = process.argv.includes('--sqlite')
 const packaged = process.argv.includes('--packaged')
 if (packaged) assert(useSqlite && bookCreative && !priorityFixes, '--packaged requires --sqlite and an authorization workflow')
+const selected = process.argv.indexOf('--packaged-dir')
+let unpacked
+if (packaged) {
+  assert(selected !== -1 && process.argv[selected + 1] && !process.argv[selected + 1].startsWith('-'),
+    '--packaged requires --packaged-dir <candidate unpacked directory>; there is no release fallback')
+  unpacked = await realpath(resolve(process.argv[selected + 1]))
+  const gitCommon = execFileSync('git', ['rev-parse', '--path-format=absolute', '--git-common-dir'], { cwd: repoRoot, encoding: 'utf8' }).trim()
+  const oldPackage = join(dirname(gitCommon), 'release', 'win-unpacked')
+  assert(!existsSync(oldPackage) || relative(await realpath(oldPackage), unpacked) !== '', 'Refusing the main checkout release package')
+} else assert.equal(selected, -1, '--packaged-dir needs --packaged')
+const recoveryJourney = useSqlite && bookCreative && nativeProse && settlement
+await mkdir(tempRoot, { recursive: true })
+const directory = await mkdtemp(join(tempRoot, 'agent-director-journey-'))
+const logPath = packaged || recoveryJourney ? directory + '.jsonl' : null
+const log = (event, details) => {
+  if (logPath) appendFileSync(logPath, JSON.stringify({ at: new Date().toISOString(), event, ...details }) + '\n')
+}
+if (logPath) console.log('JOURNEY_LOG', logPath)
+log('start', { repoRoot, directory, unpacked, packaged, argv: process.argv.slice(2) })
 const workItemMode = useWorkItems ? { responseMode: 'work_item' } : {}
 let projectId = 'director-journey-project'
 const humanUpdateMarker = 'HUMAN_APPDATA_UPDATE_AFTER_CHAPTER_2'
@@ -123,6 +145,14 @@ function reviewFixture(chapterOrder) {
 
 function reviewForPrompt(chapterOrder, prompt) {
   const fixture = reviewFixture(chapterOrder)
+  if (libraryManagement && settlement && prompt.includes('第 5 号纸条从门缝滑了进来')) {
+    // Leave one unselected proposal for the existing post-revocation authorization probe.
+    fixture.foreshadowingExtraction.newForeshadowingCandidates.push({
+      title: '第五张纸条的来源', description: '第五张纸条从门缝滑入，来源未知。', firstChapterOrder: 5,
+      suggestedWeight: 'medium', recommendedTreatmentMode: 'hint', expectedPayoff: '确认纸条来源',
+      relatedCharacterIds: [], notes: ''
+    })
+  }
   if (!priorityFixes || chapterOrder !== 2) return fixture
   const state = (category, key, label, afterValue, evidence) => ({
     characterId: 'director-character', category, key, label, changeType: 'create_fact',
@@ -207,6 +237,10 @@ function scriptedResponse(request) {
 }
 if (!packaged) globalThis.fetch = async (url, options = {}) => {
   const target = String(url)
+  if (recoveryJourney) {
+    assert(recovery?.allows(target), 'Only the two fixture loopbacks may receive model requests')
+    return originalFetch(url, { ...options, redirect: 'error' })
+  }
   assert.equal(target, 'http://127.0.0.1:9/v1/chat/completions', 'The fixture may call only its loopback mock endpoint.')
   assert.equal(options.method, 'POST')
   return scriptedResponse(JSON.parse(String(options.body ?? '{}')))
@@ -303,7 +337,8 @@ async function loadApi() {
         "export { AgentToolService } from './src/agent/tools/AgentToolService'",
         "export { AgentAuthorizationService } from './src/main/services/AgentAuthorizationService'",
         "export { JsonStorageService } from './src/storage/JsonStorageService'",
-        "export { SqliteStorageService } from './src/storage/SqliteStorageService'",
+        "export * from './src/storage/SqliteStorageService'",
+        ...(existsSync(join(repoRoot, 'src/main/libraryFiles.ts')) ? ["export { libraryStores, writeNewLibrary } from './src/main/libraryFiles'"] : []),
         "export { claimAgentJobExecution } from './src/agent/agentJobExecution'",
         "export { readCandidateDraftSource } from './src/services/CandidateDraftSource'",
         "export { invalidateDraftDiagnosticsAfterChange } from './src/services/DraftDiagnosticBindingService'",
@@ -328,26 +363,39 @@ function withoutNullTimestamps(reference) {
     value !== null || (key !== 'sourceUpdatedAt' && key !== 'sourceSnapshotUpdatedAt')))
 }
 
-let storage, endpoint, packagedQa
+let storage, endpoint, packagedQa, recovery, releaseSummary
 try {
   process.env.NOVEL_DIRECTOR_API_REGISTRY = join(directory, 'registry.json')
-  await writeFile(process.env.NOVEL_DIRECTOR_API_REGISTRY, JSON.stringify({ version: 1, apis: {} }))
+  if (recoveryJourney) {
+    recovery = await openReviewRecovery(scriptedResponse, log)
+    if (!packaged) Object.assign(process.env, recovery.fixtureEnv)
+  } else if (packaged) endpoint = await mockAgentEndpoint(scriptedResponse)
+  await writeFile(process.env.NOVEL_DIRECTOR_API_REGISTRY, JSON.stringify({ version: 1, apis: recovery?.registry ?? {} }))
   const api = await loadApi()
   const userDataPath = packaged ? join(directory, 'appdata', 'Novel Director') : join(directory, 'profile')
   const storagePath = packaged ? join(userDataPath, 'novel-director-data.sqlite')
     : join(directory, useSqlite ? 'director-journey.sqlite' : 'director-journey.json')
   await mkdir(userDataPath, { recursive: true })
-  storage = new (useSqlite ? api.SqliteStorageService : api.JsonStorageService)(storagePath)
-  if (packaged) endpoint = await mockAgentEndpoint(scriptedResponse)
-  await storage.save(fixture(api, endpoint?.baseUrl))
-  if (packaged) packagedQa = await openPackagedAgentJourney({
-    unpacked: join(repoRoot, 'release', 'win-unpacked'), profile: userDataPath, storagePath,
-    registryPath: process.env.NOVEL_DIRECTOR_API_REGISTRY
-  })
+  const seed = fixture(api, recovery?.baseUrl ?? endpoint?.baseUrl)
+  if (packaged) {
+    assert(!existsSync(storagePath))
+    packagedQa = await openPackagedAgentJourney({ unpacked, profile: userDataPath, storagePath,
+      registryPath: process.env.NOVEL_DIRECTOR_API_REGISTRY, fixtureEnv: recovery?.fixtureEnv, log })
+    storage = api.createExistingLibraryStorage?.(storagePath) ?? new api.SqliteStorageService(storagePath)
+    const empty = await storage.loadSnapshot()
+    assert.equal(empty.data.projects.length, 0)
+    await storage.saveIfCurrent(seed, empty.revision)
+  } else if (api.writeNewLibrary) {
+    storage = (await api.writeNewLibrary(storagePath, api.libraryStores, seed)).storage
+  } else {
+    storage = new (useSqlite ? api.SqliteStorageService : api.JsonStorageService)(storagePath)
+    await storage.save(seed)
+  }
 
   const metrics = { toolCalls: 0, compactReplyBytes: 0, mcpResultBytes: 0, fullDraftBytes: 0 }
   const call = async (name, args = {}) => {
-    const input = { storagePath, userDataPath, ...args }
+    const input = name === 'listAvailableChannels' ? {} : { storagePath, userDataPath, ...args }
+    log('tool', { name, projectId: args.projectId, jobId: args.jobId, operationId: args.operationId })
     const result = packagedQa ? await packagedQa.call(name, input)
       : await api.AgentToolService.callTool({ name: `agent.${name}`, arguments: input })
     metrics.toolCalls += 1
@@ -363,7 +411,8 @@ try {
   let library = null
   if (libraryManagement) {
     const otherStoragePath = join(directory, 'outside-library.json')
-    await new api.JsonStorageService(otherStoragePath).save(fixture(api))
+    if (api.writeNewLibrary) (await api.writeNewLibrary(otherStoragePath, api.libraryStores, fixture(api))).storage.close?.()
+    else await new api.JsonStorageService(otherStoragePath).save(fixture(api))
     library = await openLibraryWithOneGrant({ call, authority, storagePath, otherProjectId: projectId, snapshot,
       otherStoragePath, otherProfile: join(directory, 'other-profile') })
   }
@@ -396,12 +445,14 @@ try {
   const grant = bookGrant ?? await authority.grant({
     storagePath,
     projectId,
-    actions: ['edit_chapter_task', 'accept_draft', ...(priorityFixes ? ['accept_high_risk_candidates'] : [])],
+    actions: ['edit_chapter_task', 'accept_draft', ...(settlement ? ['manage_chapters'] : []),
+      ...(priorityFixes || settlement ? ['accept_high_risk_candidates'] : [])],
     chapterStart: 1,
     chapterEnd: 5
   })
 
   const events = []
+  const chapterEvidence = []
   let reconnectProbe = null
   let reReviewCalls = 0
   let relatedCandidateId
@@ -442,7 +493,7 @@ try {
       task: taskFixture(chapterOrder),
       budgetMode: 'standard',
       budgetMaxTokens: 12000,
-      pipelineMode: 'standard',
+      pipelineMode: recovery && chapterOrder === 4 ? 'conservative' : 'standard',
       refreshContext: false
     }
     const taskPreview = await call('previewChapterTaskEdit', editArguments)
@@ -476,7 +527,19 @@ try {
     }
     const execute = (args = taskApplied.data.nextExecution.arguments) =>
       call('retryChapterPipeline', { ...args, ...workItemMode })
-    let pipeline = await execute()
+    let pipeline
+    if (nativeProse && chapterOrder === 4) {
+      const paused = await execute({ ...taskApplied.data.nextExecution.arguments, stopAfterStep: 'build_prompt' })
+      const item = paused.data.workItem
+      assert.equal(item.state, 'awaiting_prose_draft')
+      const handoff = (await call('getChapterDraftHandoff', item.nextAction.arguments)).data
+      assert.ok(handoff.messages.some(m => m.content.includes('DIRECTOR_CHAPTER_4_TASK')))
+      const body = '　　' + proseFixture(4) + '\n'
+      recovery?.arm()
+      pipeline = await call('submitChapterDraft', { ...handoff.nextAction.arguments, title: '第四章', body, actorTag: 'prose-writer' })
+      assert.equal(pipeline.data.workItem.draft.actorTag, 'prose-writer')
+      if (recovery) pipeline = await recovery.recover({ failed: pipeline.data.workItem, snapshot, call, body })
+    } else pipeline = await execute()
     if (chapterOrder === 3) {
       const failed = pipeline.data.workItem
       assert.equal(useWorkItems ? failed.job.resumeFrom : pipeline.data.failedStep?.type, 'generate_chapter_draft',
@@ -528,6 +591,7 @@ try {
     }
     const draftId = useWorkItems ? reviewItem.draft.id : pipeline.data.draftIds[0]
     const draftRead = await call('getDraftText', useWorkItems ? reviewItem.draft.read.arguments : { draftId, detail: 'full' })
+    if (nativeProse && chapterOrder === 4) assert.equal(draftRead.data.text, '　　' + proseFixture(4) + '\n')
     if (priorityFixes && chapterOrder === 2) {
       assert.ok(draftRead.data.text.includes(revisedEnding))
       assert.ok(!draftRead.data.text.includes(oldEnding))
@@ -546,17 +610,34 @@ try {
     if (useWorkItems) {
       assert.deepEqual(reviewItem.review.reports.find(report => report.kind === 'quality_gate'), { kind: 'quality_gate', reportId: quality.id })
     }
-    const acceptancePreview = await call('previewChapterAcceptance', {
+    let consistencyId
+    if (recoveryJourney) {
+      for (const kind of ['consistency', 'quality_gate']) {
+        const selected = reviewItem.review.reports.find(report => report.kind === kind)
+        assert(selected, 'Missing chapter report: ' + kind)
+        const { data } = await call('getDraftReviewReport', { ...reviewItem.review.readReport.arguments, ...selected })
+        assert.equal(data.draftContentHash, reviewItem.draft.draftContentHash)
+        assert.equal(data.draftId, draftId)
+        assert.equal(data.report.id, selected.reportId)
+        if (kind === 'quality_gate') assert.equal(data.report.pass, true)
+        else consistencyId = data.report.id
+      }
+    }
+    const summaryCandidate = settlement && current.data.memoryUpdateCandidates.find(c => c.type === 'chapter_review' && c.sourceDraftId === draftId)
+    if (settlement) assert.ok(summaryCandidate, 'The director chose the review summary from this draft.')
+    const acceptancePreview = await call(settlement ? 'previewChapterSettlement' : 'previewChapterAcceptance', {
       ...(useWorkItems ? reviewItem.acceptance.preview.arguments : {
         projectId, agentRunId, jobId: taskApplied.data.job.id, draftId, mode: 'reviewed'
       }),
       operationId: `director-accept-${chapterOrder}`,
+      ...(settlement ? { finalTitle: `定名：纸条之${chapterOrder}`, decisions: [{ kind: 'memory_update',
+        candidateId: summaryCandidate.id, decision: 'accept' }] } : {}),
       reason: `已读取第 ${chapterOrder} 章完整正文和当前报告，明确决定采纳本次 mock fixture 输出。`
     })
     assert.equal(acceptancePreview.data.review.mode, 'reviewed')
-    const accepted = await call('applyChapterAcceptance', {
+    const accepted = await call(settlement ? 'applyChapterSettlement' : 'applyChapterAcceptance', {
       projectId,
-      previewId: acceptancePreview.data.preview.id,
+      previewId: settlement ? acceptancePreview.data.previewId : acceptancePreview.data.preview.id,
       expectedPreviewHash: acceptancePreview.data.previewHash,
       ...workItemMode
     })
@@ -564,6 +645,19 @@ try {
     assert.equal(accepted.data.authorizationGrantId, grant.id)
     const committed = await snapshot()
     assert.equal(committed.data.chapterCommitBundles.length, chapterOrder)
+    if (settlement) {
+      assert.equal(committed.data.chapters.find(c => c.id === accepted.data.chapterId).title, `定名：纸条之${chapterOrder}`)
+      assert.equal(committed.data.memoryUpdateCandidates.find(c => c.id === summaryCandidate.id).status, 'accepted')
+      assert.equal(committed.data.candidateDecisionReceipts.length, chapterOrder)
+      if (recoveryJourney) {
+        const receipt = committed.data.candidateDecisionReceipts.find(r => r.id === accepted.data.candidateReceiptId)
+        assert(receipt.decisions.some(d => d.candidateId === summaryCandidate.id && d.decision === 'accept'))
+        const entry = { order: chapterOrder, title: acceptancePreview.data.finalTitle, commitId: accepted.data.commitId,
+          qualityId: quality.id, consistencyId, candidateReceiptId: receipt.id, bodyHash: reviewItem.draft.draftContentHash }
+        log('settlement', entry)
+        chapterEvidence.push({ ...entry, body: draftRead.data.text })
+      }
+    }
     assert.equal(committed.data.chapters.find((chapter) => chapter.projectId === projectId && chapter.order === chapterOrder)?.body, draftRead.data.text)
     if (useWorkItems) {
       workItem = accepted.data.workItem
@@ -602,6 +696,11 @@ try {
   const final = await snapshot()
   assert.equal(final.data.chapters.filter((chapter) => chapter.projectId === projectId).length, 5)
   assert.equal(final.data.chapterCommitBundles.length, 5)
+  if (recoveryJourney) {
+    recovery.verify()
+    assert.equal(chapterEvidence.length, 5)
+    if (packagedQa) await packagedQa.inspectChapters(final.data.projects.find(p => p.id === projectId).name, chapterEvidence)
+  }
   assert.deepEqual(final.data.agentRuns.find((run) => run.id === agentRunId)?.targetChapterOrders, [1, 2, 3, 4, 5])
   if (priorityFixes) {
     assert.ok(relatedCandidateId)
@@ -621,8 +720,8 @@ try {
     assert.notEqual(legacy.data.authorization, 'stale_source')
   }
   const journeyMockCalls = mockRequests.length
-  assert.equal(journeyMockCalls - reReviewCalls, 21)
-  if (!priorityFixes && !bookCreative) assert.equal(metrics.toolCalls, useWorkItems ? 32 : 47)
+  assert.equal(journeyMockCalls - reReviewCalls, recovery ? 21 : nativeProse ? 20 : 21)
+  if (!priorityFixes && !bookCreative) assert.equal(metrics.toolCalls, nativeProse ? 34 : useWorkItems ? 32 : 47)
   const mcpReconnectChecks = useWorkItems && !packaged
     ? await validateChapterWorkItemReconnect({ api, directory, projectId, data: reconnectProbe, agentRunId }) : 0
   assert(!mockRequests.slice(journeyMockCalls).some(request => request.prompt.includes('You are drafting a novel chapter') ||
@@ -630,7 +729,7 @@ try {
   const reconnectReviewMockCalls = mockRequests.length - journeyMockCalls
   const management = library ? await verifyArchiveAndHistory({ call, snapshot, ...library, modelRequests: mockRequests }) : {}
   const creative = bookGrant ? await verifyBookRevisionBatch({ call, snapshot, projectId, grant: bookGrant, authority,
-    storagePath, modelRequests: mockRequests }) : {}
+    storagePath, modelRequests: mockRequests, stagedErrata: process.argv.includes('--staged-errata'), storage }) : {}
   if (library) {
     assert.equal((await call('getLibraryAuthorization')).data.active, false)
     const args = { projectId: library.otherProjectId, operationId: 'library-revoked-edit', action: 'archive', reason: '不允许撤权后继续。' }
@@ -650,7 +749,7 @@ try {
     { code: 'AGENT_CANDIDATE_AUTHORIZATION_REQUIRED' })
     assert.equal((await snapshot()).revision, stored.revision)
   }
-  console.log(JSON.stringify({
+  const summary = {
     ok: true,
     mode: libraryManagement ? 'library_management' : bookCreative ? 'book_creative' : priorityFixes ? 'priority_fixes' : useWorkItems ? 'work_item' : 'legacy',
     ...metrics,
@@ -658,9 +757,12 @@ try {
     storage: useSqlite ? 'isolated-sqlite' : 'isolated-json',
     chaptersCommitted: 5,
     pipelineEntry: packaged ? 'shipped Electron MCP over stdio' : 'agent.retryChapterPipeline via AgentToolService.callTool',
-    model: packaged ? 'isolated loopback mock endpoint' : 'in-process local mock response fixture',
-    ...(packagedQa ? { packagedEvidence: packagedQa.evidence() } : {}),
-    mockModelCalls: journeyMockCalls,
+    model: packaged || recovery ? 'isolated loopback mock endpoint' : 'in-process local mock response fixture',
+    ...(packagedQa ? { packagedEvidence: await packagedQa.evidence() } : {}),
+    mockModelCalls: journeyMockCalls + (recovery ? 1 : 0),
+    ...(settlement ? { formalSettlements: 5 } : {}),
+    ...(nativeProse ? { agentAuthoredChapter: 4 } : {}),
+    ...(recovery ? { recoveredReviewChapter: 4, uiChaptersVerified: packaged ? chapterEvidence.length : 0 } : {}),
     ...(priorityFixes ? { sameDraftReReviewMockCalls: reReviewCalls, recoveredAfterProcessExit: true } : {}),
     reconnectReviewMockCalls,
     ...creative,
@@ -669,9 +771,28 @@ try {
     pausedAndResumedChapter: 3,
     humanUpdateObservedByChapter: 3,
     sequentialFormalCommits: true
-  }))
+  }
+  log('checks-passed', summary)
+  if (recovery && packagedQa) {
+    releaseSummary = { version: summary.packagedEvidence.version, asarSha256: summary.packagedEvidence.asarSha256,
+      authorization: summary.mode, storage: 'desktop-created SQLite', agentAuthoredChapter: 4,
+      chapters: chapterEvidence.map(({ order, title }) => ({ order, title, gatePassed: true, settled: true,
+        reviewSummaryCandidateAccepted: true, uiVerified: ['body', 'title', 'consistencyReport', 'qualityGateReport', 'commitReceipt'] })),
+      recovery: { chapter: 4, failedStep: 'consistency_review', simulatedHttpStatus: 503, switchCommands: 1,
+        retryUsedRegisteredLoopback: true, previousStepsAndBodyUnchanged: true },
+      paidModelCalls: 0 }
+  }
+  console.log(JSON.stringify(summary))
+} catch (error) {
+  log('failed', { error: error.stack })
+  throw error
 } finally {
-  try { await packagedQa?.close() } finally { await endpoint?.close() }
+  try {
+    try { await packagedQa?.close() } finally { await endpoint?.close(); await recovery?.close() }
+  } catch (error) {
+    log('cleanup-failed', { error: error.stack })
+    throw error
+  }
   storage?.close?.()
   globalThis.fetch = originalFetch
   if (originalApiKey === undefined) delete process.env.NOVEL_DIRECTOR_API_KEY
@@ -681,4 +802,10 @@ try {
   const child = relative(tempRoot, directory)
   if (!child || child.startsWith('..') || isAbsolute(child)) throw new Error('Refusing to clean outside the isolated fixture root.')
   await rm(directory, { recursive: true, force: true, maxRetries: 6 })
+  log('cleanup-complete', {})
+  if (releaseSummary) {
+    const path = directory + '.summary.json'
+    await writeFile(path, JSON.stringify({ ...releaseSummary, cleanExit: true, remainingProcesses: 0 }, null, 2) + '\n', { flag: 'wx' })
+    console.log('JOURNEY_RELEASE_SUMMARY', path)
+  }
 }

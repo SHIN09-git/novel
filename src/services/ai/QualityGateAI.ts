@@ -38,7 +38,8 @@ export class QualityGateAI {
     chapterDraft: ChapterDraftResult,
     context: string,
     chapterPlan: ChapterPlan | null,
-    reviewScope: QualityGateReviewScope = {}
+    reviewScope: QualityGateReviewScope = {},
+    errata?: { start: number; old: string; replacement: string; beforeExcerpt: string; afterExcerpt: string }
   ): Promise<AIResult<QualityGateEvaluation>> {
     const fallback: QualityGateEvaluation = {
       overallScore: 68,
@@ -85,6 +86,12 @@ export class QualityGateAI {
       'Field contract: requiredFixes is reserved exclusively for acceptance blockers: concrete changes that must be completed before this draft can be accepted. If requiredFixes contains one or more items, pass must be false. Every high severity blocker should have a corresponding concrete requiredFix.',
       'Medium or low severity non-blocking improvements must not appear in requiredFixes; put them in optionalSuggestions. Do not promote a stylistic preference to a blocker unless accepting the draft would violate canon, continuity, chapter-plan constraints, or downstream memory integrity.',
       'Each dimension must be 0-100. pass must be false if score < 50, if any high severity issue exists, or if requiredFixes is non-empty. If score < 80 or key dimensions are below 70 without a blocker, keep pass based on the 50-point gate and add concrete optionalSuggestions for human review before acceptance.',
+      ...(errata ? [
+        '局部勘误审稿：各项评分和阻断项只针对本次改动造成的退化。没有新增问题的维度不要因旧稿问题扣分。旧问题仅列为 optionalSuggestions。',
+        '逐字对照改前、改后，检查否定、数值、身份、在场状态、因果及对前后章和硬规则的影响。引用改动与矛盾证据。不得因改动很小自动通过。',
+        '章首、章尾未动，仍要检查改词是否间接破坏衔接；不得把旧摘要当作否决本次勘误的依据。',
+        `系统计算的实际差异：${JSON.stringify(errata)}`
+      ] : [
       'Evaluate: plot goal progress, current character state consistency, forbidden foreshadowing reveal, unregistered major canon, style sample match, pacing, reader emotion payoff, evidence-backed AI-tone patterns, and compliance with the chapter plan.',
       LESS_AI_TONE_REVIEW_GUIDANCE,
       'If the context includes a Consistency Review section, reference it as diagnostic input. Do not duplicate identical issues; instead set linkedConsistencyIssueId when you refer to an existing consistency issue. High severity consistency issues should reduce pass likelihood.',
@@ -96,6 +103,7 @@ export class QualityGateAI {
       'Character state ledger checks: verify resource balance, inventory ownership, injury persistence, character knowledge, ability limits, location continuity, and promises/debts. Use issue.type values such as resource_underflow, missing_inventory, injury_reset, knowledge_leak, ability_overuse, location_jump, promise_ignored, or state_conflict.',
       'Novelty checks: flag unauthorized new named characters, new world rules, new system mechanics, new organizations/ranks, and major lore reveals. Use issue.type values unauthorized_new_character, unauthorized_new_rule, unauthorized_new_organization, unauthorized_lore_reveal, or deus_ex_rule_patch.',
       'If a newly introduced rule directly solves the current crisis without prior foreshadowing or chapter-plan permission, pass must be false and severity should be high. If a new rule is explicitly allowed and carries cost/risk, it may pass but should be recorded.',
+      ]),
       '',
       `Chapter plan:\n${JSON.stringify(chapterPlan ?? {}, null, 2)}`,
       '',

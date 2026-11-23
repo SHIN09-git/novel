@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 import assert from 'node:assert/strict'
+import { createHash } from 'node:crypto'
 import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { createRequire } from 'node:module'
 import { Socket } from 'node:net'
@@ -395,10 +396,10 @@ try {
     await test(`revision configuration matches UI: ${mode}`, async () => {
       const data = fixture()
       data.settings.modelName = 'global-base'
-      data.settings.pipelineModelRoles = { revision: { modelName: 'global-revision', temperature: 0.2, maxTokens: 2345 } }
+      data.settings.pipelineModelRoles = { revision: { modelName: 'global-revision', temperature: 0.2, maxTokens: 2345, reasoningEffort: 'high' } }
       if (mode === 'draft-frozen-role' || mode === 'draft-frozen-base') {
-        data.chapterGenerationJobs[0].aiRunConfig = { ...data.settings, schemaVersion: 1, modelName: 'frozen-base', temperature: 0.4, maxTokens: 4567,
-          ...(mode === 'draft-frozen-role' ? { roles: { revision: { modelName: 'frozen-revision', temperature: 0.6, maxTokens: 6789 } } } : {}) }
+        data.chapterGenerationJobs[0].aiRunConfig = { ...data.settings, schemaVersion: 1, modelName: 'frozen-base', temperature: 0.4, maxTokens: 4567, reasoningEffort: 'low',
+          ...(mode === 'draft-frozen-role' ? { roles: { revision: { modelName: 'frozen-revision', temperature: 0.6, maxTokens: 6789, reasoningEffort: null } } } : {}) }
       }
       const h = await harness('json', data)
       const draft = mode !== 'chapter-global-role'
@@ -412,6 +413,7 @@ try {
         assert.equal(actual.settings[field], expected[field], `${mode}: ${field}`)
       }
       assert.equal(actual.settings.modelName, mode === 'draft-frozen-role' ? 'frozen-revision' : mode === 'draft-frozen-base' ? 'frozen-base' : 'global-revision')
+      assert.equal(actual.settings.reasoningEffort, mode === 'draft-frozen-role' ? null : mode === 'draft-frozen-base' ? 'low' : 'high')
       assert.equal(actual.runId, draft ? 'job-p1' : 'run-p1')
       const decision = (await h.snapshot()).data.agentRuns[0].decisions.find((item) => item.step === 'generate_revision_version')
       assert.equal(api.revisionAudit(decision.evidence).aiRunId, actual.runId)
@@ -518,20 +520,49 @@ try {
         expectedRequestHash: req.requestHash, ...h.sourceArgs(req.source), body: '  Written by hand.\n', ...extra })
       const before = await h.snapshot()
       await assert.rejects(manual({ expectedRequestHash: 'stale' }), /request changed/)
+      for (const actorTag of [false, null, '   ', 'x'.repeat(49), '精修\r', '主\u0000笔', 'x\u2028y', 'x\u2067y']) {
+        await assert.rejects(manual({ actorTag }), /actorTag/)
+      }
       await assert.rejects(manual({ expectedSourceHash: 'stale' }), /[Ss]ource/)
       await assert.rejects(manual({ body: before.data.chapters[0].body }), /matches the source/)
       assert.deepEqual(await h.snapshot(), before)
-      const v = await manual({ changedSummary: 'Hand fix.' })
+      const label = '精修', tagged = { changedSummary: 'Hand fix.', actorTag: label }
+      const v = await manual({ ...tagged, actorTag: ' 精修 ' })
+      assert.equal(v.version.actorTag, label)
+      const recorded = await h.snapshot()
+      const decision = recorded.data.agentRuns.flatMap(r => r.decisions).find(d => d.id === 'agent-revision-manual')
+      assert.equal(decision.actorTag, label)
+      assert.deepEqual(api.revisionAudit(decision.evidence).actor, { kind: 'agent', agentRunId: h.write.agentRunId })
+      assert.equal((await h.call('getRevisionVersion', { versionId: v.version.id })).version.actorTag, label)
       assert.equal(v.version.status, 'draft')
       assert.equal(h.calls.length, 0)
       assert.equal((await h.snapshot()).data.chapters[0].body, before.data.chapters[0].body)
-      assert.equal((await manual({ changedSummary: 'Hand fix.' })).replayed, true)
+      assert.equal((await manual(tagged)).replayed, true)
+      for (const actorTag of [undefined, 'coordinator']) await assert.rejects(manual({ ...tagged, actorTag }), /different command/)
+      assert.deepEqual(await h.snapshot(), recorded)
       await h.apply(await h.preview(v))
       assert.equal((await h.snapshot()).data.chapters[0].body, '  Written by hand.\n')
       const local = await harness(kind)
       const localReq = await local.request({ targetRange: target })
       await assert.rejects(local.call('createManualRevisionVersion', { ...local.write, operationId: 'manual-local', requestId: localReq.requestId,
         expectedRequestHash: localReq.requestHash, ...local.sourceArgs(localReq.source), body: 'Whole text.' }), /full text/)
+    })
+    await test(`${kind}: untagged manual revision keeps the legacy command key and hash`, async () => {
+      const h = await harness(kind), req = await h.request()
+      const args = { ...h.write, operationId: 'legacy-manual', requestId: req.requestId, expectedRequestHash: req.requestHash,
+        ...h.sourceArgs(req.source), body: 'Legacy manual text.' }
+      const original = { ...args, projectId: 'p1', operation: 'create_manual_revision_version' }
+      const oldHash = createHash('sha256').update(JSON.stringify(Object.fromEntries(
+        Object.entries(original).sort(([a], [b]) => a.localeCompare(b))))).digest('hex')
+      const create = extra => h.call('createManualRevisionVersion', { ...args, ...extra })
+      const first = await create(), saved = await h.snapshot()
+      const decision = saved.data.agentRuns.flatMap(r => r.decisions).find(d => d.id === 'agent-revision-legacy-manual')
+      assert.equal(api.revisionAudit(decision.evidence).commandHash, oldHash)
+      assert.ok(!Object.hasOwn(first.version, 'actorTag') && !Object.hasOwn(decision, 'actorTag'))
+      const replay = await create()
+      assert.equal(replay.replayed, true); assert.equal(replay.version.id, first.version.id)
+      await assert.rejects(create({ actorTag: '精修' }), /different command/)
+      assert.deepEqual(await h.snapshot(), saved)
     })
     await test(`${kind}: failed AI returns no fabricated version; local broader response requires acknowledgement`, async () => {
       const h = await harness(kind)

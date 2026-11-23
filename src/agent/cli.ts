@@ -120,7 +120,7 @@ Commands:
   next-chapter-target --project-id <id> | --project <name-or-id>
   book-progress --project-id <id> | --project <name-or-id> [--from <chapter>] [--to <chapter>] [--issues-only] [--offset <n>] [--limit <n>]
   project-usage --project-id <id> | --project <name-or-id>
-  book-continuity --project-id <id> | --project <name-or-id> [--from <chapter>] [--to <chapter>] [--kind <category>] [--status conflict|needs_evidence|open] [--offset <n>] [--limit <n>]
+  book-continuity --project-id <id> | --project <name-or-id> [--from <chapter>] [--to <chapter>] [--kind <category>] [--status conflict|needs_evidence|open] [--exclude-ambient-season-hints] [--offset <n>] [--limit <n>]
   chapter-work-item --project-id <id> | --project <name-or-id> [--agent-run-id <id>]
   chapter-state --project-id <id> | --project <name-or-id> --chapter <order>
   chapter-text --project-id <id> | --project <name-or-id> --chapter <order> [--detail full] [--include-prose] [--max-chars <n>]
@@ -178,10 +178,12 @@ function buildToolCall(parsed: ParsedArgs): AgentToolCallInput {
     case 'book-continuity': {
       const options = ['storage', 'user-data', 'project-id', 'project', 'from', 'to', 'kind', 'status', 'offset', 'limit']
       for (const [key, value] of Object.entries(flags)) {
+        if (key === 'exclude-ambient-season-hints' && value === true) continue
         if (!options.includes(key) || typeof value !== 'string' || !value.trim()) throw new Error(`Invalid --${key}.`)
       }
       return { name: 'agent.getBookContinuityReport', arguments: { ...storage, ...projectArgs(flags), from: numberFlag(flags, 'from'),
-        to: numberFlag(flags, 'to'), kind: flag(flags, 'kind'), status: flag(flags, 'status'), offset: numberFlag(flags, 'offset'), limit: numberFlag(flags, 'limit') } }
+        to: numberFlag(flags, 'to'), kind: flag(flags, 'kind'), status: flag(flags, 'status'), excludeAmbientSeasonHints: flags['exclude-ambient-season-hints'] === true,
+        offset: numberFlag(flags, 'offset'), limit: numberFlag(flags, 'limit') } }
     }
     case 'chapter-state':
       return { name: 'agent.getChapterProductionState', arguments: { ...storage, ...projectArgs(flags), chapterOrder: intFlag(flags, 'chapter') } }
@@ -242,6 +244,7 @@ function buildToolCall(parsed: ParsedArgs): AgentToolCallInput {
       return {
         name: 'agent.runChapterPipeline',
         arguments: {
+          stopAfterStep: flag(flags, 'stop-after-step'),
           ...storage,
           ...projectArgs(flags),
           chapterOrder: intFlag(flags, 'chapter'),
@@ -260,6 +263,7 @@ function buildToolCall(parsed: ParsedArgs): AgentToolCallInput {
       return {
         name: 'agent.retryChapterPipeline',
         arguments: {
+          stopAfterStep: flag(flags, 'stop-after-step'),
           ...storage,
           agentRunId: flag(flags, 'agent-run-id'),
           jobId: flag(flags, 'job-id'),

@@ -1,4 +1,4 @@
-import { randomUUID } from 'node:crypto'
+import { createHash, randomUUID } from 'node:crypto'
 import type {
   AgentDecision,
   AgentRun,
@@ -14,7 +14,7 @@ import type {
 import { AIService as WorkflowAIService } from '../services/AIService'
 import type { AIChatCompletionTransport } from '../services/ai/AITransport'
 import { readChapterStepFragment } from '../shared/chapterStepFragment'
-import { getPipelineRoleForStep, resolvePipelineRoleSettings, resolvePipelineRunSettings } from '../services/PipelineRunContextService'
+import { getPipelineRoleForStep, refreshFailedRole, resolvePipelineRoleSettings, resolvePipelineRunSettings } from '../services/PipelineRunContextService'
 import { PIPELINE_AI_ROLES } from '../shared/normalizers/pipelineRunConfig'
 import { PipelineRecipeService } from '../services/PipelineRecipeService'
 import { OPENING_READER_EMOTION_FALLBACK } from '../services/OpeningChapterContextPolicy'
@@ -22,7 +22,7 @@ import { AIService as MainAITransportService } from '../main/services/AIService'
 import { AIHttpClient } from '../main/services/AIHttpClient'
 import { appendProjectUsageAttempts } from '../storage/projectUsageJournal'
 import { CodexCliService } from '../main/services/CodexCliService'
-import { agentApiKey, apiEndpoint, apiKeyHeaderFor, backupKeyAfterRejection, readApiRegistry, type ApiRegistry } from '../main/services/ApiRegistry'
+import { agentApiKey, apiEndpoint, apiKeyHeaderFor, backupKeyAfterRejection, readApiRegistry, routeKey, type ApiRegistry } from '../main/services/ApiRegistry'
 import { DiagnosticsService } from '../main/services/DiagnosticsService'
 import { TokenBucketRateLimiter } from '../main/RateLimiter'
 import { projectData } from '../renderer/src/utils/projectData'
@@ -37,7 +37,9 @@ import { checkPipelineRunTarget, describePendingRunTarget, firstPendingRunTarget
 import { BATCH_EXECUTION_PREFIX, batchModelRequestGuard, guardModelCalls, pauseInterruptedBatchAttempt, reopenPipelineRuntime } from './agentPipelineWritebackGuard'
 import { StorageRevisionConflictError } from '../storage/StorageService'
 import { claimAgentJobExecution } from './agentJobExecution'
+import { resolveAgentModelChannel } from './agentModelChannels'
 import { latestAgentDraft } from './agentDraftActions'
+import { readChapterProseHandoff, type AgentDraftSubmission } from '../shared/chapterProseHandoff'
 
 export { resolveAgentPipelineResumeStep } from './agentPipelineResume'
 
@@ -53,6 +55,11 @@ export interface ExecuteAgentChapterPipelineInput {
   budgetMode?: ContextBudgetMode
   budgetMaxTokens?: number
   fromStep?: ChapterGenerationStepType
+  refreshModelConfigFromSettings?: boolean
+  registryServiceId?: string
+  expectedFailedStep?: string
+  stopAfterStep?: 'build_prompt'
+  agentDraftSubmission?: AgentDraftSubmission
 }
 
 export interface AgentPipelineExecutorDependencies {
@@ -97,7 +104,8 @@ function preparePipelineExecutionState(
   agentRunId: ID,
   jobId: ID,
   fromStep: ChapterGenerationStepType,
-  executionId?: ID
+  executionId?: ID,
+  refresh?: ReturnType<typeof refreshFailedRole>
 ): AppData {
   const timestamp = now()
   const startIndex = AGENT_PIPELINE_STEP_ORDER.indexOf(fromStep)
@@ -126,7 +134,7 @@ function preparePipelineExecutionState(
         action: isResume ? 'retry_step' : 'run_pipeline',
         reason: isResume ? `Resume the persisted chapter pipeline from ${fromStep}; completed earlier steps remain authoritative.`
           : `Start the registered chapter pipeline from ${fromStep}.`,
-        evidence: [`jobId=${jobId}`, `fromStep=${fromStep}`],
+        evidence: [`jobId=${jobId}`, `fromStep=${fromStep}`, ...(refresh ? [refresh.evidence] : [])],
         riskLevel: 'low',
         result: 'applied',
         createdAt: timestamp
@@ -151,6 +159,7 @@ function preparePipelineExecutionState(
       item.id === jobId
         ? {
             ...item,
+            ...(refresh ? { aiRunConfig: refresh.config } : {}),
             status: 'running',
             currentStep: fromStep,
             errorMessage: '',
@@ -278,18 +287,20 @@ function finishAgentRun(
   const run = data.agentRuns.find((item) => item.id === agentRunId)
   if (!run) throw new Error(`AgentRun not found: ${agentRunId}`)
   const timestamp = now()
+  const waitingForProse = !failedStep && job.proseMode === 'agent_handoff' && job.currentStep === 'generate_chapter_draft'
   const decision: AgentDecision = {
     id: newId('agent-decision'),
     agentRunId,
     projectId: run.projectId,
     chapterId: null,
     jobId: job.id,
-    step: failedStep?.type ?? 'await_user_confirmation',
-    action: cancelled ? 'cancel_run' : failedStep ? 'retry_step' : 'pause_for_human',
+    step: failedStep?.type ?? (waitingForProse ? 'generate_chapter_draft' : 'await_user_confirmation'),
+    action: cancelled ? 'cancel_run' : failedStep ? 'retry_step' : waitingForProse ? 'run_pipeline' : 'pause_for_human',
     reason: cancelled
       ? `Agent cancellation stopped the standard chapter pipeline at ${failedStep?.type ?? job.currentStep ?? 'unknown'}. Completed earlier steps remain persisted.`
       : failedStep
       ? `Standard chapter pipeline stopped at ${failedStep.type}: ${failedStep.errorMessage}`
+      : waitingForProse ? '正式计划和写作提示已就绪，等待 Agent 交稿。'
       : 'Standard chapter pipeline completed and is waiting for the same review/acceptance decision as the desktop workflow.',
     evidence: [
       `jobId=${job.id}`,
@@ -297,7 +308,7 @@ function finishAgentRun(
       ...draftIds.map((id) => `draftId=${id}`)
     ],
     riskLevel: cancelled ? 'low' : failedStep ? 'high' : 'low',
-    result: cancelled ? 'applied' : failedStep ? 'failed' : 'pending_human',
+    result: cancelled || waitingForProse ? 'applied' : failedStep ? 'failed' : 'pending_human',
     createdAt: timestamp
   }
   const nextRun: AgentRun = {
@@ -309,6 +320,7 @@ function finishAgentRun(
       ? `Chapter ${job.targetChapterOrder} was cancelled at ${failedStep?.type ?? job.currentStep ?? 'unknown'}. It can resume from the persisted step.`
       : failedStep
       ? `Chapter ${job.targetChapterOrder} stopped at ${failedStep.type}. The last successful step is persisted and can be retried.`
+      : waitingForProse ? decision.reason
       : `Chapter ${job.targetChapterOrder} completed generation, review, diagnostics, and quality gate; awaiting acceptance decision.`,
     warnings: cancelled
       ? [...new Set([...run.warnings, 'The Agent run was cancelled by an explicit control request.'])]
@@ -340,12 +352,35 @@ async function executeClaimedAgentChapterPipeline(
 ): Promise<ExecuteAgentChapterPipelineResult> {
   const runtime = await reopenPipelineRuntime(input.runtime)
   const { run, job } = checkPipelineRunTarget(runtime.data, input.agentRunId, input.jobId)
+  let submissionHash: string | undefined
+  if (input.agentDraftSubmission) {
+    const { handoffId, title, body, actorTag } = input.agentDraftSubmission
+    const fields = [run.id, job.id, handoffId, title, body]
+    // Keep the untagged five-element receipt byte-for-byte compatible (undefined in an array serializes as null).
+    if (actorTag !== undefined) fields.push(actorTag)
+    submissionHash = createHash('sha256').update(JSON.stringify(fields)).digest('hex')
+    // Check the original submission, not the current (possibly edited) draft. A replay never runs review again.
+    const prior = runtime.data.generatedChapterDrafts.find(d => d.projectId === job.projectId && d.jobId === job.id &&
+      d.handoffReceipt?.handoffId === handoffId)
+    if (prior) {
+      if (prior.handoffReceipt?.submissionHash !== submissionHash) throw new Error('交接单已收稿，不能更换正文、标题或来源标签。')
+      Object.assign(input.runtime, runtime)
+      return { appData: runtime.data, agentRun: run, job, draftIds: [prior.id], completedStepCount: 0,
+        failedStep: null, startedFromStep: 'generate_chapter_draft' }
+    }
+    const step = runtime.data.chapterGenerationSteps.find(s => s.jobId === job.id && s.type === 'generate_chapter_draft')
+    if (job.proseMode !== 'agent_handoff' || job.currentStep !== 'generate_chapter_draft' ||
+      firstPendingRunTarget(runtime.data, run)?.jobId !== job.id ||
+      readChapterProseHandoff(step)?.handoffId !== input.agentDraftSubmission.handoffId ||
+      resolveAgentPipelineResumeStep(runtime.data, job.id) !== 'generate_chapter_draft')
+      throw new Error('交接单已失效或已交稿。请读取当前章节工作单。')
+  }
   if (latestAgentDraft(runtime.data, job.projectId, job.id)?.status === 'rejected') {
     throw new Error('当前草稿已拒绝。请从章节工作单重新准备本章任务。')
   }
   const executionId = isMultiChapterRun(run) ? BATCH_EXECUTION_PREFIX + randomUUID() : undefined
   try {
-    const result = await executeLoadedPipeline(input, dependencies, runtime, run, job, executionId)
+    const result = await executeLoadedPipeline(input, dependencies, runtime, run, job, executionId, submissionHash)
     Object.assign(input.runtime, runtime)
     return result
   } catch (error) {
@@ -361,9 +396,20 @@ async function executeClaimedAgentChapterPipeline(
   }
 }
 
+async function loadRetryChannel(id: string) {
+  const registry = await readApiRegistry()
+  const channel = resolveAgentModelChannel(registry, id)
+  if (channel.apiProvider === 'compatible') {
+    const route = registry.get(apiEndpoint(channel.baseUrl))
+    if (!route) throw new Error('模型通道未登记，请重新查询可选通道。')
+    if (!routeKey(route)) throw new Error(`所选通道缺少 API Key（${route.keyEnv}），本次任务未切换。`)
+  }
+  return { registry, channel }
+}
+
 async function executeLoadedPipeline(
   input: ExecuteAgentChapterPipelineInput, dependencies: AgentPipelineExecutorDependencies,
-  runtime: AgentRuntimeData, initialRun: AgentRun, initialJob: ChapterGenerationJob, executionId?: ID
+  runtime: AgentRuntimeData, initialRun: AgentRun, initialJob: ChapterGenerationJob, executionId?: ID, submissionHash?: string
 ): Promise<ExecuteAgentChapterPipelineResult> {
   const data = runtime.data
   const beforeRequest = batchModelRequestGuard(runtime, initialRun, initialJob.id)
@@ -375,9 +421,29 @@ async function executeLoadedPipeline(
     if (pending) throw new Error(`本章没有待执行的生成步骤。${describePendingRunTarget(pending)}`)
     throw new Error(`Pipeline job ${initialJob.id} has no failed or unfinished step to run.`)
   }
+  const role = getPipelineRoleForStep(fromStep)
+  const failed = data.chapterGenerationSteps.some(step => step.jobId === initialJob.id && step.type === fromStep && step.status === 'failed')
+  if (input.refreshModelConfigFromSettings && (!failed || !role)) throw new Error('只有失败的模型步骤可以从当前设置刷新通道。')
+  const switching = input.registryServiceId !== undefined
+  if (switching !== (input.expectedFailedStep !== undefined) || (switching && input.refreshModelConfigFromSettings)) {
+    throw new Error('切换通道需同时提供 registryServiceId 和 expectedFailedStep，不能同时从设置刷新。')
+  }
+  if (switching && (!role || !failed || fromStep !== input.expectedFailedStep || fromStep !== resolveAgentPipelineResumeStep(data, initialJob.id))) {
+    throw new Error('这不是工作单当前失败的模型步骤，请重新读取工作单。')
+  }
+  // Use the same route snapshot for selection and dispatch. Reject an unusable
+  // HTTP route before resetting the step, so the original draft can still be retried.
+  const selection = input.registryServiceId === undefined ? undefined : await loadRetryChannel(input.registryServiceId)
+  const refresh = role && (selection || input.refreshModelConfigFromSettings)
+    ? refreshFailedRole(initialJob.aiRunConfig, data.settings, role, selection?.channel) : undefined
+  const runConfig = refresh?.config ?? initialJob.aiRunConfig
+  let latestWorking = preparePipelineExecutionState(data, initialRun.id, initialJob.id, fromStep, executionId, refresh)
+  if (input.stopAfterStep) {
+    if (AGENT_PIPELINE_STEP_ORDER.indexOf(fromStep) > AGENT_PIPELINE_STEP_ORDER.indexOf('generate_chapter_draft') ||
+      latestAgentDraft(data, initialJob.projectId, initialJob.id)) throw new Error('已有草稿，不能重新切换主笔。')
+    latestWorking.chapterGenerationJobs = latestWorking.chapterGenerationJobs.map(j => j.id === initialJob.id ? { ...j, proseMode: 'agent_handoff' } : j)
+  }
   await AgentExecutionControlService.clearCancellation(runtime, initialJob.id)
-
-  let latestWorking = preparePipelineExecutionState(data, initialRun.id, initialJob.id, fromStep, executionId)
   let cancellationObserved = false
   let cancellationPollBusy = false
   let cancellationTimer: ReturnType<typeof setInterval> | null = null
@@ -394,10 +460,10 @@ async function executeLoadedPipeline(
   }
   await persistWorking(latestWorking)
   try {
-    const defaultSettings = resolvePipelineRunSettings(initialJob.aiRunConfig, data.settings)
-    const usesRemoteRoles = resolveAgentPipelineAIProfile(initialJob.aiRunConfig, data.settings, false).requiresEnvironmentApiKey
-    const registry = usesRemoteRoles ? await readApiRegistry() : new Map()
-    const { aiSettings, roleSettings } = resolveAgentPipelineAIProfile(initialJob.aiRunConfig, data.settings,
+    const defaultSettings = resolvePipelineRunSettings(runConfig, data.settings)
+    const usesRemoteRoles = resolveAgentPipelineAIProfile(runConfig, data.settings, false).requiresEnvironmentApiKey
+    const registry = selection?.registry ?? (usesRemoteRoles ? await readApiRegistry() : new Map())
+    const { aiSettings, roleSettings } = resolveAgentPipelineAIProfile(runConfig, data.settings,
       (baseUrl) => Boolean(agentApiKey(registry, baseUrl, defaultSettings.baseUrl)))
     const { pipelineMode, pipelineRecipe } = PipelineRecipeService.resolveRunConfiguration({
       recipe: initialJob.pipelineRecipe, recipeId: initialJob.pipelineRecipeId, storedMode: initialJob.pipelineMode,
@@ -412,11 +478,15 @@ async function executeLoadedPipeline(
     }
     if (!dependencies.workflowAI && !dependencies.transport) {
       const start = AGENT_PIPELINE_STEP_ORDER.indexOf(fromStep)
+      const draftIndex = AGENT_PIPELINE_STEP_ORDER.indexOf('generate_chapter_draft')
+      const stoppingForProse = (initialJob.proseMode || input.stopAfterStep) && start <= draftIndex && !input.agentDraftSubmission &&
+        !latestAgentDraft(data, initialJob.projectId, initialJob.id)
       for (const step of PipelineRecipeService.resolveExecutionPlan(pipelineRecipe, pipelineMode).steps) {
+        if (stoppingForProse && AGENT_PIPELINE_STEP_ORDER.indexOf(step.type) >= draftIndex) continue
         const role = getPipelineRoleForStep(step.type)
         if (!step.run || !role || AGENT_PIPELINE_STEP_ORDER.indexOf(step.type) < start) continue
         // The draft handler checks the persisted checkpoint before it asks for the prose service.
-        if (step.type === 'generate_chapter_draft' && fromStep === step.type) continue
+        if (step.type === 'generate_chapter_draft' && (fromStep === step.type || initialJob.proseMode || input.stopAfterStep)) continue
         requireRoleKey(role)
       }
     }
@@ -504,6 +574,7 @@ async function executeLoadedPipeline(
         aiSettings,
         runId: initialJob.id,
         diagnostics,
+        agentDraftSubmission: input.agentDraftSubmission && submissionHash ? { ...input.agentDraftSubmission, submissionHash } : undefined,
         shouldCancel: checkCancellation,
         persistWorking,
         updateStepInData

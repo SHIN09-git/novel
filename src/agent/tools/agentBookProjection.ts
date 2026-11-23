@@ -4,14 +4,14 @@ import { loadSqliteCollectionsReadonly } from '../../storage/SqliteStorageServic
 import { loadResolvedAgentRuntime, resolveAgentRuntimeStoragePath } from '../AgentRuntime'
 import { findProjectId, stringArg } from './agentToolArguments'
 
-export async function loadAgentBookProjection(args: Record<string, unknown>, collections: readonly AppDataArrayKey[]) {
+export async function loadAgentBookProjection(args: Record<string, unknown>, collections: readonly AppDataArrayKey[], options?: { redactLegacyKey: boolean }) {
   const selector = stringArg(args, 'projectId') ?? stringArg(args, 'project')
   if (!selector) throw new Error('Missing projectId or project.')
   const choice = await resolveAgentRuntimeStoragePath({
     storagePath: stringArg(args, 'storagePath'), userDataPath: stringArg(args, 'userDataPath')
   })
   if (choice.source === 'sqlite') {
-    const snapshot = await loadSqliteCollectionsReadonly(choice.storagePath, collections, selector)
+    const snapshot = await loadSqliteCollectionsReadonly(choice.storagePath, collections, selector, options)
     const data = normalizeAppData(snapshot.data)
     return { data, projectId: findProjectId(data, args), storage: { ...choice, revision: snapshot.revision } }
   }

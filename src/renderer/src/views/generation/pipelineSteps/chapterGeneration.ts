@@ -23,7 +23,7 @@ import {
   upsertGenerationRunTrace
 } from '../../../utils/runTrace'
 import {
-  assertChapterTaskPresentInPrompt, characterStateFactsPresentInPrompt, diffIds, enrichContextSelectionTrace,
+  assertChapterTaskPresentInPrompt, constrainedSnapshotTask, characterStateFactsPresentInPrompt, diffIds, enrichContextSelectionTrace,
   hardCanonTraceFromPrompt, noveltyReferenceContext, pipelineChapterTask, serializeOutput
 } from '../pipelineUtils'
 import type { PipelineStepHandlerContext } from '../pipelineRunnerTypes'
@@ -313,13 +313,15 @@ export async function runGenerateChapterDraftStep(ctx: PipelineStepHandlerContex
   const { project, updateStepInData } = env
   if (!state.plan) throw new Error('缺少章节任务书，无法生成正文')
   if (job.contextSource !== 'prompt_snapshot' && !state.rebuiltContextFromPlan) throw new Error('缺少计划后重建上下文，无法生成正文。')
-  const chapterTask = pipelineChapterTask(project, options, activeStoryDirectionGuide, job.chapterTaskSnapshot)
+  const chapterTask = pipelineChapterTask(project, options, activeStoryDirectionGuide, job.chapterTaskSnapshot ?? constrainedSnapshotTask(ctx.snapshot))
   state.plan = guardOpeningChapterPlanForDraft({ generatedPlan: state.plan, targetChapterOrder: options.targetChapterOrder, chapterTaskSnapshot: job.chapterTaskSnapshot })
   if (job.chapterTaskSnapshot) assertChapterTaskPresentInPrompt(state.context, chapterTask, 'draft')
   const inputHash = draftInputHash(ctx, chapterTask)
   const recovered = resumeCapturedDraft(ctx, inputHash)
-  const draft = recovered ??
-    await captureReviewableDraft(ctx, state.plan, chapterTask, inputHash, await env.getAiService('prose'))
+  const draft = recovered ?? (job.proseMode === 'agent_handoff'
+    ? await (await import('./proseHandoff')).receiveOrRequestProse(ctx, state.plan, chapterTask, inputHash)
+    : await captureReviewableDraft(ctx, state.plan, chapterTask, inputHash, await env.getAiService('prose')))
+  if (!draft) return
   state.draftRecord = draft
   state.draftResult = { title: draft.title, body: draft.body }
   const auditNovelty = env.diagnostics?.auditNovelty ?? auditNoveltyDiagnostic

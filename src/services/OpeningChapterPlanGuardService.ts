@@ -1,5 +1,6 @@
 import type { ChapterPlan, ChapterTask } from '../shared/types'
 import { shouldIsolateOpeningLegacyContext } from './OpeningChapterContextPolicy'
+import { taskConstraintLines } from './promptFormatters/chapterTaskConstraints'
 
 export interface GuardOpeningChapterPlanInput {
   generatedPlan: ChapterPlan
@@ -29,7 +30,8 @@ function allowedTaskScope(task: ChapterTask): string {
       labeled('允许兑现', task.allowedPayoffs),
       labeled('任务指定收束', task.endingHook),
       labeled('读者情绪', task.readerEmotion),
-      labeled('文风要求', task.styleRequirement)
+      labeled('文风要求', task.styleRequirement),
+      ...taskConstraintLines(task, true)
     ],
     'ChapterTask 未明确授权任何新增素材。'
   )
@@ -79,9 +81,9 @@ export function buildAuthoritativeOpeningPlan(task: ChapterTask): ChapterPlan {
     endingHook: endingHook || '按本章任务自然收束，不添加额外危险、命运暗示或悬念钩子。',
     readerEmotionTarget: readerEmotion || '从本章当下自然建立情绪基线，不预告后续阶段压力。',
     estimatedWordCount: targetWordCount || '按 ChapterTask 的字数要求执行。',
-    openingContinuationBeat: goal
+    openingContinuationBeat: task.mustOpenWithBeat || (goal
       ? `从 ChapterTask 指定的当下自然开场：${goal}`
-      : '从本章当下自然开场，不虚构上一章或任务外前史。',
+      : '从本章当下自然开场，不虚构上一章或任务外前史。'),
     carriedPhysicalState: '第一章没有上一章身体状态可承接；不得自行补写前史状态。',
     carriedEmotionalState: readerEmotion
       ? `第一章不承接不存在的上一章情绪；按任务要求建立基线：${readerEmotion}`

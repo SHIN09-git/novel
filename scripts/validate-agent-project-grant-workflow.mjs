@@ -21,6 +21,8 @@ try {
     export {SqliteStorageService} from './src/storage/SqliteStorageService';
     export {normalizeAppData} from './src/shared/defaults';
     export {draftContentHash} from './src/services/DraftDiagnosticBindingService';
+    export {decisionFingerprint} from './src/services/candidateDecisionPrimitives';
+    export {bindChapterAcceptance, buildBoundChapterCommit} from './src/agent/tools/agentChapterAcceptanceTools';
     export {createIdRemaps, rememberId, remapReferencesDeep} from './src/main/dataMerge/referenceRemapping';
   `, resolveDir: repoRoot, loader: 'ts' }, outfile: output, bundle: true, platform: 'node', format: 'esm',
     target: 'node22', external: ['better-sqlite3', 'electron'], logLevel: 'silent' })
@@ -72,11 +74,114 @@ try {
     const edit = async change => { const current = await storage.loadSnapshot(); change(current.data); await storage.saveIfCurrent(current.data, current.revision) }
     const preview = (extra = {}) => call('previewChapterAcceptance', { operationId: 'accept', agentRunId: 'run', jobId: 'job', draftId: 'draft',
       mode: reviewed ? 'reviewed' : 'unreviewed', reason: '导演读过正文后决定保留这个结尾。', ...extra })
-    const accept = p => call('applyChapterAcceptance', { previewId: p.preview.id, expectedPreviewHash: p.previewHash })
+    const accept = (p, extra = {}) => call('applyChapterAcceptance', { previewId: p.preview.id, expectedPreviewHash: p.previewHash, ...extra })
     return { storage, authority, storagePath, grant, call, data, edit, preview, accept }
   }
   for (const sqlite of [false, true]) {
     const label = sqlite ? 'SQLite' : 'JSON'
+    await check(`${label}: optional official title binds the operation, keeps review evidence and requires one scoped grant`, async () => {
+      const h = await harness(sqlite, true)
+      const title = '第２章：回信'
+      try {
+        for (const invalid of [null, 2, '　 ', '\n回信', '回\t信', '回信\0', '回\u2028信', '回信\u2029']) {
+          await assert.rejects(() => h.preview({ finalTitle: invalid }), /非空的单行标题/)
+        }
+        const legacy = await h.preview({ operationId: 'legacy' })
+        const original = JSON.parse(legacy.preview.evidence[0].slice('chapter-acceptance-v1:'.length))
+        assert(!Object.hasOwn(original, 'finalTitle'))
+        assert.equal(legacy.previewHash, api.decisionFingerprint(original))
+        await assert.rejects(() => h.accept(legacy, { finalTitle: title }), /核对/)
+        const p = await h.preview({ finalTitle: '　' + title + '  ' })
+        assert.equal(p.finalTitle, title)
+        assert.deepEqual(p.review, legacy.review)
+        assert.deepEqual(p.requiredAuthorization, ['accept_draft', 'manage_chapters'])
+        assert(p.preview.diffSummary.some(row => row.includes(title)))
+        assert.equal((await h.preview({ finalTitle: title })).previewHash, p.previewHash)
+        await assert.rejects(() => h.preview({ finalTitle: '另一章名' }), /操作编号/)
+        await assert.rejects(() => h.preview(), /操作编号/)
+        const other = await h.preview({ finalTitle: title, operationId: 'other' })
+        assert.notEqual(other.previewHash, p.previewHash)
+        await assert.rejects(() => h.accept(p, { expectedPreviewHash: other.previewHash }), /核对/)
+        await assert.rejects(() => h.accept(p, { finalTitle: '提交时换题' }), /核对/)
+        await h.grant(['accept_draft'])
+        await h.grant(['manage_chapters'])
+        await h.grant(p.requiredAuthorization, { chapterStart: 3 })
+        await assert.rejects(() => h.accept(p), /grant/i)
+        assert.equal((await h.data()).chapterCommitBundles.length, 0)
+        const grant = await h.grant(p.requiredAuthorization, { chapterStart: 2, chapterEnd: 2 })
+        const saved = await h.accept(p, { finalTitle: title + ' ' })
+        const data = await h.data(), bundle = data.chapterCommitBundles[0]
+        assert.equal(saved.authorizationGrantId, grant.id)
+        assert.equal(bundle.commitId, p.preview.id + ':commit')
+        assert.equal(bundle.finalTitle, title)
+        assert.equal(bundle.chapter.title, title)
+        assert.equal(bundle.chapterVersion.title, title)
+        assert.equal(data.chapters[0].title, title)
+        assert.equal(data.chapterVersions.find(v => v.id === bundle.chapterVersion.id).title, title)
+        assert.equal(bundle.previousChapterVersion.title, '原稿')
+        assert.equal(bundle.generatedDraft.title, '新稿')
+        assert.equal(data.generatedChapterDrafts[0].title, '新稿')
+        assert.equal(data.generatedChapterDrafts[0].body, body)
+        assert.equal(api.decisionFingerprint({ title: bundle.generatedDraft.title, body: bundle.generatedDraft.body }), original.draftHash)
+        assert.deepEqual(bundle.acceptanceReview, legacy.review)
+        assert.equal(data.qualityGateReports[0].draftContentHash, legacy.review.draftContentHash)
+        await h.authority.revoke(grant.id, h.storagePath, 'p')
+        await h.edit(d => { d.chapters[0].title = '作者后来定的章名' })
+        assert.equal((await h.preview({ finalTitle: title })).replayed, true)
+        await assert.rejects(() => h.preview({ finalTitle: '另一章名' }), /操作编号/)
+        await assert.rejects(() => h.accept(p, { finalTitle: '另一章名' }), /核对/)
+        assert.equal((await h.accept(p)).replayed, true)
+        const replayed = await h.data()
+        assert.equal(replayed.chapters[0].title, '作者后来定的章名')
+        assert.equal(replayed.chapterCommitBundles.length, 1)
+        assert.equal(replayed.chapterVersions.length, data.chapterVersions.length)
+      } finally { h.storage.close?.() }
+    })
+    await check(`${label}: a detached titled bundle creates a new chapter and retries only the missing metadata`, async () => {
+      const h = await harness(sqlite, true)
+      try {
+        await h.edit(d => { d.chapters = []; d.generatedChapterDrafts[0].chapterId = null; d.qualityGateReports[0].chapterId = null })
+        const finalTitle = '第一封回信', p = await h.preview({ finalTitle })
+        const grant = await h.grant(p.requiredAuthorization)
+        const { data, revision } = await h.storage.loadSnapshot()
+        const binding = api.bindChapterAcceptance(data, { projectId: 'p', agentRunId: 'run', jobId: 'job',
+          draftId: 'draft', mode: 'reviewed', reason: p.preview.reason, finalTitle })
+        const bundle = api.buildBoundChapterCommit(data, binding, p.preview, grant.id, time)
+        assert.equal(data.chapters.length, 0)
+        assert.equal(data.generatedChapterDrafts[0].status, 'draft')
+        assert.equal(data.generatedChapterDrafts[0].title, '新稿')
+        assert.equal(bundle.acceptedAt, time)
+        assert.equal(bundle.actor.authorizationGrantId, grant.id)
+        for (const [part, expected] of [['chapterVersion', /正文版本/], ['generatedDraft', /来源草稿已变化/]]) {
+          await assert.rejects(() => h.storage.saveChapterCommitBundle({ ...bundle, [part]: { ...bundle[part], title: '错误的标题' } }, revision), expected)
+        }
+        await h.storage.saveChapterCommitBundle(bundle, revision)
+        await h.authority.revoke(grant.id, h.storagePath, 'p')
+        await h.edit(d => { d.chapters[0].title = '作者后改的标题' })
+        assert.equal((await h.preview({ finalTitle })).previewHash, p.previewHash)
+        assert.equal((await h.data()).agentActionPreviews[0].status, 'pending')
+        assert.equal((await h.accept(p)).replayed, true)
+        const repaired = await h.data()
+        assert.equal(repaired.chapters[0].title, '作者后改的标题')
+        assert.equal(repaired.agentActionPreviews[0].status, 'applied')
+        assert.deepEqual(repaired.agentRuns[0].createdCommitIds, [bundle.commitId])
+        assert.deepEqual(repaired.chapterVersions.map(v => v.title), [finalTitle])
+      } finally { h.storage.close?.() }
+    })
+    await check(`${label}: a titled preview goes stale on a draft-title-only or official-title-only edit`, async () => {
+      const h = await harness(sqlite)
+      try {
+        const p = await h.preview({ finalTitle: '回信' })
+        assert.deepEqual(p.requiredAuthorization, ['accept_draft', 'accept_unreviewed_draft', 'manage_chapters'])
+        await h.grant(p.requiredAuthorization)
+        await h.edit(d => { d.generatedChapterDrafts[0].title = '作者改过的草稿名' })
+        await assert.rejects(() => h.accept(p), /变化/)
+        const fresh = await h.preview({ operationId: 'fresh', finalTitle: '回信' })
+        await h.edit(d => { d.chapters[0].title = '作者改过的正式章名' })
+        await assert.rejects(() => h.accept(fresh), /变化/)
+        assert.equal((await h.data()).chapterCommitBundles.length, 0)
+      } finally { h.storage.close?.() }
+    })
     await check(`${label}: a current approved verdict cannot auto-commit an over-limit draft; a scoped explicit decision can`, async () => {
       const h = await harness(sqlite, true)
       try {

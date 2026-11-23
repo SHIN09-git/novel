@@ -131,6 +131,8 @@ export interface ChapterDraftResult {
 }
 
 export interface ChapterGenerationJob {
+  /** Absent on ordinary model-written jobs. The draft step waits for an explicit submission. */
+  proseMode?: 'agent_handoff'
   id: ID
   projectId: ID
   targetChapterOrder: number
@@ -173,6 +175,9 @@ export interface ChapterGenerationStep {
 }
 
 export interface GeneratedChapterDraft {
+  proseSource?: 'agent_handoff'
+  actorTag?: string
+  handoffReceipt?: { handoffId: ID; submissionHash: string }
   id: ID
   projectId: ID
   chapterId: ID | null

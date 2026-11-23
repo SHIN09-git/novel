@@ -1,24 +1,10 @@
 import { readFile } from 'node:fs/promises'
 import { join } from 'node:path'
-import ts from 'typescript'
+import { loadDomainModules } from './utils/load-domain-modules.mjs'
 import { repoRoot } from './utils/repo-root.mjs'
 
 function assert(condition, message, details = {}) {
   return condition ? { ok: true, message } : { ok: false, message, details }
-}
-
-async function loadConsistencyModule() {
-  const source = await readFile(
-    join(repoRoot, 'src/renderer/src/views/promptBuilder/promptBuilderSnapshotConsistency.ts'),
-    'utf8'
-  )
-  const compiled = ts.transpileModule(source, {
-    compilerOptions: {
-      module: ts.ModuleKind.ES2022,
-      target: ts.ScriptTarget.ES2022
-    }
-  })
-  return import(`data:text/javascript;base64,${Buffer.from(compiled.outputText).toString('base64')}`)
 }
 
 const modules = {
@@ -104,10 +90,14 @@ function makeResult(chapterOrder) {
 }
 
 async function main() {
-  const api = await loadConsistencyModule()
+  const api = await loadDomainModules('renderer/src/views/promptBuilder/promptBuilderSnapshotConsistency')
   const checks = []
   const originalResult = makeResult(3)
+  originalResult.chapterTask.povPolicy = { mode: 'third_limited_single', povCharacterId: 'character-3', perceptionChannels: ['on_site'] }
   const originalBinding = api.createPromptBuilderSnapshotBinding(makeBindingInput(3, originalResult))
+  originalResult.chapterTask.povPolicy.perceptionChannels.push('screen')
+  checks.push(assert(originalBinding.chapterTask.povPolicy.perceptionChannels.join() === 'on_site',
+    'the bound POV policy is independent of subsequent edits to its source'))
 
   let rebuildCount = 0
   const resolvedEditedDraft = api.resolvePromptBuilderSnapshotDraft({

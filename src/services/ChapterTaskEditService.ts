@@ -1,10 +1,11 @@
 import type { AppData, ChapterGenerationJob, ChapterGenerationStep, ChapterPlan, ChapterTask, ChapterTaskEdit, ContextBudgetMode, ID, PipelineMode } from '../shared/types'
 import { normalizeChapterTask } from '../shared/normalizers/generation'
+import { changedTaskFields, TASK_TEXT_FIELDS } from '../shared/chapterTaskConstraints'
 import { PipelineRecipeService } from './PipelineRecipeService'
 import { createPipelineAIRunConfig } from './PipelineRunContextService'
 import { StoryDirectionService } from './StoryDirectionService'
 
-export const CHAPTER_TASK_FIELDS = ['goal', 'conflict', 'suspenseToKeep', 'allowedPayoffs', 'forbiddenPayoffs', 'endingHook', 'readerEmotion', 'targetWordCount', 'styleRequirement'] as const
+export { CHAPTER_TASK_FIELDS } from '../shared/chapterTaskConstraints'
 export const TASK_SCOPE_LABELS = { expression: '仅更新表达要求', budget: '更新篇幅与预算', context: '重新准备相关上下文' } as const
 
 function readOutput<T>(steps: ChapterGenerationStep[], type: ChapterGenerationStep['type']): T | null {
@@ -36,7 +37,7 @@ export function getChapterTaskForJob(data: AppData, projectId: ID, job: ChapterG
 }
 
 export function analyzeChapterTaskEdit(before: ChapterTask, after: ChapterTask): ChapterTaskEdit {
-  const changedFields = CHAPTER_TASK_FIELDS.filter((field) => before[field] !== after[field])
+  const changedFields = changedTaskFields(before, after)
   const scope = changedFields.some((field) => field !== 'styleRequirement' && field !== 'targetWordCount') ? 'context' : changedFields.includes('targetWordCount') ? 'budget' : 'expression'
   return { sourceJobId: null, changedFields, scope, resumeStep: 'generate_chapter_plan', reusableArtifacts: ['原草稿和历史报告'], warnings: [] }
 }
@@ -68,11 +69,11 @@ export async function prepareChapterTaskEdit(data: AppData, input: PrepareChapte
   if (source?.targetChapterOrder !== undefined && source.targetChapterOrder !== input.targetChapterOrder) throw new Error('新任务章序与原运行不一致。')
   if (snapshotId && !snapshot) throw new Error('找不到原手动快照，请重新选择。')
   if ((source?.contextSource === 'prompt_snapshot' || snapshot) && !input.refreshContext) throw new Error('手动快照保持固定。请明确选择基于最新资料另建任务，原快照不会被修改。')
-  if (!input.task || CHAPTER_TASK_FIELDS.some((field) => typeof input.task[field] !== 'string')) throw new Error('章节任务字段必须是文本。')
-  const task = normalizeChapterTask(input.task)
+  if (!input.task || TASK_TEXT_FIELDS.some((field) => typeof input.task[field] !== 'string')) throw new Error('章节任务字段必须是文本。')
+  const task = normalizeChapterTask(input.task, true)
   const existing = data.chapterGenerationJobs.find((item) => item.id === input.jobId)
   if (existing) {
-    if (existing.projectId !== input.projectId || existing.targetChapterOrder !== input.targetChapterOrder || existing.taskEdit?.sourceJobId !== (source?.id ?? null) || (existing.taskEdit?.sourcePromptContextSnapshotId ?? null) !== (snapshotId ?? null) || CHAPTER_TASK_FIELDS.some((field) => existing.chapterTaskSnapshot?.[field] !== task[field])) throw new Error('任务操作编号已用于另一份内容。')
+    if (existing.projectId !== input.projectId || existing.targetChapterOrder !== input.targetChapterOrder || existing.taskEdit?.sourceJobId !== (source?.id ?? null) || (existing.taskEdit?.sourcePromptContextSnapshotId ?? null) !== (snapshotId ?? null) || !existing.chapterTaskSnapshot || changedTaskFields(existing.chapterTaskSnapshot, task).length) throw new Error('任务操作编号已用于另一份内容。')
     return { data, job: existing, impact: existing.taskEdit! }
   }
   if (source?.status === 'running') throw new Error('请等待或取消当前生成后再保存新任务。')

@@ -36,7 +36,7 @@ export async function generateAgentRevisionVersion(
   if (revisionFingerprint(request) !== requiredString(args, 'expectedRequestHash')) throw new Error('Revision request changed.')
   const resolved = resolveRevisionSource(data, projectId, session.chapterId, session.sourceDraftId)
   assertRevisionWritable(resolved)
-  assertRevisionBatchTarget(data, revisionRun(data, projectId, identity.agentRunId), session.chapterId)
+  assertRevisionBatchTarget(data, revisionRun(data, projectId, identity.agentRunId), session.chapterId, 'prepare')
   checkSourceHashes(resolved.source, args)
   checkKnownAgentSource(data, resolved.source, 'request', request.id, revisionFingerprint(request))
   if (request.sourceDraftContentHash && request.sourceDraftContentHash !== resolved.source.sourceContentHash) throw new Error('Revision request belongs to an older source.')
@@ -90,7 +90,14 @@ export async function generateAgentRevisionVersion(
   const current = await reloadAgentRuntimeData(runtime)
   const replay = replayRevisionOperation(current.data, projectId, identity)
   if (replay?.versionId) return { ...readRevisionVersion(current.data, projectId, replay.versionId), replayed: true }
-  assertRevisionWritable(resolveRevisionSource(current.data, projectId, session.chapterId, session.sourceDraftId))
+  const freshSource = resolveRevisionSource(current.data, projectId, session.chapterId, session.sourceDraftId)
+  assertRevisionWritable(freshSource)
+  // A concurrent text edit makes this paid candidate stale, not transferable. Preview/commit
+  // verify its original hashes. A reassigned draft/job, however, is no longer the same source.
+  if (freshSource.source.chapterId !== resolved.source.chapterId ||
+      freshSource.source.sourceDraftId !== resolved.source.sourceDraftId ||
+      freshSource.source.sourceJobId !== resolved.source.sourceJobId) throw new Error('Agent revision source/job binding changed.')
+  assertRevisionBatchTarget(current.data, revisionRun(current.data, projectId, identity.agentRunId), session.chapterId, 'prepare')
   const currentSession = revisionSession(current.data, projectId, session.id)
   if (revisionFingerprint(currentSession) !== revisionFingerprint(session) ||
     revisionFingerprint(current.data.revisionRequests.find((item) => item.id === request.id)) !== audit.requestHash) {

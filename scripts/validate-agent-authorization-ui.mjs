@@ -247,7 +247,7 @@ try {
     import { createElement } from 'react';
     export function latestQualityReportForDraft() { return null; }
     export function Header({ title, actions }) { return createElement('header', null, title, actions); }
-    export function SectionCard() { return null; }
+    export function SectionCard({children}) { return createElement('section', null, children); }
     export function StatCard() { return null; }
     export function StatusBadge() { return null; }
     export function useProjectData(data) {
@@ -291,8 +291,17 @@ try {
   }))
   assert.match(agentViewMarkup, /读取最新结果/)
   assert.match(agentViewMarkup, /资料改动记录.*?原设定.*?新设定/)
+  const renderSources = (draftLabel, revisionLabel) => renderToStaticMarkup(createElement(AgentRunsView, {
+    project: { id: 'p' }, data: {
+      agentRuns: [{ id: 'r', projectId: 'p', status: 'paused', targetChapterOrders: [1], createdJobIds: ['j'], createdCommitIds: [],
+        warnings: [], pendingHumanReviewItemIds: [], decisions: [{ id: 'd', action: 'revise_draft', actorTag: revisionLabel, evidence: [] }] }],
+      chapterGenerationJobs: [{ id: 'j', targetChapterOrder: 1 }], qualityGateReports: [],
+      generatedChapterDrafts: [{ id: 'draft', projectId: 'p', jobId: 'j', actorTag: draftLabel }] }
+  }))
+  assert.match(renderSources('主笔', '精修'), /最近草稿来源：主笔.*修订来源：精修/s)
+  assert.doesNotMatch(renderSources(undefined, undefined), /最近草稿来源：|修订来源：/)
 
-  console.log(JSON.stringify({ ok: true, checks: 37 }, null, 2))
+  console.log(JSON.stringify({ ok: true, checks: 39 }, null, 2))
 } finally {
   await rm(workspace, { recursive: true, force: true })
 }

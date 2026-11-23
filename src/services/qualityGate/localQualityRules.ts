@@ -132,7 +132,8 @@ export function buildLocalQualityEvaluation(
   characterStateFacts?: CharacterStateFact[],
   characters: Character[] = [],
   chapterTask?: ChapterTask | null,
-  precomputedRedundancy?: RedundancyReport | null
+  precomputedRedundancy?: RedundancyReport | null,
+  errataBaseBody?: string
 ): LocalQualityEvaluation {
   const body = draftBody(chapterDraft)
   const tokenCount = TokenEstimator.estimate(body)
@@ -156,7 +157,9 @@ export function buildLocalQualityEvaluation(
   if (/本地草稿模板|API Key|请根据/.test(body)) {
     issues.push({ severity: 'high', type: 'placeholder', description: '正文仍包含模板或配置提示，不能作为正式章节。', evidence: '检测到模板提示文本。', suggestedFix: '配置 API 后重新生成，或手动替换为真实章节正文。' })
   }
-  if (hasContinuityContext && startsWithReset) {
+  // In an interior correction, an identical accepted opening is not a newly introduced reset.
+  const inheritedOpening = errataBaseBody !== undefined && errataBaseBody.trim().slice(0, 120) === body.trim().slice(0, 120)
+  if (hasContinuityContext && startsWithReset && !inheritedOpening) {
     issues.push({ severity: 'high', type: 'chapter_continuity_break', description: '正文开头疑似重新开场，没有直接承接上一章结尾状态。', evidence: body.trim().slice(0, 120), suggestedFix: '执行“加强章节衔接”，让第一场戏从上一章结尾后的数秒到数分钟内开始。' })
   }
   if (redundancy.overallRedundancyScore >= 45) {

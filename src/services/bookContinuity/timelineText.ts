@@ -11,6 +11,11 @@ const seasons: Record<Season, RegExp> = {
   autumn: /秋[天季日]|[初仲深金暮晚立]秋/u,
   winter: /冬[天季日]|[初仲深寒隆严暮立]冬/u
 }
+const seasonMentions = new RegExp(Object.values(seasons).map(re => re.source).join('|'), 'gu')
+const scenicModifier = /^(?:般的|一般的|一样的|似的|的)(?:晚霞|朝霞|暮色|夜色|天色|阳光|日光|月光|微凉|凉意|寒意|暖意|暑气|细雨|寒风|风声|气息|[风雨雪霜雾](?=[，。；！？、里中]|吹|拂|落|飘|散|停|$))/u
+const sensorySimile = /^(?:一般|般|一样|似的)的?(?:微凉|寒冷|凛冽|闷热|温暖|明媚)/u
+const sceneryComparedToSeason = /(?:暮色|夜色|晚霞|天色|凉意|寒意|暖意)(?:宛如|犹如|仿佛|如同|像极了|像)$/u
+const explicitSeason = /(?:正值|正是|已是|已到|进入|步入|到了|时至|时逢)$/u
 const remaining = /(?:倒计时(?:尚余|还剩|[:：为是])?|还剩(?:下)?|只剩(?:下)?|仅剩(?:下)?|尚剩|剩余|尚余|仅余|还有|尚有|只余|剩下)\s*([零〇一二两三四五六七八九十百千万\d]+)\s*(?:整天|天|日)/gu
 const deadlineClue = /倒计时|(?:期限|大限|截止|到期)(?:已至|将至|还剩|为|只剩|日)|[零〇一二两三四五六七八九十百千万\d]+[天日](?:内|之内|后到期|后截止|为限)/u
 const jump = /跨(?:季|年)|季节交替|转眼(?:已|便|到了?|就是)|时隔|来年|次年|翌年|来到了?[春夏秋冬]季|[春夏秋冬]去[春夏秋冬]来|(?:入[春夏秋冬]|[春夏秋冬]至|立[春夏秋冬])(?:了|时|之日|当天|之?后|之际|[，。；]|$)|[零〇半一两三四五六七八九十百千数几多\d]+个?(?:年|月|季)(?:之?后|过去)|(?:过了|过去了|一晃|转眼过了)[零〇半一两三四五六七八九十百千数几多\d]+个?(?:年|月|季)/u
@@ -40,6 +45,17 @@ export function timeNoteShift(note: string) {
 
 export interface TimelinePassage extends ReturnType<typeof timeClues> {
   text: string; at: number; uncertain: boolean; flashback: boolean; era: number; deadlineEra: number
+}
+
+export function isAmbientSeasonHint(line: TimelinePassage): boolean {
+  // Examine the whole sentence, not its truncated evidence excerpt. Unknown uses stay visible.
+  if (line.named.length !== 1 || jump.test(line.text)) return false
+  for (const m of line.text.matchAll(seasonMentions)) {
+    const before = line.text.slice(0, m.index), after = line.text.slice(m.index + m[0].length)
+    if (m[0].startsWith('立') || explicitSeason.test(before)) return false
+    if (!scenicModifier.test(after) && !sensorySimile.test(after) && !sceneryComparedToSeason.test(before)) return false
+  }
+  return true
 }
 
 export function readTimelinePassages(body: string, epochs: { era: number; deadlineEra: number }): TimelinePassage[] {

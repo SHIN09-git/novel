@@ -1,14 +1,16 @@
-import type { ChapterTask } from '../../../../shared/types'
+import type { ChapterTask, Character } from '../../../../shared/types'
+import { ChapterTaskConstraintFields } from '../../components/ChapterTaskConstraintFields'
 import { TextArea, TextInput } from '../../components/FormFields'
 
 interface PromptChapterTaskPanelProps {
   task: ChapterTask
+  characters?: Pick<Character, 'id' | 'name'>[]
   onTaskChange: (task: ChapterTask) => void
 }
 
 export function PromptChapterTaskPanel({
   task,
-  onTaskChange
+  onTaskChange, characters
 }: PromptChapterTaskPanelProps) {
   return (
     <section className="panel prompt-chapter-task-panel">
@@ -23,6 +25,7 @@ export function PromptChapterTaskPanel({
         <TextArea label="本章读者应该产生的情绪" value={task.readerEmotion} onChange={(readerEmotion) => onTaskChange({ ...task, readerEmotion })} />
         <TextInput label="本章预计字数" value={task.targetWordCount} onChange={(targetWordCount) => onTaskChange({ ...task, targetWordCount })} />
         <TextArea label="文风要求" value={task.styleRequirement} onChange={(styleRequirement) => onTaskChange({ ...task, styleRequirement })} />
+        <ChapterTaskConstraintFields task={task} characters={characters} onChange={onTaskChange} />
       </div>
     </section>
   )

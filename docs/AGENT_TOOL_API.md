@@ -6,15 +6,60 @@ Novel Director 现在提供一个面向 Codex/Agent 的结构化工具入口。�
 
 以 [项目授权与逐章创作指南](./AGENT_PROJECT_AUTHORIZATION.md) 为当前操作说明。全库管理权和全书创作权都不接受调用方自行填写的 `confirm` 作为授权；草稿采纳使用实际正文、当前审稿报告和作者授权，不能经旧采纳工具绕过。
 
+### 长篇改稿与断点续审（Preview.23 起）
+
+- **改稿先自检**：调用 `agent.preflightDraftText({ projectId, chapterOrder, body })`。它只读当前书库，对传入的正文统计可见字符、检查正文格式，并返回适用于该章的机械 HardCanon 命中、原句与位置。命中较多时按 `nextOffset` 翻页。它不写草稿、不调用模型；没有命中不等于已通过审稿。
+- **只处理当前候选**：`agent.getDecisionInbox` 默认隐藏来源正文已经失效的待决候选。传 `staleOnly: true` 可查看这些旧记录。没有正文指纹的旧数据仍保留供核对。预览和提交决策时可以直接使用收件箱给出的 `memory_update`、`character_state_change`，也兼容原来的短名称。
+- **模型额度用尽，保留原稿续跑**：从当前工作单取 `retryWithChannel`。调用 `agent.listAvailableChannels({})`，选一个登记的服务 ID 或 `codex_cli`，填进 `retryWithChannel` 的 `registryServiceId` 再执行。例：`agent.retryChapterPipeline({ agentRunId, jobId, expectedFailedStep: "generate_chapter_review", registryServiceId: "codex_cli", responseMode: "work_item" })`。这里切换的是提取角色（`extraction`）；一致性审稿和质量门禁对应 `reviewer`。同一任务后续使用该角色的步骤沿用新通道，其他角色、其他章和桌面全局设置不变。工作单的失败步骤已经改变时，先重新读取工作单。
+- **通道目录不是在线探测**：目录不读取书库，不返回密钥，也不验证服务余额或 Codex 登录。只有清单中可直接使用的聊天协议和默认模型才作为 HTTP 选项；选择 HTTP 通道但没有配置对应密钥时，不会重置失败步骤。`codex_cli` 需要本机已经安装并登录。如果已在桌面调整好角色，可继续用原来的 `retryWithSavedRole`（`refreshModelConfigFromSettings: true`）；它不能和按 ID 切换同时使用。普通重试不改变配置。
+
+### Agent 接手主笔（Preview.23 起，可选）
+
+1. 在 `agent.runChapterPipeline` 传 `stopAfterStep: "build_prompt"` 和 `responseMode: "work_item"`。已有批次的当前章尚无草稿时，也可以在 `agent.retryChapterPipeline` 传这两个参数。这里的暂停点是**正式计划生成、上下文按计划重建之后**。不传时仍由工作台模型写正文。
+2. 工作单显示 `awaiting_prose_draft` 后，执行 `nextAction` 指向的 `agent.getChapterDraftHandoff`。它返回这次任务的正式计划、正文模型原本会收到的写作消息、硬设定条目 ID 和交稿所需的 `handoffId`。断开连接后，重新读取工作单即可，不必重跑规划。
+3. 以 `agent.submitChapterDraft({ agentRunId, jobId, handoffId, title, body })` 交稿。明显不完整的正文会退回，不会另付费让主笔模型改写。有效草稿在同一任务上进入原审稿和质量门禁，调用返回工作单；**交稿不是采纳**。已消费的交接单不能重复交稿，重试诊断使用已保存的草稿。
+
+通读正式正文用 `agent.exportManuscriptRange({ projectId, fromChapter, toChapter })`，每次最多 10 个连续章号。返回结果按章序排列，缺章见 `missingChapters`。它不创建本地导出文件，不含待采纳草稿。
+
+群像章节可以在 `chapterTask` 中限定视角和时间。例：`povPolicy: { mode: "限知", povCharacterId: "角色ID", perceptionChannels: ["亲眼所见", "耳机通话"] }`；`storyTimeWindow: { date: "2026-11-23", weekday: "周一", range: "20:42-20:48" }`；`mustOpenWithBeat: "从耳机里的断音接起"`。这些都是可选字段。日期和星期可以机械核对；叙事是否越过人物视角仍需读稿判断。
+
+复现五章交接对照：分别运行 `node scripts/validate-agent-director-journey.mjs --work-items --sqlite` 和 `node scripts/validate-agent-director-journey.mjs --agent-prose --sqlite`。同一组虚构章节，默认流程为 32 次工具调用、21 次模拟模型请求；仅第四章交给 Agent 时为 34 次、20 次。两组均逐章正式提交 5 章。差额是读交接单和交稿多两次工具调用，工作台少一次正文请求；不代表 Agent 自身写作免费或作品质量更高。
+
+### 相邻章节联合精校（Preview.23 起）
+
+1. 用 `agent.startBookRevisionBatch({ projectId, operationId, goal, chapterIds, stageNeighbors: true })` 开批次。可以先给后章创建请求和修订候选。未启用此选项的批次沿用原顺序。
+2. 按章序调用 `agent.reviewRevisionVersion`。前章审稿取下一章在同一批次中最近创建、来源仍有效的候选开头（最多 550 个 UTF-16 码元），没有合格候选则取正式正文。报告的 `stagedNeighbors` 记录引用；候选不会写进小说圣经，也不能替代下一章自己的门禁。
+3. 只改章中一处字句时可传 `mode: "surgical_errata"`。程序从正式正文与候选计算差异；变动跨度最多 120 个 UTF-16 码元，不得跨段或触及首尾 120 个码元，多段正文还要求首末段不变。范围不符会在模型调用前提示改用 `full`。审稿只对本次改动评分，包括一个“不”引起的事实反转；机械硬规则仍检查全章。
+4. 预览、提交沿用原工具。勘误确实涉及章摘要时，预览可传 `updateSummaryIfAffected: true`：仅在包含改动的原文分句可在原稿与摘要中唯一定位时，展示改前、改后并随正文同一事务保存。摘要是意译、匹配有歧义或只插入新字时，不自动改。阶段摘要不受影响。
+5. 邻章候选在前章提交前被换掉，须用新的 `operationId` 重审。提交后看工作单的 `stagedSeams`：`awaiting_commit` 表示仍等后章写回；若后章开头最终不一致则为 `needs_recheck`，内附原审稿入口。已完成批次也保留提示，不自动撤回已提交正文。
+
+### 一次结清当前章（Preview.23 起）
+
+当前正文审稿通过后，可以把正式采纳、定章名和处理本稿候选放在同一次提交。原来的独立工具仍可用。
+
+1. 从工作单取 `projectId`、`agentRunId`、`jobId`、`draftId`。查看候选后调用 `agent.previewChapterSettlement`，另外提供本次唯一的 `operationId`、`reason` 和 `decisions`。例如 `decisions: [{ kind: "memory", candidateId: "候选ID", decision: "accept" }]`。传 `[]` 表示只采纳正文；未列出的候选保持原状。需要定章名时再传 `finalTitle`，原稿标题不变。
+2. 核对返回的章名、审稿依据和每条候选的实际影响。调用 `agent.applyChapterSettlement({ projectId, previewId, expectedPreviewHash: previewHash, responseMode: "work_item" })`。提交时重新检查授权；改章名需要章节管理权限，高风险候选需要相应授权。跨章更新和没有当前稿来源的候选请在收件箱单独核对。
+3. 正文、报告或候选已变时，用新的 `operationId` 重新预览。提交失败不会留下半章或部分候选决定；提交成功但连接中断，可用原预览重试，取回同一份章节与候选回执。事后恢复正文和撤销候选，仍分别走已有版本链和候选撤销流程。
+
+通读时，`agent.getBookContinuityReport({ projectId, excludeAmbientSeasonHints: true })` 可以隐藏孤立的写景季节词。返回的 `excludedAmbientSeasonHints` 是分页前略去的条数。时间线记录和已识别的冲突仍会显示；不传此选项可看完整线索。
+
+多位 Agent 合作时，`agent.submitChapterDraft` 和 `agent.createManualRevisionVersion` 可以传 `actorTag`，如 `"Gemini 主笔"`。这是交稿方自报的来源标签，不是身份认证或审稿签字，不会增加权限。旧稿不补署名。
+
+复现：`node scripts/validate-agent-chapter-settlement.mjs` 验证事务和重试；`node scripts/validate-agent-director-journey.mjs --chapter-settlement --sqlite` 在隔离书库逐章审稿、定名、采纳并核对五章回执。不使用付费模型。
+
 ### 启动
 
-使用 Preview.22 或更新的 Windows 成品时，在「Agent 批次」点击「复制一键接入命令」，然后在 PowerShell 中运行。命令会用当前工作台启动随包分发的 MCP 服务，不需要源码或单独安装 Node。若已有同名旧服务，请先用 `codex mcp remove novel-director` 移除旧入口，再注册。移动程序后也要重新注册。
+使用 Preview.22 或更新的 Windows 成品时，打开工作台的「Agent 批次」，点击「复制一键接入命令」，在 PowerShell 中运行该命令。它会用当前工作台可执行文件启动随包分发的 MCP 服务，不需要源码或单独安装 Node。如果 Codex 已注册同名的旧服务，先用 `codex mcp remove novel-director` 移除旧入口，再用新命令注册。移动安装目录后也要重新注册。
 
-从源码运行时，可以用下面的命令接入：
+从源码运行时，可用下列命令接入 Codex：
 
 ```powershell
 npm.cmd run agent:setup:codex
 ```
+
+源码 CLI 和 MCP 再次启动时会检查本地构建缓存；源码依赖或构建配置变动时重新编译。缓存位于仓库的 `tmp`，不在书库内。安装包仍使用打包时重新构建的 MCP，不依赖本机缓存。
+
+复测命令：`node scripts/validate-agent-build-cache.mjs --measure`。2026-11-23 本机结果（5 个新 Node 进程取中位数，包括启动和准备构建产物，不含读库）：MCP 强制构建 / 首次建缓存 / 命中缓存分别为 122 / 152 / 91 毫秒；CLI 为 117 / 148 / 85 毫秒。
 
 重新打开一个 Codex 任务后，`novel-director` 会作为 MCP 工具服务出现。Codex 可以直接读取项目、章节、版本链、诊断和候选，并通过事务化预览执行正式采纳，不需要用 Computer Use 识别界面。
 
@@ -311,6 +356,10 @@ known shared defects to remain present.
 
 Novel Director now exposes a structured Agent Tool API for Codex/Agent use. It shares the desktop app's SQLite/JSON data, Agent Runtime, and transaction-backed commit pipeline without requiring Computer Use to read the UI.
 
+For a failed model step, use the work item's `retryWithChannel` action with a `registryServiceId` from `agent.listAvailableChannels`. The retry checks `expectedFailedStep` and changes only that role for that job, not global settings. The directory is offline; listing a route or `codex_cli` does not confirm provider credit, connectivity or a CLI login.
+
+On a current source build, `agent.previewChapterSettlement` and `agent.applyChapterSettlement` can commit a reviewed draft, its optional final title and an explicit list of decisions together. Passing `decisions: []` leaves all candidates pending. A stale preview must be recreated; replaying a completed preview returns its receipts. Set `excludeAmbientSeasonHints: true` on the continuity report to skip isolated scenic cues without suppressing timeline conflicts. An optional `actorTag` on Agent-authored prose or manual revision submissions records a self-reported credit, not an authorization.
+
 Library managers can use `agent.createProject` without a project ID or a reservation. Use `agent.previewProjectAction` and `agent.applyProjectAction` to edit project metadata, archive or restore a book, or revert a previous project change. Read project receipts through `agent.getLibraryActionHistory` and include archived books with `agent.listProjects` using `status: "all"`. A library grant does not waive per-chapter review and quality checks.
 
 With the author's full-book creator grant, use `agent.listBookCreationSlots` and `agent.createProject` for a reserved book, or `agent.previewBookReferenceEdit` and `agent.applyBookReferenceEdit` for Story Bible and stage-summary changes or restores. For an ordered revision batch, use `agent.startBookRevisionBatch` and `agent.getChapterWorkItem`. Each revision must pass `agent.reviewRevisionVersion` before preview and commit. See the Chinese section for the exact arguments.
@@ -325,9 +374,9 @@ For a single character, `agent.getWorldRecord` includes a compact `cardReview`: 
 
 ### Start
 
-With the Windows build (Preview.22 or newer), use the Agent Runs page to copy the Codex setup command and run it in PowerShell. It uses the bundled MCP server without requiring Node or a source checkout. Remove an older entry with `codex mcp remove novel-director` before registering the replacement. Register again if you move the application.
+With the packaged Windows app (Preview.22 or newer), copy the Codex setup command from Agent Runs and run it in PowerShell. The command uses the bundled application executable and MCP server; Node and a source checkout are not required. Remove an old registration with `codex mcp remove novel-director` before registering the shipped server under the same name. Register again if you move the executable.
 
-To launch MCP directly from a source checkout for debugging:
+To launch the service from a source checkout:
 
 ```powershell
 npm.cmd run agent:tools

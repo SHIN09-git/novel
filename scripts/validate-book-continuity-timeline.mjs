@@ -153,6 +153,31 @@ test('旧书原句只列线索；不拿注释、草稿、历史版、别书或�
   repeated.chapters[1].body += four
   assert.ok(read(repeated, 'countdown').every(f => f.status === 'needs_evidence'))
 })
+test('只折叠未绑定的写景或比喻；不从环境词推季节，保留同句中的明确时令', () => {
+  const noise = ['北门浮着深秋的暮色。', '风像春天一般温暖。', '桥头的凉意仿佛初冬。']
+  const keep = [winter, '春季的风险不能漏记。', '今日立冬。', '开闸日期与去年初冬一样。',
+    '山下是暮春的暖意，山顶却是严冬的寒意。', '暮春的晚霞照着北门，' + '灯下'.repeat(100) + '城里已是暮春。']
+  const mixed = '初冬的微凉渗进窗缝，距离启闸还剩五天。'
+  const d = book([quoted(1, ['晚霞渐暗，暮色微凉。', ...noise, ...keep, mixed].join('\n'))])
+  const full = read(d, 'season')
+  assert.equal(full.length, noise.length + keep.length + 1)
+  assert.deepEqual(read(d, 'season', { excludeAmbientSeasonHints: false }), full)
+  const kept = read(d, 'season', { excludeAmbientSeasonHints: true })
+  assert.deepEqual(kept.map(f => f.evidence[0].excerpt), keep.map(q => q.slice(0, 150)))
+  assert.deepEqual(read(d, 'countdown', { excludeAmbientSeasonHints: true }).map(f => f.evidence[0].excerpt), [mixed])
+})
+test('即使引文本身是景物描写，也保留时间记录的硬矛盾、待补证和待绑定项', () => {
+  const quotes = ['门外浮着暮春的暖意。', '北门笼在严冬的暮色里。']
+  const events = [event(1, quotes[0], { season: 'spring' }), event(96, quotes[1], { season: 'winter' })]
+  for (const [patch, status] of [[{}, 'conflict'], [{ timeAnchor: '' }, 'needs_evidence'], [{ chapterId: 'gone' }, 'needs_evidence']]) {
+    const d = book([quoted(1, quotes[0]), quoted(96, quotes[1])], [events[0], { ...events[1], ...patch }])
+    const opts = { from: 96, to: 96, status }
+    const kept = read(d, 'season', { ...opts, excludeAmbientSeasonHints: true })
+    assert.equal(kept.length, 1)
+    assert.deepEqual(kept, read(d, 'season', opts).filter(f => !f.ambientSeasonHint))
+    assert.deepEqual(kept[0].evidence.map(e => e.excerpt), patch.chapterId ? [] : quotes)
+  }
+})
 test('对白、回忆、否定、不确定数量和一行多个期限不作为可计算事实', () => {
   for (const q of ['“距离启闸只剩四天。”', '十年前，距离启闸只剩四天。', '并非距离启闸只剩四天。',
     '距离启闸只剩四天左右。', '距离启闸只剩两三天。', '距离启闸只剩四天，距离封桥还剩五天。']) {

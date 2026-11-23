@@ -1,4 +1,5 @@
 import type { AppData, ChapterCommitBundle } from '../../shared/types'
+import { normalizeManualChapterTitle } from '../../shared/normalizers/chapterTitle'
 import {
   normalizeConsistencyReviewReport,
   normalizeQualityGateReport,
@@ -16,6 +17,10 @@ import { validateDiagnosticBindings } from './chapterDiagnosticBindings'
 
 export function validateAcceptanceReviewShape(bundle: ChapterCommitBundle): void {
   const review = bundle.acceptanceReview
+  if (bundle.finalTitle !== undefined && (!review || bundle.acceptedBy !== 'agent' || !bundle.actor?.authorizationGrantId ||
+    normalizeManualChapterTitle(bundle.finalTitle) !== bundle.finalTitle || bundle.finalTitle !== bundle.chapter.title)) {
+    throw new Error('定稿标题与授权采纳记录不匹配。')
+  }
   if (review === undefined) return // Legacy commits retain their original review provenance.
   if (!review || !['reviewed', 'unreviewed'].includes(review.mode) || typeof review.editorialRequired !== 'boolean') {
     throw new Error('草稿采纳方式无效。')
@@ -32,7 +37,8 @@ export function validateAcceptanceReviewShape(bundle: ChapterCommitBundle): void
   }
   if (review.qualityGateReportId !== (bundle.qualityGateReportId ?? null)) throw new Error('采纳记录的质量报告引用不一致。')
   if (!bundle.chapterVersion || !bundle.generatedDraft || bundle.generatedDraft.status !== 'accepted' ||
-    bundle.generatedDraft.body !== bundle.chapter.body || bundle.generatedDraft.title !== bundle.chapter.title) {
+    bundle.generatedDraft.body !== bundle.chapter.body || bundle.chapterVersion.title !== bundle.chapter.title ||
+    (bundle.finalTitle ?? bundle.generatedDraft.title) !== bundle.chapter.title) {
     throw new Error('采纳记录缺少匹配的正文版本。')
   }
   if (review.mode === 'unreviewed' && [bundle.acceptedMemoryUpdateCandidates, bundle.acceptedCharacterStateChangeCandidates,
@@ -61,7 +67,7 @@ export function validateCurrentAcceptanceReview(bundle: ChapterCommitBundle, dat
   }
   if (!draft || draft.jobId !== bundle.jobId || !job) throw new Error('来源草稿或生成任务已不存在，请重新打开当前章节。')
   if (job.status === 'running') throw new Error('生成仍在运行，请先停止或等待完成再采纳。')
-  if (draft.body !== bundle.chapter.body || draft.title !== bundle.chapter.title ||
+  if (draft.body !== bundle.chapter.body || draft.title !== bundle.generatedDraft?.title ||
     (draft.chapterId && draft.chapterId !== bundle.chapterId)) throw new Error('来源草稿已变化，请核对最新正文后采纳。')
   const current = buildChapterAcceptanceReview(data, draft, review.mode, review.editorialRequired)
   if (current.hardCanonCheck?.resultFingerprint !== review.hardCanonCheck?.resultFingerprint) {

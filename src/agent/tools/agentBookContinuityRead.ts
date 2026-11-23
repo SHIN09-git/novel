@@ -12,6 +12,7 @@ export const bookContinuityProperties = {
   from: { type: 'integer', minimum: 1, description: 'First chapter with a finding. Earlier comparison evidence is retained.' },
   to: { type: 'integer', minimum: 1, description: 'Last chapter visible to the audit, inclusive.' },
   kind: { type: 'string', enum: kinds }, status: { type: 'string', enum: statuses },
+  excludeAmbientSeasonHints: { type: 'boolean', default: false, description: 'Hide unlinked scenic or figurative season clues. Conflicts and timeline records stay visible. excludedAmbientSeasonHints counts matching omissions before paging. Omit or set false for the full list.' },
   offset: { type: 'integer', minimum: 0 }, limit: { type: 'integer', minimum: 1, maximum: maxPageSize, default: 10 }
 }
 
@@ -37,7 +38,9 @@ function parseOptions(args: Record<string, unknown>): BookAuditOptions {
   }
   const from = integer('from', 1), to = integer('to', 1)
   if (from !== undefined && to !== undefined && from > to) throw new Error('from must not exceed to.')
-  return { from, to, kind: choice('kind', kinds), status: choice('status', statuses),
+  const { excludeAmbientSeasonHints } = args
+  if (excludeAmbientSeasonHints !== undefined && typeof excludeAmbientSeasonHints !== 'boolean') throw new Error('Invalid excludeAmbientSeasonHints.')
+  return { from, to, kind: choice('kind', kinds), status: choice('status', statuses), excludeAmbientSeasonHints,
     offset: integer('offset', 0), limit: integer('limit', 1, maxPageSize) ?? 10 }
 }
 

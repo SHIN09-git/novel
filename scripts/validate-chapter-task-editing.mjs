@@ -20,6 +20,10 @@ try {
   const outfile = join(directory, 'api.mjs')
   await build({ stdin: { contents: `
     export * from './src/services/ChapterTaskEditService';
+    export { chapterPlanMessages, chapterDraftMessages } from './src/services/ai/GenerationPipelineAI';
+    export { QualityGateService } from './src/services/QualityGateService';
+    export { buildAuthoritativeOpeningPlan } from './src/services/OpeningChapterPlanGuardService';
+    export { assertChapterTaskPresentInPrompt, constrainedSnapshotTask } from './src/renderer/src/views/generation/pipelineUtils';
     export * from './src/services/GenerationRunBundleService';
     export * from './src/services/chapterTaskEdit/contextSourceBinding';
     export * from './src/shared/defaults';
@@ -55,6 +59,10 @@ try {
     foreshadowings: [{ id: 'f1', projectId: 'p1', title: '铜铃的刻痕', description: '铃内有一行刻痕。', status: 'planted', weight: 'high', treatmentMode: 'hint', createdAt: timestamp, updatedAt: timestamp }]
   })
   const task = { ...api.createEmptyChapterTask(), goal: '沈禾在旧桥寻找信使。', conflict: '渡船无人回应。', endingHook: '绳索轻轻动了一下。', targetWordCount: '800-1200', styleRequirement: '短句，动作清楚。' }
+  Object.assign(task, { povPolicy: { mode: 'third_limited_single', povCharacterId: 'character-1', perceptionChannels: ['on_site', 'kook_audio'] },
+    storyTimeWindow: { date: '2026-08-28', weekday: '周五', range: '20:57–20:59' }, mustOpenWithBeat: '她抬起的手仍握着绳索。' })
+  const boundaryValues = [task.povPolicy.mode, task.povPolicy.povCharacterId, ...task.povPolicy.perceptionChannels,
+    ...Object.values(task.storyTimeWindow), task.mustOpenWithBeat]
   const input = { projectId: 'p1', targetChapterOrder: 2, task, jobId: 'task-original', createdAt: timestamp, budgetMode: 'standard', budgetMaxTokens: 12000, pipelineMode: 'standard' }
   let fresh
   await test('saving a new task prepares context without AI and preserves the source AppData', async () => {
@@ -69,7 +77,8 @@ try {
     const savedSteps = fresh.data.chapterGenerationSteps.filter(step => step.jobId === fresh.job.id)
     assert.equal(savedSteps.filter(step => step.status === 'completed').length, 3)
     const context = savedSteps.find(step => step.type === 'build_context').output
-    for (const field of api.CHAPTER_TASK_FIELDS) if (task[field]) assert.ok(context.includes(task[field]), field)
+    for (const value of [...Object.values(task).filter(v => typeof v === 'string' && v), ...boundaryValues]) assert.ok(context.includes(value), value)
+    assert.ok(fresh.data.contextNeedPlans[0].expectedCharacters.some(c => c.characterId === task.povPolicy.povCharacterId && !c.uncertain))
     assert.equal(savedSteps.find(step => step.type === 'generate_chapter_plan').status, 'pending')
   })
 
@@ -137,6 +146,36 @@ try {
     assert.equal(received.context, running.state.context)
     assert.deepEqual(received.options.chapterTask, editInput.task)
     assert.ok(received.context.includes(editInput.task.styleRequirement))
+    for (const value of boundaryValues) assert.ok(received.context.includes(value), value)
+  })
+  await test('boundaries reach plan, opening and continuation drafts, and semantic review even without context text', async () => {
+    const options = { targetChapterOrder: 2, chapterTask: task, mode: 'standard' }
+    const opening = { ...options, targetChapterOrder: 1, authoritativeChapterTask: true }
+    assert.equal(api.buildAuthoritativeOpeningPlan(task).openingContinuationBeat, task.mustOpenWithBeat)
+    let reviewContext
+    await api.QualityGateService.evaluateChapterDraft({ projectId: 'p1', jobId: 'review', chapterId: null, draftId: null,
+      context: '', chapterPlan: null, chapterDraft: { title: '渡口', body: '她伸手拉绳。' }, chapterTask: task, targetChapterOrder: 2,
+      aiService: { generateQualityGateReport: async (_, context) => { reviewContext = context; return { data: null } } } })
+    for (const prompt of [api.chapterPlanMessages('', options)[1].content, api.chapterDraftMessages(ctx.state.plan, '', options)[1].content,
+      api.chapterDraftMessages(ctx.state.plan, '', opening)[1].content, reviewContext]) {
+      for (const v of boundaryValues) assert.ok(prompt.includes(v), v)
+      assert.match(prompt, /前 200 字/)
+    }
+    assert.equal(api.constrainedSnapshotTask({ chapterTask: task }), task)
+    assert.equal(api.constrainedSnapshotTask({ chapterTask: task, moduleSelection: { chapterTask: false } }), null)
+    assert.equal(api.constrainedSnapshotTask({ chapterTask: api.createEmptyChapterTask() }), null)
+    const context = stateFor(style.data, style.job).state.context
+    for (const [field, value] of [['povPolicy', 'kook_audio'], ['storyTimeWindow', '20:57–20:59'], ['mustOpenWithBeat', task.mustOpenWithBeat]]) {
+      assert.throws(() => api.assertChapterTaskPresentInPrompt(context.replaceAll(value, ''), task, 'draft'), new RegExp(field))
+    }
+    const reordered = { ...task, storyTimeWindow: { range: task.storyTimeWindow.range, weekday: '周五', date: task.storyTimeWindow.date } }
+    assert.deepEqual(api.analyzeChapterTaskEdit(task, reordered).changedFields, [])
+    for (const field of ['povPolicy', 'storyTimeWindow', 'mustOpenWithBeat']) {
+      const after = { ...task }; delete after[field]
+      const delta = api.analyzeChapterTaskEdit(task, after)
+      assert.deepEqual(delta.changedFields, [field])
+      assert.equal(delta.scope, 'context')
+    }
   })
   await test('length edit keeps the plan but updates word count and frozen budget metadata', async () => {
     const next = await api.prepareChapterTaskEdit(original, { ...editInput, jobId: 'length-edit', task: { ...task, targetWordCount: '1800-2200' }, budgetMaxTokens: 16000 })

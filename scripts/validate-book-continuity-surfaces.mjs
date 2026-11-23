@@ -61,6 +61,8 @@ try {
   assert.equal(definition.inputSchema.additionalProperties, false)
   assert.equal(definition.inputSchema.properties.kind.enum.length, 7)
   assert.deepEqual(definition.inputSchema.properties.status.enum, ['conflict', 'needs_evidence', 'open'])
+  assert.equal(definition.inputSchema.properties.excludeAmbientSeasonHints.type, 'boolean')
+  assert.equal(definition.inputSchema.properties.excludeAmbientSeasonHints.default, false)
   const run = args => api.AgentToolService.callTool({ name: tool, arguments: args })
   const expected = options => api.buildBookContinuityReport(seed, auditBook, options)
   const onlyConflict = { from: 5, to: 5, kind: 'money', status: 'conflict', limit: 1 }
@@ -115,6 +117,20 @@ try {
     assert.equal(firstPage.limit, 10)
     const secondPage = (await run({ ...args, offset: 10, limit: 10 })).data
     assert.deepEqual([...firstPage.findings, ...secondPage.findings], all.findings.slice(0, 20))
+    const season = { ...args, kind: 'season', from: 8, to: 9 }, reduced = { ...season, excludeAmbientSeasonHints: true }
+    const full = (await run(season)).data
+    assert.equal(full.total, 4)
+    for (const [offset, excerpts] of [[0, ['山中正值暮春。']], [1, ['今日立冬。']], [2, []]]) {
+      const page = (await run({ ...reduced, limit: 1, offset })).data
+      assert.equal(page.total, 2); assert.equal(page.excludedAmbientSeasonHints, 2)
+      assert.deepEqual(page.counts, { conflict: 0, needs_evidence: 2, open: 0 })
+      assert.deepEqual(page.findings.map(f => f.evidence[0].excerpt), excerpts)
+    }
+    assert.deepEqual((await run({ ...season, excludeAmbientSeasonHints: false })).data, full)
+    const focus = (await run({ ...args, excludeAmbientSeasonHints: true, status: 'conflict', limit: 50 })).data
+    assert.deepEqual(focus.findings, all.findings.filter(f => f.status === 'conflict'))
+    assert.equal(focus.total, all.counts.conflict); assert.equal(focus.excludedAmbientSeasonHints, 0)
+    assert.deepEqual(focus.counts, { ...all.counts, needs_evidence: all.counts.needs_evidence - 3 })
     assert.equal((await run({ ...args, to: 2, status: 'conflict' })).data.total, 0)
     assert.deepEqual((await run({ ...args, offset: 999 })).data.findings, [])
     for (const finding of firstPage.findings) for (const e of finding.evidence) {
@@ -134,14 +150,19 @@ try {
     assert(timeQuote.includes('137天') && oldCountdown.includes(timeQuote))
     assert(!JSON.stringify(countdown).includes(oldCountdown))
     for (const bad of [{ from: 0 }, { from: 9, to: 5 }, { limit: 51 }, { limit: 1.5 }, { offset: -1 },
-      { offset: '0' }, { kind: 'else' }, { status: 'all' }, { includeProse: true }, { project: 'nonexistent' }, { storagePath: 1 }]) {
+      { offset: '0' }, { kind: 'else' }, { status: 'all' }, { excludeAmbientSeasonHints: 'false' }, { excludeAmbientSeasonHints: null },
+      { minConfidence: 0.5 }, { includeProse: true }, { project: 'nonexistent' }, { storagePath: 1 }]) {
       await assert.rejects(run({ ...args, ...bad }))
     }
     await assert.rejects(run({ storagePath: path, userDataPath: dir }), /project/i)
     const cli = JSON.parse(invoke('cli', ['book-continuity', '--project-id', auditBook, '--storage', path, '--user-data', dir,
       '--from', '5', '--to', '5', '--kind', 'money', '--status', 'conflict', '--limit', '1']))
     assert.deepEqual(cli.data, dispute)
-    const requests = [{ id: 1, method: 'tools/list' }, { id: 2, method: 'tools/call', params: { name: tool, arguments: { ...args, ...onlyConflict } } }]
+    const cliReduced = JSON.parse(invoke('cli', ['book-continuity', '--project-id', auditBook, '--storage', path, '--user-data', dir,
+      '--from', '8', '--to', '9', '--kind', 'season', '--exclude-ambient-season-hints']))
+    assert.equal(cliReduced.data.total, 2); assert.equal(cliReduced.data.excludedAmbientSeasonHints, 2)
+    const requests = [{ id: 1, method: 'tools/list' }, { id: 2, method: 'tools/call', params: { name: tool, arguments: { ...args, ...onlyConflict } } },
+      { id: 3, method: 'tools/call', params: { name: tool, arguments: reduced } }]
     const responses = invoke('mcp', [], requests.map(r => JSON.stringify({ jsonrpc: '2.0', ...r })).join('\n') + '\n')
       .split(/\r?\n/).map(s => JSON.parse(s))
     const advertised = responses.find(r => r.id === 1).result.tools.find(t => t.name === tool)
@@ -150,6 +171,7 @@ try {
     const mcp = responses.find(r => r.id === 2).result
     assert.equal(mcp.isError, false); assert.deepEqual(mcp.structuredContent, result)
     assert.deepEqual(JSON.parse(mcp.content[0].text), result)
+    assert.deepEqual(responses.find(r => r.id === 3).result.structuredContent.data, cliReduced.data)
     assert.deepEqual(await fingerprints(dir), before, 'Read-only entrypoints must leave files byte-identical')
 
     await run({ ...args, ...onlyConflict })

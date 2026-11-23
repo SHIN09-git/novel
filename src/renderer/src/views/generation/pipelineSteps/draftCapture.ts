@@ -123,8 +123,16 @@ export async function captureReviewableDraft(
     error = validate(true)
   }
   if (error) throw new Error(`${error} 请检查任务约束后重试。`)
+  return persistCapturedDraft(ctx, candidate, plan, inputHash)
+}
+
+export async function persistCapturedDraft(ctx: PipelineStepHandlerContext, candidate: ChapterDraftResult,
+  plan: ChapterPlan, inputHash: string, source?: Pick<GeneratedChapterDraft, 'actorTag' | 'handoffReceipt'>): Promise<GeneratedChapterDraft> {
+  const { state, job, step, env } = ctx
   const at = now()
   const draft: GeneratedChapterDraft = { id: newId(), projectId: job.projectId, chapterId: null, jobId: job.id,
+    ...source,
+    ...(job.proseMode ? { proseSource: job.proseMode } : {}),
     title: candidate.title, body: candidate.body, summary: plan.chapterGoal, status: 'draft',
     tokenEstimate: TokenEstimator.estimate(candidate.body), createdAt: at, updatedAt: at }
   const checkpoint = checkpointForDraft(draft, inputHash)

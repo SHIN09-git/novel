@@ -17,6 +17,8 @@ export interface BookAuditFinding {
   title: string
   reason: string
   evidence: BookAuditEvidence[]
+  /** Only an unlinked manuscript clue whose season mentions are all scenic or figurative. */
+  ambientSeasonHint?: true
   /** Position of a record or unresolved source; not a substitute for a manuscript quotation. */
   atChapterOrder?: number
   characterIds?: ID[]
@@ -37,6 +39,7 @@ export interface BookAuditOptions {
   to?: number
   kind?: BookAuditKind
   status?: BookAuditStatus
+  excludeAmbientSeasonHints?: boolean
   offset?: number
   limit?: number
 }

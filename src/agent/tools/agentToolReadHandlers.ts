@@ -1,4 +1,7 @@
 import { AgentDecisionService } from '../AgentDecisionService'
+import { readChapterProseHandoff } from '../../shared/chapterProseHandoff'
+import { firstPendingRunTarget } from '../agentBatchWriteback'
+import { redactCandidateValue } from './agentCandidateDecisionOutput'
 import { AgentExecutionControlService } from '../AgentExecutionControlService'
 import type { AgentRuntimeData } from '../AgentRuntime'
 import { AgentAuthorizationService } from '../../main/services/AgentAuthorizationService'
@@ -68,6 +71,21 @@ export function handleAgentReadTool(
   const revisionRead = handleRevisionRead(name, args, data)
   if (revisionRead.handled) return revisionRead
   switch (name) {
+    case 'agent.getChapterDraftHandoff': {
+      const jobId = requiredString(args, 'jobId')
+      const job = data.chapterGenerationJobs.find(j => j.id === jobId)
+      const run = data.agentRuns.find(r => r.projectId === job?.projectId && r.createdJobIds.includes(jobId))
+      const handoff = readChapterProseHandoff(data.chapterGenerationSteps.find(s => s.jobId === jobId && s.type === 'generate_chapter_draft'))
+      if (!run || !job?.proseMode || job.currentStep !== 'generate_chapter_draft' || !handoff ||
+        firstPendingRunTarget(data, run)?.jobId !== jobId) throw new Error('本章没有有效的主笔交接单。请读取最新工作单。')
+      return { handled: true, payload: { projectId: job.projectId, chapterOrder: job.targetChapterOrder, jobId, agentRunId: run.id,
+        kind: handoff.kind, handoffId: handoff.handoffId, inputHash: handoff.inputHash,
+        ...redactCandidateValue({ messages: handoff.messages.map(({ role, content }) => ({ role, content: redactSensitiveText(content) })),
+          plan: JSON.parse(JSON.stringify(handoff.plan, (_, v) => typeof v === 'string' ? redactSensitiveText(v) : v)),
+          includedHardCanonItemIds: handoff.includedHardCanonItemIds }, data),
+        nextAction: { tool: 'agent.submitChapterDraft', arguments: { jobId, agentRunId: run.id, handoffId: handoff.handoffId },
+          requiresInput: ['title', 'body'] } } }
+    }
     case 'agent.getRevisionReview':
       return { handled: true, payload: readAgentRevisionReview(data, args) }
     case 'agent.getCandidateDecisionHistory':

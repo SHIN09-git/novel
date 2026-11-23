@@ -133,6 +133,8 @@ export interface QualityGateReport {
     contextHash: string
     commandHash: string
     consistencyReviewReportId: ID
+    mode?: 'surgical_errata'
+    stagedNeighbors?: { chapterId: ID; chapterOrder: number; versionId: ID; openingHash: string }[]
   }
   overallScore: number
   pass: boolean

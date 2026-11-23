@@ -13,6 +13,7 @@ import type {
   StoryDirectionGuide
 } from '../../../../shared/types'
 import type { SaveDataHandler, SaveDataOutcome } from '../../utils/saveDataState'
+import { readTaskConstraints } from '../../../../shared/chapterTaskConstraints'
 
 export interface PromptBuilderSnapshotBinding {
   projectId: ID
@@ -71,7 +72,7 @@ export function createPromptBuilderSnapshotBinding(
     selectedCharacterIds: [...input.result.selectedCharacterIds],
     selectedForeshadowingIds: [...input.result.selectedForeshadowingIds],
     foreshadowingTreatmentOverrides: { ...input.result.foreshadowingTreatmentOverrides },
-    chapterTask: { ...input.result.chapterTask },
+    chapterTask: { ...input.result.chapterTask, ...readTaskConstraints(input.result.chapterTask) },
     contextNeedPlan: input.result.contextNeedPlan,
     storyDirectionGuide: input.result.storyDirectionGuide
   }
@@ -121,7 +122,7 @@ export function createPromptBuilderSnapshotBindingFromSnapshot(
     selectedCharacterIds: [...snapshot.selectedCharacterIds],
     selectedForeshadowingIds: [...snapshot.selectedForeshadowingIds],
     foreshadowingTreatmentOverrides: { ...snapshot.foreshadowingTreatmentOverrides },
-    chapterTask: { ...snapshot.chapterTask },
+    chapterTask: structuredClone(snapshot.chapterTask),
     contextNeedPlan: snapshot.contextNeedPlan,
     storyDirectionGuide: snapshot.storyDirectionGuide
   }
@@ -144,7 +145,7 @@ export function createBoundPromptContextSnapshot(input: CreateSnapshotInput): Pr
     selectedCharacterIds: [...binding.selectedCharacterIds],
     selectedForeshadowingIds: [...binding.selectedForeshadowingIds],
     foreshadowingTreatmentOverrides: { ...binding.foreshadowingTreatmentOverrides },
-    chapterTask: { ...binding.chapterTask },
+    chapterTask: { ...binding.chapterTask, ...readTaskConstraints(binding.chapterTask) },
     contextNeedPlan: binding.contextNeedPlan,
     storyDirectionGuide: binding.storyDirectionGuide,
     finalPrompt: input.finalPrompt,

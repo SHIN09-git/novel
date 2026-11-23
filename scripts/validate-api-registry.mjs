@@ -12,6 +12,46 @@ const registryFile = join(root, 'registry.json')
 process.env.NOVEL_DIRECTOR_API_REGISTRY = registryFile
 const servers = []
 
+function checkModelChannels({ parseApiRegistry, listAgentModelChannels: list, resolveAgentModelChannel: select,
+  sameApiEndpoint, apiKeyHeaderFor }) {
+  const baseUrl = 'https://fixture.invalid/compat'
+  const chat = { baseUrl: baseUrl + '/', protocol: 'openai-chat-completions', path: '/chat/completions',
+    model: 'org/model-v2:fast', aliases: [baseUrl + '/alias'], apiKeyHeader: 'X-Fixture-Key',
+    keyEnv: 'NOVEL_FIXTURE_CHANNEL_API_KEY', backupKeyEnv: 'NOVEL_FIXTURE_BACKUP_API_KEY',
+    label: 'private fixture label', note: 'private fixture note', key: 'private fixture value' }
+  const service = (id, fields) => ({ ...chat, baseUrl: baseUrl + '/' + id, aliases: [], ...fields })
+  const apis = { primary: chat }
+  for (const [id, fields] of Object.entries({
+    google: { protocol: 'google-generate-content', path: '/chat/completions' },
+    voice: { path: '/audio/speech' }, legacy: { protocol: undefined }, noPath: { path: undefined },
+    suffix: { path: '/v1/chat/completions' }, noDefault: { model: undefined, chatModels: ['not-a-default'] },
+    empty: { model: '   ' }, invalidType: { model: ['not-a-model'] }, prose: { model: 'private fixture text' },
+    url: { model: 'https://private.invalid' }, credential: { model: ['sk', 'fixture-not-a-model'].join('-') },
+    constructor: {}, prototype: {}, 'private text': {}
+  })) apis[id] = service(id, fields)
+  const registry = parseApiRegistry({ version: 1, apis, desktopSavedKeyFor: 'primary' })
+  const local = { registryServiceId: 'codex_cli', provider: 'codex_cli', model: null }
+  assert.deepEqual(list(registry), { channels: [local,
+    { registryServiceId: 'primary', provider: 'compatible', model: 'org/model-v2:fast' }] })
+  assert.deepEqual(select(registry, 'primary'), {
+    id: 'primary', apiProvider: 'compatible', baseUrl, modelName: 'org/model-v2:fast'
+  })
+  assert.deepEqual(select(registry, 'codex_cli'), { id: 'codex_cli', apiProvider: 'codex_cli' })
+  for (const id of [...Object.keys(apis).filter(id => id !== 'primary'), 'unknown', '', '__proto__', baseUrl, chat.aliases[0]]) {
+    assert.throws(() => select(registry, id), /模型通道|未配置/)
+  }
+  assert.deepEqual(list(new Map()), { channels: [local] })
+  assert.throws(() => select(new Map(), 'primary'), /未知/)
+  const conflict = parseApiRegistry({ version: 1, apis: { codex_cli: chat } })
+  assert.deepEqual(list(conflict), { channels: [] })
+  assert.throws(() => select(conflict, 'codex_cli'), /保留/)
+  assert.ok(sameApiEndpoint(registry, baseUrl, chat.aliases[0]))
+  assert.equal(apiKeyHeaderFor(registry, chat.aliases[0]), chat.apiKeyHeader)
+  assert.equal(registry.get(chat.aliases[0]).backupKeyEnv, chat.backupKeyEnv)
+  assert.equal(registry.get(baseUrl).legacyDesktopKey, true)
+  assert.equal(registry.get(apis.voice.baseUrl).keyEnv, chat.keyEnv)
+}
+
 async function endpoint(expectedKey, model, keyHeader) {
   const server = createServer(async (req, res) => {
     let body = ''
@@ -34,6 +74,7 @@ try {
   const compiled = await build({
     stdin: { resolveDir: repoRoot, contents: [
       "export * from './src/main/services/ApiRegistry'",
+      "export * from './src/agent/agentModelChannels'",
       "export * from './src/main/SecureCredentialService'",
       "export * from './src/main/services/AIService'",
       "export * from './src/main/services/MainAIJsonClient'",
@@ -47,8 +88,10 @@ try {
       }))
     } }]
   })
-  const { AIService, SecureCredentialService, MainAIJsonClient, AIClient, readApiRegistry, agentApiKey, apiKeyHeaderFor, backupKeyAfterRejection } =
-    await import('data:text/javascript;base64,' + Buffer.from(compiled.outputFiles[0].contents).toString('base64'))
+  const modules = await import('data:text/javascript;base64,' + Buffer.from(compiled.outputFiles[0].contents).toString('base64'))
+  checkModelChannels(modules)
+  console.log('Agent model channels: fixture catalog, ID selection, CLI login shape, invalid/reserved IDs and route compatibility passed.')
+  const { AIService, SecureCredentialService, MainAIJsonClient, AIClient, readApiRegistry, agentApiKey, apiKeyHeaderFor, backupKeyAfterRejection } = modules
   const a = await endpoint('fixture-a', 'model-a'), b = await endpoint('fixture-b', 'model-b')
   const c = await endpoint('fixture-c', 'model-c', 'x-goog-api-key')
   const config = { version: 1, desktopSavedKeyFor: 'a', apis: {

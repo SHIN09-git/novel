@@ -1,4 +1,5 @@
 import type { AgentToolDefinition, JsonSchema } from './agentToolTypes'
+import { actorTagSchema } from '../../shared/agentActorTag'
 import { AGENT_DRAFT_REPORT_KINDS } from '../agentDraftReview'
 import { workItemResponseSchema } from './agentChapterWorkItem'
 import { AGENT_REVISION_TOOL_DEFINITIONS } from './agentRevisionToolDefinitions'
@@ -38,21 +39,12 @@ function readInputProperties(extra: JsonSchema): JsonSchema {
   }
 }
 
+import { chapterTaskProperties } from './chapterTaskProperties'
 const chapterTaskSchema: JsonSchema = {
   type: 'object',
   additionalProperties: false,
   description: 'Immutable chapter-level creative contract. This is separate from the AgentRun audit goal and is reused by retries.',
-  properties: {
-    goal: { type: 'string' },
-    conflict: { type: 'string' },
-    suspenseToKeep: { type: 'string' },
-    allowedPayoffs: { type: 'string' },
-    forbiddenPayoffs: { type: 'string' },
-    endingHook: { type: 'string' },
-    readerEmotion: { type: 'string' },
-    targetWordCount: { type: 'string' },
-    styleRequirement: { type: 'string' }
-  },
+  properties: chapterTaskProperties,
   required: ['goal']
 }
 
@@ -187,7 +179,7 @@ function candidateDecisionsSchema(apply: boolean): JsonSchema {
     items: {
       type: 'object', additionalProperties: false,
       properties: {
-        kind: { type: 'string', enum: ['memory', 'character_state'] },
+          kind: { type: 'string', enum: ['memory', 'character_state', 'memory_update', 'character_state_change'] },
         candidateId: { type: 'string', minLength: 1 },
         decision: { type: 'string', enum: ['accept', 'reject'] },
         amendment: amendmentSchema,
@@ -211,13 +203,35 @@ const runDiagnosticsSchema = schema({
 }, ['jobId'])
 
 export const AGENT_TOOL_DEFINITIONS: AgentToolDefinition[] = [
+  { name: 'agent.listAvailableChannels', riskLevel: 'read', annotations: { readOnlyHint: true },
+    description: 'List registered chat channels and the local Codex CLI option for a failed model step. No library read, credential disclosure, balance check or model call.',
+    inputSchema: schema({}) },
   ...AGENT_CHAPTER_ACCEPTANCE_DEFINITIONS,
+  { name: 'agent.previewChapterSettlement', riskLevel: 'write_preview',
+    description: 'Preview one reviewed chapter commit, optional final title and explicit decisions for candidates from this exact draft. Empty decisions leave all pending.',
+    inputSchema: schema({ projectId: { type: 'string' }, agentRunId: { type: 'string' }, jobId: { type: 'string' }, draftId: { type: 'string' },
+      operationId: { type: 'string' }, reason: { type: 'string' }, finalTitle: { type: 'string' },
+      mode: { type: 'string', enum: ['reviewed'] },
+      expectedDraftContentHash: { type: 'string' }, expectedQualityGateReportId: { type: ['string', 'null'] },
+      expectedEditorialVerdictId: { type: ['string', 'null'] }, decisions: { ...candidateDecisionsSchema(false), minItems: 0 } },
+    ['projectId', 'agentRunId', 'jobId', 'draftId', 'operationId', 'reason', 'decisions']) },
+  { name: 'agent.applyChapterSettlement', riskLevel: 'write_commit',
+    description: 'Apply the exact preview under the current grant as a single atomic write. Returns chapter and candidate receipts; retry does not reapply.',
+    inputSchema: schema({ projectId: { type: 'string' }, previewId: { type: 'string' }, expectedPreviewHash: { type: 'string' },
+      responseMode: workItemResponseSchema },
+      ['projectId', 'previewId', 'expectedPreviewHash']) },
   ...AGENT_CHAPTER_TASK_TOOL_DEFINITIONS,
   ...chapterTitleDefinitions(schema),
   ...AGENT_WORLD_TOOL_DEFINITIONS,
   ...AGENT_BOOK_REFERENCE_DEFINITIONS,
   ...AGENT_BOOK_CREATIVE_TOOL_DEFINITIONS,
   ...AGENT_LIBRARY_TOOL_DEFINITIONS,
+  {
+    name: 'agent.preflightDraftText', riskLevel: 'read',
+    description: 'Locally check unsaved prose for format, visible character count and applicable mechanical HardCanon findings. No model, persistence or acceptance. Use nextOffset for more evidence.',
+    inputSchema: schema({ projectId: { type: 'string' }, chapterOrder: { type: 'integer', minimum: 1 },
+      body: { type: 'string' }, offset: { type: 'integer', minimum: 0 } }, ['projectId', 'chapterOrder', 'body'])
+  },
   {
     name: 'agent.getProjectAuthorization', riskLevel: 'read',
     description: 'Read author-issued grants for this project and database. Only the desktop author UI can grant or revoke; imported AppData and confirm flags cannot grant authority.',
@@ -232,6 +246,7 @@ export const AGENT_TOOL_DEFINITIONS: AgentToolDefinition[] = [
     inputSchema: schema({
       ...candidateReadProperties,
       chapterOrder: { type: 'integer', minimum: 1 },
+      staleOnly: { type: 'boolean', description: 'Only return pending candidates whose source draft was replaced. They cannot be accepted.' },
       limit: { type: 'integer', minimum: 1, maximum: 100, default: 20 },
       offset: { type: 'integer', minimum: 0, default: 0 }
     })
@@ -337,6 +352,15 @@ export const AGENT_TOOL_DEFINITIONS: AgentToolDefinition[] = [
     inputSchema: schema(readInputProperties({ chapterOrder: { type: 'integer', minimum: 1 }, projectId: { type: 'string' }, project: { type: 'string' } }), ['chapterOrder'])
   },
   {
+    name: 'agent.exportManuscriptRange',
+    description: 'Return current nonblank manuscript bodies in chapter order, with missingChapters for every gap. Supply an exact projectId and an inclusive window of at most 10 chapter numbers; split longer ranges into adjacent windows. Credentials are redacted. No drafts, archived chapters, or file output.',
+    riskLevel: 'read', annotations: { readOnlyHint: true },
+    inputSchema: schema({
+      projectId: { type: 'string', minLength: 1 },
+      fromChapter: { type: 'integer', minimum: 1 }, toChapter: { type: 'integer', minimum: 1 }
+    }, ['projectId', 'fromChapter', 'toChapter'])
+  },
+  {
     name: 'agent.getDraftText',
     description: 'Read draft text with compact defaults. Full prose requires detail=full or includeProse=true.',
     riskLevel: 'read',
@@ -428,6 +452,7 @@ export const AGENT_TOOL_DEFINITIONS: AgentToolDefinition[] = [
       chapterOrder: { type: 'integer', minimum: 1 },
       goal: { type: 'string', description: 'Run-level audit/operations goal; not the prose instruction.' },
       chapterTask: chapterTaskSchema,
+      stopAfterStep: { type: 'string', enum: ['build_prompt'], description: 'Opt in to Agent-written prose. Pause after the formal plan and rebuilt context; retrieve the handoff and submit a draft.' },
       safetyMode: { type: 'string' },
       pipelineMode: { type: 'string', enum: ['conservative', 'standard', 'aggressive'] },
       estimatedWordCount: { type: 'string' },
@@ -443,13 +468,30 @@ export const AGENT_TOOL_DEFINITIONS: AgentToolDefinition[] = [
     riskLevel: 'write_preview',
     inputSchema: schema({
       agentRunId: { type: 'string' },
+      stopAfterStep: { type: 'string', enum: ['build_prompt'], description: 'For a prepared job without a draft: enable Agent-written prose.' },
       jobId: { type: 'string' },
+      refreshModelConfigFromSettings: { type: 'boolean', description: 'On a failed model step only: reload that role from the saved desktop settings for this job. Other frozen roles and previous steps stay unchanged.' },
+      registryServiceId: { type: 'string', minLength: 1, description: 'Choose one channel from agent.listAvailableChannels for this failed job role only. Requires expectedFailedStep; do not also request a settings refresh.' },
+      expectedFailedStep: { type: 'string', description: 'Exact failed step from the current work item, required with registryServiceId.' },
       pipelineMode: { type: 'string', enum: ['conservative', 'standard', 'aggressive'] },
       estimatedWordCount: { type: 'string' },
       readerEmotionTarget: { type: 'string' },
       budgetMaxTokens: { type: 'integer', minimum: 1000 },
       responseMode: workItemResponseSchema
     }, ['agentRunId', 'jobId'])
+  },
+  {
+    name: 'agent.getChapterDraftHandoff',
+    description: 'Read the current writing messages, formal plan, and included HardCanon IDs for an Agent-written draft.',
+    riskLevel: 'read',
+    inputSchema: schema({ jobId: { type: 'string' } }, ['jobId'])
+  },
+  {
+    name: 'agent.submitChapterDraft',
+    description: 'Submit prose for the current handoff on the same job, then run the usual diagnostics and review. Does not accept the chapter.',
+    riskLevel: 'write_preview',
+    inputSchema: schema({ agentRunId: { type: 'string' }, jobId: { type: 'string' }, handoffId: { type: 'string' },
+      title: { type: 'string' }, body: { type: 'string' }, actorTag: actorTagSchema }, ['agentRunId', 'jobId', 'handoffId', 'title', 'body'])
   },
   {
     name: 'agent.getPipelineProgress',

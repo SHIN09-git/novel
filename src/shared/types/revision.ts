@@ -122,6 +122,7 @@ export interface RevisionResult {
 }
 
 export interface RevisionVersion {
+  actorTag?: string
   id: ID
   sessionId: ID
   requestId: ID

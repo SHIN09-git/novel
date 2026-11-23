@@ -6,9 +6,7 @@ import { buildAgentMcp } from './utils/build-agent-mcp.mjs'
 
 const root = dirname(dirname(fileURLToPath(import.meta.url)))
 const outDir = join(root, 'tmp', 'agent-tools')
-const outfile = join(outDir, 'agent-tools-server.mjs')
-
-await buildAgentMcp(root, outfile)
+const { outfile } = await buildAgentMcp(root, join(outDir, 'agent-tools-server.mjs'), { cache: true })
 
 const child = spawn(process.execPath, [outfile, ...process.argv.slice(2)], {
   cwd: root,

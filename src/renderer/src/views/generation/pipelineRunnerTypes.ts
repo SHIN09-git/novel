@@ -55,6 +55,7 @@ export interface PipelineDiagnosticsAdapter {
 }
 
 export interface RunPipelineFromStepEngineEnv {
+  agentDraftSubmission?: import('../../../../shared/chapterProseHandoff').AgentDraftSubmission & { submissionHash: string }
   data: AppData
   project: Project
   scoped: {

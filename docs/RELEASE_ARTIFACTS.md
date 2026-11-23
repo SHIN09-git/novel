@@ -19,6 +19,12 @@ Novel Director 的本地目录按用途分为三层：
 
 小说项目和 SQLite 用户数据库不存放在这些目录中，整理发行产物不会移动或删除用户数据。
 
+### Preview.23：接笔（本地 Windows 候选）
+
+本版在已发布的 Preview.22.1 上合入五批 Agent 工作流改动，沿用原来的应用 ID、SQLite 库格式和按角色配置的推理强度。安装包、免安装程序和校验文件应使用同一次构建。源码提交号见同目录的 `BUILD_INFO.json`；本地生成这些文件不等于已发布 GitHub Release。
+
+验收使用一次性书库和本机模拟模型。先运行 `npm.cmd test`、`npm.cmd run dist:win`，再运行 `node scripts/verify-win-installer-payload.mjs`，逐个比较安装器载荷与已测试的免安装文件。Agent 功能通过包内 MCP 验证，不使用源码 MCP 冒充成品。
+
 ### Preview.22：Agent 创作与书库管理
 
 安装包和配套 `SHA256SUMS.txt` 见 [v0.1.6-preview.22](https://github.com/SHIN09-git/novel/releases/tag/v0.1.6-preview.22)。本版自带 MCP 服务；在「Agent 批次」点击「复制一键接入命令」即可注册。安装包未签名。
@@ -94,6 +100,8 @@ Novel Director 的本地目录按用途分为三层：
 清理后验证：类型检查通过；完整回归 137/137 通过；生产构建通过；当前 Preview.11 安装目录的启动与 SQLite smoke 通过；`git diff --check` 通过。验证日志保存在本机 `tmp/cleanup-20260912/`。
 
 ## English
+
+Preview.23 (The Handoff) builds on the published Preview.22.1 source and keeps its application ID, storage format and per-role reasoning settings. Use the installer and checksum from the same build; see `BUILD_INFO.json` for its source revision. Local qualification uses disposable libraries and the shipped MCP entry, not a live manuscript or a hosted model. A local candidate is not a GitHub Release.
 
 For [Preview.22](https://github.com/SHIN09-git/novel/releases/tag/v0.1.6-preview.22), download the unsigned installer and `SHA256SUMS.txt` together. The packaged app includes MCP registration on the Agent Runs page. Packaged checks used disposable SQLite libraries, with no paid model calls. The 152 extracted installer files match the unpacked version by SHA-256.
 

@@ -1,5 +1,7 @@
 import { useId, useLayoutEffect, useRef, useState, type FormEvent } from 'react'
-import type { ChapterTask } from '../../../../shared/types'
+import type { ChapterTask, Character } from '../../../../shared/types'
+import { CHAPTER_TASK_FIELDS, changedTaskFields, readTaskConstraints } from '../../../../shared/chapterTaskConstraints'
+import { ChapterTaskConstraintFields } from '../ChapterTaskConstraintFields'
 
 export const PIPELINE_TASK_FIELD_LABELS: Record<keyof ChapterTask, string> = {
   goal: '本章目标',
@@ -10,12 +12,15 @@ export const PIPELINE_TASK_FIELD_LABELS: Record<keyof ChapterTask, string> = {
   suspenseToKeep: '保留悬念',
   allowedPayoffs: '允许回收',
   forbiddenPayoffs: '禁止提前揭示',
-  readerEmotion: '读者情绪'
+  readerEmotion: '读者情绪',
+  povPolicy: '视角边界',
+  storyTimeWindow: '故事时间窗',
+  mustOpenWithBeat: '章首动作锚点'
 }
 
 const MAIN_FIELDS = ['goal', 'conflict', 'endingHook', 'targetWordCount', 'styleRequirement'] as const
 const ADVANCED_FIELDS = ['suspenseToKeep', 'allowedPayoffs', 'forbiddenPayoffs', 'readerEmotion'] as const
-const TASK_FIELDS: ReadonlyArray<keyof ChapterTask> = [...MAIN_FIELDS, ...ADVANCED_FIELDS]
+type TextField = typeof MAIN_FIELDS[number] | typeof ADVANCED_FIELDS[number]
 
 export interface PipelineTaskEditorProps {
   task: ChapterTask
@@ -25,19 +30,20 @@ export interface PipelineTaskEditorProps {
   onDirtyChange?: (dirty: boolean) => void
   impact?: { label: string; reusableArtifacts: string[]; warnings: string[] }
   sourceLabel?: string
+  characters?: Pick<Character, 'id' | 'name'>[]
 }
 
 function sameTask(left: ChapterTask, right: ChapterTask) {
-  return TASK_FIELDS.every((field) => left[field] === right[field])
+  return !changedTaskFields(left, right).length
 }
 
-export function PipelineTaskEditor({ task, busy, onSave, onGenerate, onDirtyChange, impact, sourceLabel }: PipelineTaskEditorProps) {
+export function PipelineTaskEditor({ task, busy, onSave, onGenerate, onDirtyChange, impact, sourceLabel, characters }: PipelineTaskEditorProps) {
   const prefix = useId()
   const [editor, setEditor] = useState(() => ({ saved: { ...task }, draft: { ...task } }))
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
   const editorRef = useRef(editor)
-  const incomingKey = JSON.stringify(TASK_FIELDS.map((field) => task[field]))
+  const incomingKey = JSON.stringify(CHAPTER_TASK_FIELDS.map((field) => task[field]))
   const sourceKey = sourceLabel ?? ''
   const incomingKeyRef = useRef(incomingKey)
   const sourceKeyRef = useRef(sourceKey)
@@ -76,13 +82,17 @@ export function PipelineTaskEditor({ task, busy, onSave, onGenerate, onDirtyChan
     setError('')
   }, [incomingKey, sourceKey])
 
-  function changeField(field: keyof ChapterTask, value: string) {
+  function changeDraft(draft: ChapterTask) {
     if (!mountedRef.current || busyRef.current || savingRef.current) return
     const current = editorRef.current
-    const next = { ...current, draft: { ...current.draft, [field]: value } }
+    const next = { ...current, draft }
     editorRef.current = next
     setEditor(next)
     setError('')
+  }
+
+  function changeField(field: TextField, value: string) {
+    changeDraft({ ...editorRef.current.draft, [field]: value })
   }
 
   function resetDraft() {
@@ -105,9 +115,10 @@ export function PipelineTaskEditor({ task, busy, onSave, onGenerate, onDirtyChan
     setSaving(true)
     setError('')
     try {
+      Object.assign(submitted, readTaskConstraints(submitted))
       await onSave({ ...submitted })
       if (!mountedRef.current || sourceVersion !== sourceVersionRef.current) return
-      const next = { ...editorRef.current, saved: submitted }
+      const next = { saved: submitted, draft: { ...submitted } }
       editorRef.current = next
       setEditor(next)
     } catch (cause) {
@@ -126,7 +137,7 @@ export function PipelineTaskEditor({ task, busy, onSave, onGenerate, onDirtyChan
     onGenerate?.()
   }
 
-  function fieldInput(field: keyof ChapterTask) {
+  function fieldInput(field: TextField) {
     const id = `${prefix}-${field}`
     return (
       <div className={`pipeline-task-field${field === 'styleRequirement' ? ' full-width' : ''}`} key={field}>
@@ -151,7 +162,9 @@ export function PipelineTaskEditor({ task, busy, onSave, onGenerate, onDirtyChan
         <div className="pipeline-task-fields">{MAIN_FIELDS.map(fieldInput)}</div>
         <details className="pipeline-task-advanced">
           <summary>更多任务要求</summary>
-          <div className="pipeline-task-fields">{ADVANCED_FIELDS.map(fieldInput)}</div>
+          <div className="pipeline-task-fields">{ADVANCED_FIELDS.map(fieldInput)}
+            <ChapterTaskConstraintFields task={editor.draft} characters={characters} onChange={changeDraft} disabled={disabled} />
+          </div>
         </details>
         {impact ? <div className="pipeline-task-impact" aria-label="执行影响">
           <strong>{impact.label}</strong>

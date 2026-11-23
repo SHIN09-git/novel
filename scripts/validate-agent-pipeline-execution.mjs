@@ -1,12 +1,17 @@
 #!/usr/bin/env node
-import { mkdir, rm, writeFile } from 'node:fs/promises'
-import { join } from 'node:path'
+import { mkdir, mkdtemp, realpath, rm, writeFile } from 'node:fs/promises'
+import { createHash } from 'node:crypto'
+import { dirname, join } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { build } from 'esbuild'
 import { repoRoot } from './utils/repo-root.mjs'
+import { isolatePipelineRegistry, verifyChannelRetry } from './fixtures/agent-pipeline-channel-retry.mjs'
 
 const root = repoRoot
-const outDir = join(root, 'tmp', 'agent-pipeline-execution')
+const tmp = join(root, 'tmp')
+await mkdir(tmp, { recursive: true })
+const tempRoot = await realpath(tmp)
+const outDir = await mkdtemp(join(tempRoot, 'agent-pipeline-execution-'))
 
 function assert(condition, message, details = {}) {
   if (!condition) throw new Error(`${message}\n${JSON.stringify(details, null, 2)}`)
@@ -38,6 +43,8 @@ async function loadHarness() {
     entry,
     [
       "export { executeAgentChapterPipeline } from '../../src/agent/AgentPipelineExecutor'",
+      "export { AgentToolService } from '../../src/agent/tools/AgentToolService'",
+      "export { CodexCliService } from '../../src/main/services/CodexCliService'",
       "export { AgentRunService, AGENT_PIPELINE_STEP_ORDER } from '../../src/agent/AgentRunService'",
       "export { AgentExecutionControlService } from '../../src/agent/AgentExecutionControlService'",
       "export { loadAgentRuntimeData } from '../../src/agent/AgentRuntime'",
@@ -666,8 +673,7 @@ function fakeDiagnostics(h, captures) {
 }
 
 async function main() {
-  await rm(outDir, { recursive: true, force: true })
-  await mkdir(outDir, { recursive: true })
+  const isolatedProfile = await isolatePipelineRegistry(outDir)
   const h = await loadHarness()
   const primaryTask = chapterTaskFixture('PRIMARY_TASK_CONTRACT')
   const runAuditGoal = 'RUN_AUDIT_GOAL_MUST_NOT_BECOME_PROSE_INSTRUCTION'
@@ -993,8 +999,11 @@ async function main() {
     })
   }
 
+  const book = fixture(h)
+  book.settings.pipelineModelRoles = { reviewer: { reasoningEffort: 'low', maxTokens: 3072 },
+    prose: { reasoningEffort: 'high', maxTokens: 8192 } }
   const prepared = h.AgentRunService.prepareSingleChapterRun({
-    appData: fixture(h),
+    appData: book,
     projectId: 'project-agent-pipeline',
     targetChapterOrder: 2,
     goal: runAuditGoal,
@@ -1007,7 +1016,9 @@ async function main() {
   // The saved settings may change while a run is active; the job snapshot must remain authoritative.
   const preparedData = {
     ...prepared.appData,
-    settings: { ...prepared.appData.settings, modelName: 'later-settings-model' }
+    settings: { ...prepared.appData.settings, modelName: 'later-settings-model', pipelineModelRoles: {
+      reviewer: { reasoningEffort: 'medium', maxTokens: 4096 }, prose: { reasoningEffort: null, maxTokens: 2048 }
+    } }
   }
   const storagePath = join(outDir, 'novel-director-data.json')
   await writeFile(storagePath, JSON.stringify(preparedData, null, 2), 'utf8')
@@ -1050,6 +1061,101 @@ async function main() {
   assert(h.noveltyAuditMatchesDraft(trace?.noveltyAuditResult, draft), 'Novelty audit must bind to the exact generated draft revision.')
   assert(captures.noveltyBodies.every((body) => body === fake.body), 'Every novelty pass must inspect the current body only.')
   assert(captures.qualityModels.every((model) => model === 'run-snapshot-model'), 'Quality diagnostics must inherit the job model snapshot.', captures)
+  assert(captures.qualityRequests[0]?.settings.reasoningEffort === 'low' && captures.qualityRequests[0]?.settings.maxTokens === 3072,
+    'The original review must use the frozen reviewer effort and output budget.')
+  const sqliteRetention = process.argv.includes('--sqlite-retention')
+  const handoffPath = join(outDir, sqliteRetention ? 'external-prose.sqlite' : 'external-prose.json')
+  if (sqliteRetention) {
+    const storage = new h.SqliteStorageService(handoffPath, { legacyJsonPath: join(outDir, 'no-legacy-handoff.json') })
+    try { await storage.save(preparedData) } finally { storage.close() }
+  } else await writeFile(handoffPath, JSON.stringify(preparedData), 'utf8')
+  const handoffRuntime = () => h.loadAgentRuntimeData({ storagePath: handoffPath, userDataPath: outDir })
+  const writer = fakeWorkflowAI()
+  const reviews = { noveltyBodies: [], qualityModels: [], qualityRequests: [] }
+  const runHandoff = async extra => h.executeAgentChapterPipeline({ runtime: await handoffRuntime(),
+    jobId: prepared.job.id, agentRunId: prepared.agentRun.id, ...extra },
+    { workflowAI: writer.service, diagnostics: fakeDiagnostics(h, reviews) })
+  const awaiting = await runHandoff({ stopAfterStep: 'build_prompt', estimatedWordCount: '2400-3000' })
+  assert(awaiting.job.status === 'paused' && !awaiting.failedStep && !awaiting.draftIds.length, 'Pause only after the real plan and rebuilt prompt.', awaiting.failedStep)
+  const tool = (name, args) => h.AgentToolService.callTool({ name, arguments: { storagePath: handoffPath, userDataPath: outDir, ...args } })
+  const workItem = (await tool('agent.getChapterWorkItem', { projectId: prepared.job.projectId, agentRunId: prepared.agentRun.id })).data
+  assert(workItem.state === 'awaiting_prose_draft' && workItem.nextAction.tool === 'agent.getChapterDraftHandoff' &&
+    !JSON.stringify(workItem).includes('Authoritative chapter task:'), 'Compact reconnect should point to the full handoff.', workItem)
+  const handoff = (await tool(workItem.nextAction.tool, workItem.nextAction.arguments)).data
+  assert(handoff.kind === 'awaiting_prose_draft' && handoff.plan.chapterTitle && handoff.messages[1].content.includes(primaryTask.goal),
+    'The writer must receive the formal task and actual writing messages.')
+  assert(!Object.hasOwn(draft, 'actorTag'), 'An untagged model draft must not acquire a source label.')
+  const submission = { title: draft.title, body: fake.body, handoffId: handoff.handoffId, actorTag: '主笔' }
+  const submitTool = extra => tool('agent.submitChapterDraft', { ...handoff.nextAction.arguments, ...submission, ...extra })
+  const beforeInvalidTag = (await handoffRuntime()).revision
+  for (const actorTag of [null, 42, '', '  ', '主笔\n', '\t主笔', 'a\u0085b', 'a\u202eb', 'a'.repeat(49)]) {
+    await submitTool({ actorTag }).then(() => { throw new Error('Accepted invalid tag.') },
+      error => assert(/actorTag/.test(String(error)), 'Invalid tag must fail before capture.'))
+  }
+  assert((await handoffRuntime()).revision === beforeInvalidTag, 'Rejected tags must not change the book.')
+  await runHandoff({ agentDraftSubmission: { ...submission, handoffId: 'obsolete' } }).then(
+    () => { throw new Error('Accepted stale handoff.') }, error => assert(/失效/.test(String(error)), 'Reject stale handoff before review.'))
+  const invalid = await runHandoff({ agentDraftSubmission: { ...submission, body: '短。' } })
+  assert(invalid.failedStep?.type === 'generate_chapter_draft' && !invalid.draftIds.length && !reviews.noveltyBodies.length,
+    'Unusable prose must be returned to the writer without paid repair or review.', invalid.failedStep)
+  const received = await runHandoff({ agentDraftSubmission: submission })
+  assert(!received.failedStep && received.completedStepCount === h.AGENT_PIPELINE_STEP_ORDER.length, 'Submitted draft must pass through the remaining steps.', received.failedStep)
+  assert(received.draftIds.length === 1 && received.appData.generatedChapterDrafts.find(d => d.id === received.draftIds[0]).proseSource === 'agent_handoff' &&
+    writer.captures.planOptions.length === 1 && writer.captures.draftOptions.length === 0, 'Exactly one plan, one Agent draft, zero provider prose requests.')
+  assert(reviews.noveltyBodies.includes(fake.body) && received.appData.qualityGateReports.some(r => r.draftContentHash === h.draftContentHash(fake.body)) &&
+    !received.appData.chapterCommitBundles.length, 'Review submitted content, never auto-accept.')
+  const afterSubmission = await handoffRuntime()
+  const reviewedCount = reviews.noveltyBodies.length
+  const replay = await submitTool({ actorTag: ' 主笔 ' })
+  assert(replay.data.workItem.draft.id === received.draftIds[0] && replay.data.workItem.draft.actorTag === '主笔',
+    'An exact replay must read the original labelled draft from the work item.')
+  for (const patch of [{ actorTag: '精修' }, { actorTag: undefined }, { title: '另稿' }, { body: fake.body + '改' }]) {
+    await submitTool(patch).then(() => { throw new Error('Rebound consumed handoff.') },
+      error => assert(/已收稿/.test(String(error)), 'A replay cannot change the source, title or body.'))
+  }
+  assert((await handoffRuntime()).revision === afterSubmission.revision && reviews.noveltyBodies.length === reviewedCount,
+    'Neither replay nor a conflicting label may write or repeat review.')
+  const oldPath = join(outDir, 'legacy-handoff.json')
+  const oldData = structuredClone(afterSubmission.data)
+  const oldDraft = oldData.generatedChapterDrafts.find(d => d.id === received.draftIds[0])
+  delete oldDraft.actorTag
+  const oldFields = [prepared.agentRun.id, prepared.job.id, submission.handoffId, submission.title, submission.body]
+  oldDraft.handoffReceipt.submissionHash = createHash('sha256').update(JSON.stringify(oldFields)).digest('hex')
+  oldDraft.body += '作者交稿后手改。'
+  await writeFile(oldPath, JSON.stringify(oldData))
+  const oldRevision = async () => (await h.loadAgentRuntimeData({ storagePath: oldPath, userDataPath: outDir })).revision
+  const oldBefore = await oldRevision()
+  const legacyReplay = await submitTool({ storagePath: oldPath, actorTag: undefined })
+  assert(legacyReplay.data.workItem.draft.id === oldDraft.id && !Object.hasOwn(legacyReplay.data.workItem.draft, 'actorTag'),
+    'The five-field pre-tag receipt must replay without a guessed label, even after a manual edit.')
+  await submitTool({ storagePath: oldPath, actorTag: '主笔' }).then(() => { throw new Error('Retagged legacy submission.') },
+    error => assert(/已收稿/.test(String(error)), 'An untagged legacy handoff cannot be retagged.'))
+  assert(await oldRevision() === oldBefore, 'Legacy replay must leave the revision untouched.')
+  // Retry a real persisted job using stubbed transports. Only the failed role may change.
+  const switchPath = join(outDir, 'review-channel-switch.json')
+  await writeFile(switchPath, JSON.stringify(preparedData), 'utf8')
+  const switchedRuntime = await h.loadAgentRuntimeData({ storagePath: switchPath, userDataPath: outDir })
+  const switchAI = fakeWorkflowAI()
+  const switchCaptures = { noveltyBodies: [], qualityModels: [], qualityRequests: [] }
+  const switchArgs = { runtime: switchedRuntime, agentRunId: prepared.agentRun.id, jobId: prepared.job.id }
+  const stopped = await h.executeAgentChapterPipeline(switchArgs, { workflowAI: switchAI.service,
+    diagnostics: { ...fakeDiagnostics(h, switchCaptures), async evaluateQualityGate() { throw new Error('429 insufficient_quota (fixture)') } } })
+  assert(stopped.failedStep?.type === 'quality_gate', 'Quota failure must preserve the review checkpoint.', stopped.failedStep)
+  await verifyChannelRetry(h, { outDir, isolatedProfile, switchPath, agentRunId: switchArgs.agentRunId, jobId: switchArgs.jobId, report })
+  const resumedReview = await h.executeAgentChapterPipeline({ ...switchArgs, refreshModelConfigFromSettings: true },
+    { workflowAI: switchAI.service, diagnostics: fakeDiagnostics(h, switchCaptures) })
+  assert(!resumedReview.failedStep && resumedReview.startedFromStep === 'quality_gate', 'Resume only the failed review.', resumedReview.failedStep)
+  assert(switchCaptures.qualityModels.at(-1) === 'later-settings-model' && resumedReview.job.aiRunConfig.roles.prose.modelName === 'run-snapshot-model',
+    'The review transport must see the new model and prose must retain the original model.')
+  const refreshed = switchCaptures.qualityRequests.at(-1).settings
+  const frozenProse = resumedReview.job.aiRunConfig.roles.prose
+  assert(refreshed.reasoningEffort === 'medium' && refreshed.maxTokens === 4096 &&
+    frozenProse.reasoningEffort === 'high' && frozenProse.maxTokens === 8192,
+    'A reviewer refresh must take its new effort and output budget without changing the frozen prose settings.')
+  assert(switchAI.captures.draftOptions.length === 1 && stopped.draftIds[0] && stopped.draftIds[0] === resumedReview.draftIds[0],
+    'Recovering review must not rewrite or replace the draft.')
+  assert(resumedReview.agentRun.decisions.some(d => d.evidence.some(e => e.includes('reviewer') && e.includes('later-settings-model'))),
+    'The model switch must survive in the run history.')
   assert(
       captures.qualityRequests.length === 1 &&
       captures.qualityRequests[0].targetChapterOrder === 2 &&
@@ -1213,7 +1319,6 @@ async function main() {
   // Prose is already paid for when local diagnostics begin. Reopen the actual isolated file inside the fault.
   const recoveryRun = h.AgentRunService.prepareSingleChapterRun({ appData: fixture(h), projectId: prepared.job.projectId,
     targetChapterOrder: 2, goal: '验证超限草稿在审稿失败时仍可找回。', chapterTaskSnapshot: { ...primaryTask, targetWordCount: '1200-1300' } })
-  const sqliteRetention = process.argv.includes('--sqlite-retention')
   const recoveryPath = join(outDir, sqliteRetention ? 'retained-overflow.sqlite' : 'retained-overflow.json')
   if (sqliteRetention) {
     const storage = new h.SqliteStorageService(recoveryPath, { legacyJsonPath: join(outDir, 'absent-retention-legacy.json') })
@@ -1659,6 +1764,8 @@ async function main() {
       {
         ok: true,
         completedStepCount: result.completedStepCount,
+        agentHandoff: { storage: sqliteRetention ? 'sqlite' : 'json', planCalls: writer.captures.planOptions.length,
+          proseProviderCalls: writer.captures.draftOptions.length, reviewCompleted: !received.failedStep, storedDrafts: received.draftIds.length },
         draftId: draft.id,
         retainedDraft: { storage: sqliteRetention ? 'sqlite' : 'json', proseCallsAfterAuditRetry: paidDraftCalls,
           storedDrafts: retainedRows.length, incompleteFragmentStayedOutOfDrafts: true },
@@ -1691,7 +1798,11 @@ async function main() {
   )
 }
 
-main().catch((error) => {
+main().finally(async () => {
+  const target = await realpath(outDir)
+  if (dirname(target) !== tempRoot) throw new Error('Refusing cleanup outside the pipeline test workspace.')
+  await rm(target, { recursive: true, force: true })
+}).catch((error) => {
   console.error(error instanceof Error ? error.stack : String(error))
   process.exit(1)
 })

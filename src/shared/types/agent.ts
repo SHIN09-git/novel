@@ -24,6 +24,7 @@ export type AgentDecisionAction =
 export type AgentDecisionResult = 'applied' | 'skipped' | 'failed' | 'pending_human'
 
 export type AgentActionPreviewType =
+  | 'chapter_settlement'
   | 'chapter_commit'
   | 'revision_commit'
   | 'memory_candidate_batch'
@@ -36,6 +37,7 @@ export type AgentActionPreviewType =
 export type AgentActionPreviewStatus = 'pending' | 'approved' | 'applied' | 'dismissed'
 
 export interface AgentDecision {
+  actorTag?: string
   id: ID
   agentRunId: ID
   projectId: ID
@@ -58,6 +60,7 @@ export interface AgentRun {
   safetyMode: AgentSafetyMode
   targetChapterOrders: number[]
   revisionChapterIds?: ID[]
+  stageNeighbors?: boolean
   status: AgentRunStatus
   createdJobIds: ID[]
   createdDraftIds: ID[]

@@ -4,7 +4,8 @@ import { PipelineRecipeService } from '../../../../../services/PipelineRecipeSer
 import { newId, now } from '../../../utils/format'
 import { appendGenerationRunTraceAiCall, upsertGenerationRunTrace } from '../../../utils/runTrace'
 import type { PipelineStepHandlerContext } from '../pipelineRunnerTypes'
-import { serializeOutput } from '../pipelineUtils'
+import { constrainedSnapshotTask, serializeOutput } from '../pipelineUtils'
+import { taskReviewContext } from '../../../../../services/promptFormatters/chapterTaskConstraints'
 
 export async function runConsistencyReviewStep(ctx: PipelineStepHandlerContext) {
   const { env, state, job, step } = ctx
@@ -27,7 +28,8 @@ export async function runConsistencyReviewStep(ctx: PipelineStepHandlerContext) 
     return
   }
   const aiService = await env.getAiService('reviewer')
-  const result = await aiService.generateConsistencyReview(state.draftResult, state.context)
+  const reviewContext = taskReviewContext(state.context, job.chapterTaskSnapshot ?? constrainedSnapshotTask(ctx.snapshot), job.targetChapterOrder === 1)
+  const result = await aiService.generateConsistencyReview(state.draftResult, reviewContext)
   state.working = appendGenerationRunTraceAiCall(
     state.working,
     job.id,

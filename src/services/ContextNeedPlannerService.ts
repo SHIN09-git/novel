@@ -74,6 +74,8 @@ export class ContextNeedPlannerService {
     const positivelyRequiredCharacterIds = new Set(
       input.characters.filter((item) => textMentions(positiveCharacterText, item.name)).map((item) => item.id)
     )
+    const povCharacterId = input.chapterTaskDraft.povPolicy?.povCharacterId
+    if (povCharacterId) positivelyRequiredCharacterIds.add(povCharacterId)
     const excludedCharacterIds = new Set(
       input.characters
         .filter((item) => textMentions(forbiddenText, item.name) && !positivelyRequiredCharacterIds.has(item.id))
@@ -98,6 +100,7 @@ export class ContextNeedPlannerService {
     }
 
     const characterNeedSlice = buildCharacterNeedPlanSlice({
+      povCharacterId,
       characters: input.characters.filter((item) =>
         !excludedCharacterIds.has(item.id) && (!isolateOpeningLegacyContext || positivelyRequiredCharacterIds.has(item.id))
       ),

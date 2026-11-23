@@ -116,7 +116,7 @@ function createAcceptedDraftChapterVersion(input: {
   }
 }
 
-export function buildAcceptedDraftCommitBundle(input: BuildAcceptedDraftCommitBundleInput): ChapterCommitBundle {
+export function buildAcceptedDraftCommitBundle(input: BuildAcceptedDraftCommitBundleInput): ChapterCommitBundle & { chapterVersion: ChapterVersion } {
   const draft = findDraft(input.appData, input.draftId)
   if (draft.projectId !== input.projectId) {
     throw new Error('ChapterCommitBundle draft projectId does not match projectId.')

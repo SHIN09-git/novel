@@ -127,4 +127,7 @@ export interface ChapterTask {
   readerEmotion: string
   targetWordCount: string
   styleRequirement: string
+  povPolicy?: { mode: string; povCharacterId: ID; perceptionChannels: string[] }
+  storyTimeWindow?: { date: string; weekday?: string; range: string }
+  mustOpenWithBeat?: string
 }

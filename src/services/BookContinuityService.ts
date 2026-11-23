@@ -54,19 +54,27 @@ export function createBookContinuityReader(data: AppData, projectId: ID, cutoff:
     if (from > to) throw new Error('全书核对的起始章不能晚于截止章。')
     const offset = integer(options.offset, 0, 0), limit = Math.min(200, integer(options.limit, 30, 1))
     const counts: Record<BookAuditStatus, number> = { conflict: 0, needs_evidence: 0, open: 0 }
+    let excludedAmbientSeasonHints = 0
     const matched = findings.filter(f => {
       // Keep the earlier end of a cross-range comparison as evidence, not as a new finding in that earlier range.
       if ((options.kind && f.kind !== options.kind) || (endOrder(f) || 1) < from) return false
+      if (options.excludeAmbientSeasonHints && f.kind === 'season' && f.status === 'needs_evidence' && f.ambientSeasonHint) {
+        if (!options.status || options.status === f.status) excludedAmbientSeasonHints++
+        return false
+      }
       counts[f.status]++
       return !options.status || f.status === options.status
     })
-    return { projectId, from, to, total: matched.length, offset, limit, counts, findings: matched.slice(offset, offset + limit) }
+    return { projectId, from, to, total: matched.length, offset, limit, counts,
+      ...(options.excludeAmbientSeasonHints ? { excludedAmbientSeasonHints } : {}), findings: matched.slice(offset, offset + limit) }
   } }
 }
 
 export interface BookContinuityReport {
   projectId: ID; from: number; to: number; total: number; offset: number; limit: number
   counts: Record<BookAuditStatus, number>
+  /** Number omitted by the ambient filter within this query, before pagination. */
+  excludedAmbientSeasonHints?: number
   findings: BookAuditFinding[]
 }
 

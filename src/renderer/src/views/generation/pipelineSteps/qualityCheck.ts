@@ -12,7 +12,8 @@ import { deriveConsistencyReviewFromQualityGate } from '../../../../../services/
 import { PipelineRecipeService } from '../../../../../services/PipelineRecipeService'
 import { characterStatesForProjectAtChapter } from '../../../../../services/characterState/stateAsOf'
 import { appendGenerationRunTraceAiCall, upsertGenerationRunTrace } from '../../../utils/runTrace'
-import { noveltyReferenceContext, serializeOutput } from '../pipelineUtils'
+import { constrainedSnapshotTask, noveltyReferenceContext, serializeOutput } from '../pipelineUtils'
+import { taskReviewContext } from '../../../../../services/promptFormatters/chapterTaskConstraints'
 import type { PipelineStepHandlerContext } from '../pipelineRunnerTypes'
 import { finalizeEditorialVerdict } from '../pipelineEditorialVerdict'
 
@@ -68,7 +69,7 @@ export async function runQualityGateStep(ctx: PipelineStepHandlerContext) {
     chapterId: currentDraft?.chapterId ?? null,
     draftId: currentDraft?.id ?? null,
     chapterDraft,
-    context: state.context,
+    context: job.chapterTaskSnapshot ? state.context : taskReviewContext(state.context, constrainedSnapshotTask(ctx.snapshot), job.targetChapterOrder === 1),
     chapterPlan: state.plan,
     consistencyReports: latestConsistencyReports,
     noveltyAuditResult: state.noveltyAuditResult,

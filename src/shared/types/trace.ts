@@ -370,6 +370,8 @@ export interface ChapterCommitBundle {
   actor?: { kind: 'agent'; agentRunId: ID; actionPreviewId: ID; authorizationGrantId?: ID }
   /** Missing on legacy commits; never infer a passed review from that absence. */
   acceptanceReview?: ChapterAcceptanceReview
+  /** Explicit official title from the Agent acceptance preview; the source draft keeps its reviewed title. */
+  finalTitle?: string
   chapter: Chapter
   chapterVersion?: ChapterVersion
   previousChapterVersion?: ChapterVersion

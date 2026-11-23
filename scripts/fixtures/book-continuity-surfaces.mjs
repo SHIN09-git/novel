@@ -15,6 +15,9 @@ export function continuitySurfaceFixture() {
   const chapters = Array.from({ length: 96 }, (_, i) => chapter(projectId, i + 1, '渡口的灯照常亮起。'))
   chapters[1].body = firstQuote + '\n木桌上压着一页封存附记。'
   chapters[4].body = laterQuote + '\n' + promiseQuote + '\n门外有人叩了三声。'
+  chapters[6].body = '窗外泛起深秋的凉意。城里已是深秋。'
+  chapters[7].body = '山头浮着初冬的晚霞。今日立冬。'
+  chapters[8].body = '灯影像春天一般温暖。山中正值暮春。'
   const fact = (id, n, evidence, patch) => ({ id, projectId, characterId, key: id, label: '现金',
     category: 'resource', valueType: 'number', value: 10, unit: '文', status: 'active',
     sourceChapterId: chapters[n - 1].id, sourceChapterOrder: n, evidence, ...dates, ...patch })

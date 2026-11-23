@@ -10,9 +10,10 @@ import type {
   PipelineStepEscalation
 } from '../types'
 import { createEmptyChapterTask } from '../defaults/index'
+import { CHAPTER_TASK_FIELDS, readTaskConstraints } from '../chapterTaskConstraints'
 import { objectOrEmpty, stringArrayValue, stringValue } from './common'
 
-export function normalizeChapterTask(value: unknown): ChapterTask {
+export function normalizeChapterTask(value: unknown, strictConstraints = false): ChapterTask {
   const task = objectOrEmpty(value)
   return {
     goal: stringValue(task.goal),
@@ -23,14 +24,15 @@ export function normalizeChapterTask(value: unknown): ChapterTask {
     endingHook: stringValue(task.endingHook),
     readerEmotion: stringValue(task.readerEmotion),
     targetWordCount: stringValue(task.targetWordCount) || createEmptyChapterTask().targetWordCount,
-    styleRequirement: stringValue(task.styleRequirement)
+    styleRequirement: stringValue(task.styleRequirement),
+    ...readTaskConstraints(task, strictConstraints)
   }
 }
 
 export function normalizeChapterTaskEdit(value: unknown): ChapterTaskEdit | null {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return null
   const edit = objectOrEmpty(value)
-  const fields = Object.keys(createEmptyChapterTask())
+  const fields: readonly string[] = CHAPTER_TASK_FIELDS
   return {
     sourceJobId: stringValue(edit.sourceJobId) || null,
     sourcePromptContextSnapshotId: stringValue(edit.sourcePromptContextSnapshotId) || null,

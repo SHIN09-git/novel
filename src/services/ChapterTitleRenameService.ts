@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto'
-import { isTitlePrefixMode } from '../shared/normalizers/chapterTitle'
+import { isTitlePrefixMode, normalizeManualChapterTitle } from '../shared/normalizers/chapterTitle'
 import type { Chapter, ChapterTitleActor, ChapterTitleCommit, ChapterTitlePreview, ChapterTitleReceipt, ChapterTitleRename, ChapterTitleRow } from '../shared/types'
 import { StorageRevisionConflictError } from '../storage/StorageService'
 import { stableDecisionJson } from './candidateDecisionPrimitives'
@@ -38,10 +38,7 @@ export function parseChapterTitleRename(input: unknown): ChapterTitleRename {
     if (seen.has(chapterId)) throw new Error('改名列表中不能重复选择同一章。')
     seen.add(chapterId)
     if (edit.title === undefined && mode !== 'manual') return { chapterId }
-    if (typeof edit.title !== 'string' || !edit.title.trim() || /[\u0000-\u001f\u007f\u2028\u2029]/u.test(edit.title)) {
-      throw new Error('请为所选章节填写非空的单行标题。')
-    }
-    return { chapterId, title: edit.title.trim() }
+    return { chapterId, title: normalizeManualChapterTitle(edit.title) }
   }).sort((a, b) => a.chapterId < b.chapterId ? -1 : 1)
   return { projectId: id(raw.projectId), operationId: id(raw.operationId), prefixMode: mode, edits }
 }

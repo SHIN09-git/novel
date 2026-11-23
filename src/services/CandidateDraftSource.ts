@@ -46,6 +46,20 @@ export function readCandidateDraftSource(data: Library, candidate: Candidate): {
 
 export const STALE_CANDIDATE_SOURCE = '候选来自已替换、拒绝或缺失的正文。请按当前正文重新提取，或拒绝旧候选。'
 
+/** Archive is a projection, not a rejection. Unbound legacy candidates remain visible. */
+export function pendingInboxSources(data: AppData, projectId: string, staleOnly = false) {
+  const cache = new Map<string, boolean>()
+  const include = (candidate: Candidate) => {
+    if (candidate.projectId !== projectId || candidate.status !== 'pending') return false
+    const binding = JSON.stringify([candidate.jobId, candidate.sourceDraftId, candidate.sourceDraftContentHash,
+      'proposedTransaction' in candidate ? candidate.proposedTransaction?.sourceBodyHash : null])
+    if (!cache.has(binding)) cache.set(binding, readCandidateDraftSource(data, candidate).status === 'stale')
+    return cache.get(binding) === staleOnly
+  }
+  return { memoryCandidates: data.memoryUpdateCandidates.filter(include),
+    characterStateChangeCandidates: data.characterStateChangeCandidates.filter(include) }
+}
+
 export function assertCandidateDraftSource(data: Library, candidate: Candidate): void {
   if (readCandidateDraftSource(data, candidate).status === 'stale') {
     throw new CandidateDecisionError(STALE_CANDIDATE_SOURCE, 'CANDIDATE_SOURCE_STALE')

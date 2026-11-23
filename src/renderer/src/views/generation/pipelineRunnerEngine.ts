@@ -142,6 +142,7 @@ export async function runPipelineFromStepEngine(
       }
       await runPipelineStep(type, handlerContext)
       await persistWorking(state.working, jobId)
+      if (type === 'generate_chapter_draft' && state.working.chapterGenerationJobs.find(item => item.id === jobId)?.status === 'paused') break
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error)
       state.working = updateStepInData(state.working, step.id, { status: 'failed', errorMessage: message }, { status: 'failed', errorMessage: message })

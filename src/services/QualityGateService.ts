@@ -23,6 +23,7 @@ import {
   shouldQualityGateRequireHumanReview
 } from '../shared/qualityGatePolicy'
 import { NoveltyDetector } from './NoveltyDetector'
+import { taskReviewContext } from './promptFormatters/chapterTaskConstraints'
 import { draftContentHash } from './DraftDiagnosticBindingService'
 import { hardCanonAuditMatchesBody, withCurrentHardCanonAudit } from './qualityGate/hardCanonQuality'
 import { activeConsistencyIssues, applyConsistencyFindings, applyLocalGuardrails, applyNoveltyAudit } from './qualityGate/evaluationMergers'
@@ -83,7 +84,7 @@ function consistencyDiagnosticsContext(options: EvaluateQualityGateOptions): str
 }
 
 export class QualityGateService {
-  static async evaluateChapterDraft(options: EvaluateQualityGateOptions): Promise<QualityGateReport> {
+  static async evaluateChapterDraft(options: EvaluateQualityGateOptions, errataBaseBody?: string): Promise<QualityGateReport> {
     const body = draftBody(options.chapterDraft)
     const contentHash = draftContentHash(body)
     const audit = options.hardCanonAudit
@@ -99,16 +100,16 @@ export class QualityGateService {
       options.characterStateFacts,
       options.characters ?? [],
       options.chapterTask,
-      options.redundancyReport
+      options.redundancyReport,
+      errataBaseBody
     )
     let evaluation: QualityGateEvaluation | null = null
     let aiTelemetry: AiCallTelemetry | undefined
     if (options.aiService) {
       const result = await options.aiService.generateQualityGateReport(
         options.chapterDraft,
-        reviewContext,
-        options.chapterPlan,
-        {
+        taskReviewContext(reviewContext, options.chapterTask, options.targetChapterOrder === 1),
+        options.chapterPlan, {
           targetChapterOrder: options.targetChapterOrder,
           hasAuthoritativeChapterTask: options.hasAuthoritativeChapterTask
         }

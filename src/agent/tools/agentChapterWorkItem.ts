@@ -2,11 +2,13 @@ import type { AgentRun, AppData, ChapterGenerationJob, GeneratedChapterDraft } f
 import type { AgentGrantAction } from '../../shared/types/agentAuthorization'
 import { redactSensitiveText } from '../../shared/errorUtils'
 import { hasCurrentChapterFragment } from '../../shared/chapterStepFragment'
+import { readChapterProseHandoff } from '../../shared/chapterProseHandoff'
 import { AgentAuthorizationService } from '../../main/services/AgentAuthorizationService'
 import { AuthorDecisionPolicyService } from '../../services/AuthorDecisionPolicyService'
 import { createBookWritebackIndex } from '../../services/BookWritebackService'
 import { hasCompleteChapterReview } from '../../services/ChapterAcceptanceReviewService'
 import { ChapterTaskContractService } from '../../services/ChapterTaskContractService'
+import { getPipelineRoleForStep } from '../../services/PipelineRunContextService'
 import { findActiveChapterByOrder } from '../../services/ChapterLifecycleService'
 import { isProjectArchived } from '../../services/ProjectLifecycleService'
 import { currentHardCanonAudit } from '../../services/HardCanonPreflight'
@@ -22,6 +24,7 @@ import { AGENT_PIPELINE_STEP_ORDER } from '../AgentRunService'
 import type { AgentRuntimeData } from '../AgentRuntime'
 import { compact } from '../agentReadableText'
 import { getAgentChapterTask } from './agentChapterTaskTools'
+import { stagedSeamStatus } from '../revision/agentStagedRevisionNeighbors'
 import { findProjectId, requiredString } from './agentToolArguments'
 
 function action(tool: string, args: Record<string, unknown>, requiresInput: string[] = []) {
@@ -72,8 +75,9 @@ async function draftReview(
   const qualityStatus = AuthorDecisionPolicyService.assessQualityGate(review.quality && withCurrentHardCanonAudit(review.quality, canon)).status
   const bookCreative = Boolean(runtime.storagePath && await new AgentAuthorizationService(runtime.userDataPath)
     .requiresReviewedCommits(runtime.storagePath, run.projectId))
-  const needsPassingReview = bookCreative && (!complete || !['passed', 'needs_review'].includes(qualityStatus) ||
-    review.editorial?.status === 'blocked' || review.quality?.issues.some(issue => issue.type === 'manual_review_required'))
+  const passingReview = complete && ['passed', 'needs_review'].includes(qualityStatus) &&
+    review.editorial?.status !== 'blocked' && !review.quality?.issues.some(issue => issue.type === 'manual_review_required')
+  const needsPassingReview = bookCreative && !passingReview
   const canonBlocked = Boolean(canon?.findings.some(finding => finding.severity === 'block'))
   const mode = complete ? 'reviewed' as const : 'unreviewed' as const
   const requiredActions: AgentGrantAction[] = complete ? ['accept_draft'] : ['accept_draft', 'accept_unreviewed_draft']
@@ -99,6 +103,7 @@ async function draftReview(
   return {
     draft: {
       id: draft.id, draftContentHash, updatedAt: draft.updatedAt,
+      ...(draft.actorTag ? { actorTag: summaryText(data, draft.actorTag) } : {}),
       title: summaryText(data, draft.title, 120), wordCount: visibleCharacterCount(draft.body),
       read: action('agent.getDraftText', { draftId: draft.id, expectedDraftContentHash: draftContentHash, detail: 'full' })
     },
@@ -118,6 +123,7 @@ async function draftReview(
         needsPassingReview ? 'needs_passing_review' : grant === 'granted' ? 'available'
         : grant === 'required' ? 'needs_authorization' : 'authorization_unavailable',
       mode, requiredActions, checkedAuthorization: grant,
+      ...(passingReview && canPreview && grant === 'granted' ? { settlementTool: 'agent.previewChapterSettlement' } : {}),
       ...(grant === 'granted' && canPreview ? { preview: action('agent.previewChapterAcceptance',
         { ...scoped, agentRunId: run.id, mode, expectedQualityGateReportId: review.quality?.id ?? null,
           expectedEditorialVerdictId: review.editorial?.id ?? null }, ['operationId', 'reason']) } : {})
@@ -148,7 +154,8 @@ export async function readAgentChapterWorkItem(runtime: AgentRuntimeData, args: 
   const { run, pending, lastReceipt } = active[0] ?? candidates[0]
   const common = { projectId, agentRunId: run.id }
   const range = { from: Math.min(...run.targetChapterOrders), to: Math.max(...run.targetChapterOrders), count: run.targetChapterOrders.length }
-  const head = { ...common, runStatus: run.status, range, lastReceipt }
+  const head = { ...common, runStatus: run.status, range, lastReceipt,
+    ...(run.stageNeighbors ? { stagedSeams: stagedSeamStatus(data, run) } : {}) }
   if (!pending) return { ...head, state: 'complete' as const, nextAction: null }
 
   const chapterOrder = pending.chapterOrder
@@ -194,6 +201,11 @@ export async function readAgentChapterWorkItem(runtime: AgentRuntimeData, args: 
       steps.some(step => step.type === type && step.status === 'completed')) ?? null } }
   const progress = action('agent.getPipelineProgress', { jobId: job.id })
   const resume = action('agent.retryChapterPipeline', { agentRunId: run.id, jobId: job.id, responseMode: 'work_item' })
+  const retryOption = resumeFrom && getPipelineRoleForStep(resumeFrom) &&
+    steps.some(s => s.type === resumeFrom && s.status === 'failed')
+    ? { retryWithSavedRole: action(resume.tool, { ...resume.arguments, refreshModelConfigFromSettings: true }),
+        listAvailableChannels: action('agent.listAvailableChannels', {}),
+        retryWithChannel: action(resume.tool, { ...resume.arguments, expectedFailedStep: resumeFrom }, ['registryServiceId']) } : {}
   const readDiagnostics = action('agent.getRunDiagnostics', { jobId: job.id, ...(fragment ? { detail: 'full' } : {}) })
   // Older processes did not publish claims. A persisted running job alone
   // cannot establish that those executors have stopped.
@@ -207,6 +219,11 @@ export async function readAgentChapterWorkItem(runtime: AgentRuntimeData, args: 
     return { ...jobWork, state: 'check_writeback' as const, reason: pending.reason,
       nextAction: failure?.revisionVersionId ? action('agent.getRevisionVersion', { projectId, versionId: failure.revisionVersionId })
         : action('agent.getBookProgress', { projectId, fromChapter: chapterOrder, toChapter: chapterOrder }) }
+  }
+  if (job.proseMode === 'agent_handoff' && resumeFrom === 'generate_chapter_draft' &&
+      readChapterProseHandoff(steps.find(s => s.type === resumeFrom))) {
+    return { ...jobWork, state: 'awaiting_prose_draft' as const, ...(job.errorMessage ? { problem: summaryText(data, job.errorMessage, 300) } : {}),
+      nextAction: action('agent.getChapterDraftHandoff', { jobId: job.id }) }
   }
   const decision = !fragment && draft ? currentAgentDraftDecision(run, draft) : null
   const directorDecision = decision ? {
@@ -225,11 +242,12 @@ export async function readAgentChapterWorkItem(runtime: AgentRuntimeData, args: 
       decide: action('agent.recordDraftDecision', { ...common, draftId: draft.id,
         expectedDraftContentHash: result.draft.draftContentHash }, ['operationId', 'reason', 'decision']),
       ...(job.errorMessage ? { problem: summaryText(data, job.errorMessage, 300) } : {}),
-      ...(!result.review.complete && resumeFrom ? { resume } : {}),
+      ...(!result.review.complete && resumeFrom ? { resume, ...retryOption } : {}),
       ...(pending.writebackFailure ? { writeback: { id: pending.writebackFailure.id, reason: pending.reason } } : {}),
       nextAction: result.draft.read }
   }
   if (resumeFrom) return { ...jobWork, state: 'resume_pipeline' as const,
+    ...retryOption,
     ...(fragment ? { fragment: readDiagnostics } : {}),
     ...(job.errorMessage ? { problem: summaryText(data, job.errorMessage, 300) } : {}),
     ...(!fragment && !steps.some(step => step.status === 'completed') ? { editTask, task: planningTask() } : {}), nextAction: resume }

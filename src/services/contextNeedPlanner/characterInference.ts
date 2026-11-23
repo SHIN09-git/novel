@@ -21,6 +21,7 @@ interface CharacterNeedCandidate extends ExpectedCharacterNeed {
 }
 
 export interface InferExpectedCharacterNeedsInput {
+  povCharacterId?: ID
   characters: Character[]
   taskText: string
   storyDirectionText: string
@@ -160,6 +161,10 @@ export function inferExpectedCharacterNeeds(input: InferExpectedCharacterNeedsIn
   }
 
   for (const character of input.characters) {
+    if (character.id === input.povCharacterId) upsert({
+      characterId: character.id, roleInChapter: inferRoleInChapter(character, input.taskText), expectedPresence: 'onstage',
+      involvement: 'present', stateCheckRequired: true, uncertain: false, reason: '章节任务指定的视角角色。', evidenceRank: 120
+    })
     upsert(explicitCandidate(character, input.taskText, 'task'))
     upsert(explicitCandidate(character, bridgeText(input.continuityBridge), 'bridge'))
     upsert(explicitCandidate(character, input.storyDirectionText, 'story_direction'))

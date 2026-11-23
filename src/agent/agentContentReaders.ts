@@ -42,6 +42,7 @@ export function getDraftText(
     projectId: draft.projectId,
     chapterId: draft.chapterId,
     jobId: draft.jobId,
+    ...(draft.proseSource ? { proseSource: draft.proseSource } : {}),
     status: draft.status,
     tokenEstimate: draft.tokenEstimate,
     updatedAt: draft.updatedAt

@@ -4,7 +4,7 @@ import { createRequire } from 'node:module'
 import { dirname, extname, resolve } from 'node:path'
 import type { AppData, CandidateDecisionCommand, Character, CharacterCardReviewCommand, ChapterCommitBundle, ChapterWritebackFailure, GenerationRunBundle, RevisionCommitBundle } from '../shared/types'
 import type { CandidateDecisionWriteResult, CharacterCardReviewWriteResult, StorageWriteResult } from '../shared/ipc/ipcTypes'
-import { normalizeAppData, sanitizeAppDataForPersistence } from '../shared/defaults'
+import { DEFAULT_SETTINGS, normalizeAppData, sanitizeAppDataForPersistence } from '../shared/defaults'
 import { normalizeChapterWritebackFailure } from '../shared/normalizers/chapterWritebackFailures'
 import { applyCharacterCardReview, CHARACTER_CARD_REVIEW_COLLECTIONS } from '../services/characterState/cardReview'
 import { applyChapterCommitBundleToAppData } from '../services/ChapterCommitBundleService'
@@ -102,7 +102,7 @@ export function loadSqliteUsageHistoryReadonly(storagePath: string, projectId: s
 }
 
 export async function loadSqliteCollectionsReadonly(
-  storagePath: string, collections: readonly AppDataArrayKey[], projectSelector?: string
+  storagePath: string, collections: readonly AppDataArrayKey[], projectSelector?: string, options?: { redactLegacyKey: boolean }
 ): Promise<{ data: Partial<AppData>; revision: string }> {
   return readSqliteReadonly(storagePath, (db) => {
     let projectId: string | undefined
@@ -113,7 +113,12 @@ export async function loadSqliteCollectionsReadonly(
       if (rows.length > 1 && rows[0].id !== projectSelector) throw new Error('书库有同名作品，请使用明确的 projectId。')
       projectId = rows[0].id
     }
-    return { data: readAppDataCollectionsFromDatabase(db, collections, projectId), revision: currentRevisionFromDatabase(db) }
+    const data = readAppDataCollectionsFromDatabase(db, collections, projectId)
+    if (options?.redactLegacyKey) {
+      const key = db.prepare("SELECT json_extract(json, '$.apiKey') AS legacy FROM app_settings WHERE id = ?").get(SETTINGS_ROW_ID)?.legacy
+      if (typeof key === 'string' && key) data.settings = { ...DEFAULT_SETTINGS, apiKey: key }
+    }
+    return { data, revision: currentRevisionFromDatabase(db) }
   })
 }
 

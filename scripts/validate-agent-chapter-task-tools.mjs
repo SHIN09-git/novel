@@ -44,6 +44,8 @@ try {
       contents: `
         export * from './src/agent/tools/agentChapterTaskTools';
         export * from './src/agent/tools/agentChapterTaskDefinitions';
+        export * from './src/agent/tools/agentToolDefinitions';
+        export { chapterTaskArg } from './src/agent/tools/agentToolArguments';
         export * from './src/agent/AgentRuntime';
         export * from './src/main/services/AgentAuthorizationService';
         export * from './src/shared/defaults';
@@ -64,6 +66,8 @@ try {
   const api = await import(pathToFileURL(outfile).href)
   const timestamp = '2026-09-07T08:00:00.000Z'
   const copy = (value) => structuredClone(value)
+  const constraints = { povPolicy: { mode: 'third_limited_single', povCharacterId: 'character-1', perceptionChannels: ['on_site', 'kook_audio'] },
+    storyTimeWindow: { date: '2026-08-28', weekday: '周五', range: '20:57–20:59' }, mustOpenWithBeat: '先接住松脱的绳索。' }
 
   function task(goal = '沈禾在旧桥寻找信使。') {
     return {
@@ -149,13 +153,15 @@ try {
       const read = await h.read({ chapterOrder: 2, sourceJobId: null, sourceSnapshotId: null })
       assert.equal(read.payload.source.kind, 'derived')
       assert.equal(read.payload.editReference.sourceJobId, null)
-      const editedTask = task('沈禾沿绳索找到被水淹没的渡船。')
+      const editedTask = { ...task('沈禾沿绳索找到被水淹没的渡船。'), ...copy(constraints) }
       const command = {
         chapterOrder: 2, sourceJobId: null, sourceSnapshotId: null,
         agentRunId: 'run-p1', operationId: `edit-${kind}`, reason: '推进渡口冲突。', task: editedTask,
         budgetMode: 'standard', budgetMaxTokens: 12000, pipelineMode: 'standard'
       }
       const before = await h.runtime()
+      await assert.rejects(h.write('agent.previewChapterTaskEdit', { ...command, task: { ...editedTask,
+        storyTimeWindow: { ...constraints.storyTimeWindow, weekday: '周四' } } }, before), /2026-08-28 是周五/)
       const preview = await h.write('agent.previewChapterTaskEdit', command, before)
       assert.equal(preview.payload.persisted, false)
       assert.equal(preview.payload.invokesAI, false)
@@ -183,6 +189,7 @@ try {
       const saved = await h.runtime()
       const job = saved.data.chapterGenerationJobs.find((item) => item.id === applied.payload.job.id)
       assert.ok(job)
+      for (const field of Object.keys(constraints)) assert.ok(job.taskEdit.changedFields.includes(field), field)
       const steps = saved.data.chapterGenerationSteps.filter((item) => item.jobId === job.id)
       assert.equal(steps.filter((item) => item.status === 'completed').length, 3)
       assert.ok(steps.find((item) => item.type === 'build_context').output.includes(editedTask.goal))
@@ -231,6 +238,30 @@ try {
       assert.equal(after.data.chapterGenerationJobs.length, 0)
     })
   }
+
+  await test('creation and replacement schemas share optional boundaries; invalid calendar and nested data are rejected', () => {
+    for (const name of ['agent.startAgentRun', 'agent.runChapterPipeline', 'agent.previewChapterTaskEdit', 'agent.applyChapterTaskEdit']) {
+      const props = api.AGENT_TOOL_DEFINITIONS.find(item => item.name === name).inputSchema.properties
+      const schema = props.chapterTask ?? props.task
+      for (const key of Object.keys(constraints)) {
+        assert.ok(schema.properties[key], name + ': ' + key)
+        assert.ok(!schema.required.includes(key))
+      }
+    }
+    const parse = fields => api.chapterTaskArg({ chapterTask: { goal: '过桥', ...fields } })
+    const legacy = parse({})
+    assert.deepEqual(parse(constraints), { ...legacy, ...constraints })
+    assert.ok(Object.keys(constraints).every(k => !(k in legacy)))
+    const window = patch => ({ storyTimeWindow: { ...constraints.storyTimeWindow, ...patch } })
+    assert.equal(parse(window({ date: '2024-02-29', weekday: '星期四' })).storyTimeWindow.weekday, '星期四')
+    assert.throws(() => parse(window({ date: '2026-02-29' })), /公历日期/)
+    assert.throws(() => parse(window({ weekday: '周日' })), /是周五/)
+    assert.throws(() => parse(window({ range: '25:30–25:35' })), /range/)
+    assert.throws(() => parse(window({ range: '20:59–20:57' })), /range/)
+    assert.throws(() => parse({ povPolicy: { ...constraints.povPolicy, perceptionChannels: 'phone' } }), /perceptionChannels/)
+    assert.throws(() => parse({ povPolicy: { ...constraints.povPolicy, extra: true } }), /extra/)
+    assert.throws(() => parse({ mustOpenWithBeat: [] }), /mustOpenWithBeat/)
+  })
 
   await test('manual snapshot read is exact and apply requires explicit fresh context without mutating the snapshot', async () => {
     const h = await harness('json', fixture(true))

@@ -1,3 +1,4 @@
+import { validActorTag } from '../agentActorTag'
 import type {
   AgentActionPreview,
   AgentActionPreviewStatus,
@@ -54,6 +55,7 @@ function normalizeDecisionResult(value: unknown): AgentDecisionResult {
 
 function normalizeActionPreviewType(value: unknown): AgentActionPreviewType {
   const allowed: AgentActionPreviewType[] = [
+    'chapter_settlement',
     'chapter_commit',
     'revision_commit',
     'memory_candidate_batch',
@@ -79,9 +81,11 @@ function numberArrayValue(value: unknown): number[] {
 
 export function normalizeAgentDecision(value: unknown, agentRunIdHint = '', projectIdHint = ''): AgentDecision {
   const raw = objectOrEmpty(value)
+  const actorTag = validActorTag(raw.actorTag)
   const createdAt = stringValue(raw.createdAt) || new Date().toISOString()
   return {
     id: stringValue(raw.id) || `agent-decision-${createdAt}`,
+    ...(actorTag ? { actorTag } : {}),
     agentRunId: stringValue(raw.agentRunId) || agentRunIdHint,
     projectId: stringValue(raw.projectId) || projectIdHint,
     chapterId: stringValue(raw.chapterId) || null,
@@ -109,6 +113,7 @@ export function normalizeAgentRun(value: unknown): AgentRun {
     safetyMode: normalizeSafetyMode(raw.safetyMode),
     targetChapterOrders: numberArrayValue(raw.targetChapterOrders),
     ...(raw.mode === 'book_revision' ? { revisionChapterIds: stringArrayValue(raw.revisionChapterIds) } : {}),
+    ...(raw.mode === 'book_revision' && raw.stageNeighbors === true ? { stageNeighbors: true } : {}),
     status: normalizeRunStatus(raw.status),
     createdJobIds: stringArrayValue(raw.createdJobIds),
     createdDraftIds: stringArrayValue(raw.createdDraftIds),

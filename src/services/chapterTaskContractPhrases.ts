@@ -24,7 +24,7 @@ function compilePhraseRules(task: ChapterTask): { rules: PhraseRule[]; warnings:
   const rules: PhraseRule[] = []
   const warnings: QualityGateIssue[] = []
   for (const [field, value] of Object.entries(task)) {
-    if (field === 'targetWordCount' || typeof value !== 'string') continue
+    if (field === 'targetWordCount' || field === 'mustOpenWithBeat' || typeof value !== 'string') continue
     let priorPhrases: string[] = []
     for (const clause of taskClauses(value)) {
       const quotes = taskQuotes(clause).filter((item) => item.phrase.trim())

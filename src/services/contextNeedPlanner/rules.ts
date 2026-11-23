@@ -42,6 +42,7 @@ const NEGATIVE_TASK_MARKERS = ['不得', '不要', '禁止', '不能', '不可',
 function taskTextFragments(task: Partial<ChapterTask>): string[] {
   return [
     task.goal,
+    task.mustOpenWithBeat,
     task.conflict,
     task.suspenseToKeep,
     task.allowedPayoffs,

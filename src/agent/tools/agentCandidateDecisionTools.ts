@@ -2,6 +2,7 @@ import type { AppData } from '../../shared/types'
 import type { CandidateDecisionAmendment, CandidateDecisionCommand, CandidateDecisionItem, CandidateDecisionPreviewItem, CandidateDecisionReceipt, CandidateDecisionSelection } from '../../shared/types/candidateDecision'
 import { previewCandidateDecisions } from '../../services/CandidateDecisionService'
 import { listDecisionInboxGroups } from '../../services/DecisionInboxService'
+import { pendingInboxSources } from '../../services/CandidateDraftSource'
 import type { AgentRuntimeData } from '../AgentRuntime'
 import { saveAgentCandidateDecision } from '../AgentRuntime'
 import { compact } from '../agentReadableText'
@@ -29,9 +30,9 @@ function validateAgentAmendment(amendment: CandidateDecisionAmendment): void {
   if (legacy.length) throw new Error(`StageSummary legacy fields cannot be amended: ${legacy.join(', ')}.`)
 }
 
-function selections(args: Record<string, unknown>, apply: true): CandidateDecisionItem[]
-function selections(args: Record<string, unknown>, apply: false): CandidateDecisionSelection[]
-function selections(args: Record<string, unknown>, apply: boolean): CandidateDecisionSelection[] {
+export function selections(args: Record<string, unknown>, apply: true): CandidateDecisionItem[]
+export function selections(args: Record<string, unknown>, apply: false): CandidateDecisionSelection[]
+export function selections(args: Record<string, unknown>, apply: boolean): CandidateDecisionSelection[] {
   if (!Array.isArray(args.decisions) || !args.decisions.length || args.decisions.length > 100) {
     throw new Error('decisions must contain between 1 and 100 items.')
   }
@@ -39,15 +40,16 @@ function selections(args: Record<string, unknown>, apply: boolean): CandidateDec
     if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('Each decision must be an object.')
     const item = value as Record<string, unknown>
     checkFields(item, ['kind', 'candidateId', 'decision', 'amendment', ...(apply ? ['expectedFingerprint'] : [])])
-    if (item.kind !== 'memory' && item.kind !== 'character_state') throw new Error('kind must be memory or character_state.')
+    const kind = item.kind === 'memory_update' ? 'memory' : item.kind === 'character_state_change' ? 'character_state' : item.kind
+    if (kind !== 'memory' && kind !== 'character_state') throw new Error('kind must be memory or character_state (inbox aliases also accepted).')
     if (item.decision !== 'accept' && item.decision !== 'reject') throw new Error('decision must be accept or reject.')
     const amendment = item.amendment === undefined ? undefined : normalizeCandidateDecisionAmendment(item.amendment)
     if (item.amendment !== undefined && !amendment) throw new Error('amendment contains unsupported fields or invalid values.')
     if (amendment) validateAgentAmendment(amendment)
     if (amendment && item.decision !== 'accept') throw new Error('Only accepted candidates may include an amendment.')
-    if (amendment && amendment.kind !== item.kind) throw new Error('amendment kind must match decision kind.')
+    if (amendment && amendment.kind !== kind) throw new Error('amendment kind must match decision kind.')
     return {
-      kind: item.kind,
+      kind,
       candidateId: requiredString(item, 'candidateId'),
       decision: item.decision,
       ...(amendment ? { amendment } : {}),
@@ -179,7 +181,8 @@ function receiptForOutput(
 }
 
 export function getAgentDecisionInbox(data: AppData, args: Record<string, unknown>): unknown {
-  checkFields(args, [...commonFields, ...readFields, 'chapterOrder', 'limit', 'offset'])
+  checkFields(args, [...commonFields, ...readFields, 'chapterOrder', 'limit', 'offset', 'staleOnly'])
+  if (args.staleOnly !== undefined && typeof args.staleOnly !== 'boolean') throw new Error('staleOnly must be boolean.')
   const projectId = findProjectId(data, args)
   const text = textReader(data, args)
   const limit = args.limit === undefined ? 20 : requiredPositiveInteger(args, 'limit', 100)
@@ -187,8 +190,7 @@ export function getAgentDecisionInbox(data: AppData, args: Record<string, unknow
   if (typeof offset !== 'number' || !Number.isSafeInteger(offset) || offset < 0) throw new Error('offset must be a non-negative integer.')
   const groups = listDecisionInboxGroups({
     projectId,
-    memoryCandidates: data.memoryUpdateCandidates,
-    characterStateChangeCandidates: data.characterStateChangeCandidates,
+    ...pendingInboxSources(data, projectId, args.staleOnly === true),
     jobs: data.chapterGenerationJobs
   }, { chapterOrder: args.chapterOrder === undefined ? undefined : requiredPositiveInteger(args, 'chapterOrder') })
   const full = readOptions(args).detail === 'full'

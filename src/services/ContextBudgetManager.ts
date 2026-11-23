@@ -10,6 +10,7 @@ import { projectCharacterStatesAtChapter } from './characterState/stateAsOf'
 import { getRelevantCharacterStatesForPrompt } from './characterState/stateSelection'
 import { writingCardAtChapter } from './characterState/writingCard'
 import { isolateOpeningCharacterCards } from './OpeningChapterContextPolicy'
+import { combinedTaskText } from './contextNeedPlanner/rules'
 import type {
   ContextEvaluationCandidate,
   ContextEvaluationOptions,
@@ -42,27 +43,6 @@ import { byScoreThenOrder, mergeUniqueById, scored } from './contextBudget/selec
 import { finalizeContextSelection } from './contextBudget/selectionFinalizer'
 
 export type { ContextEvaluationCandidate, ContextEvaluationOptions } from './contextBudget/types'
-
-const NEGATIVE_TASK_MARKERS = ['不得', '不要', '禁止', '不能', '不可', '不应', '避免']
-
-function positiveTaskText(task: ForcedContextSelection['chapterTask']): string {
-  if (!task) return ''
-  return [
-    task.goal,
-    task.conflict,
-    task.suspenseToKeep,
-    task.allowedPayoffs,
-    task.endingHook,
-    task.readerEmotion,
-    task.targetWordCount,
-    task.styleRequirement
-  ]
-    .filter((value): value is string => typeof value === 'string' && Boolean(value.trim()))
-    .flatMap((value) => value.split(/[。！？；\n，,]+|(?:但是|但|不过|然而)/))
-    .map((value) => value.trim())
-    .filter((value) => value && !NEGATIVE_TASK_MARKERS.some((marker) => value.includes(marker)))
-    .join('\n')
-}
 
 export class ContextBudgetManager {
   static evaluateContext(candidate: ContextEvaluationCandidate, options: ContextEvaluationOptions): number {
@@ -110,10 +90,10 @@ export class ContextBudgetManager {
     data = { ...data, chapters: activeChapters(data.chapters), characterStateFacts: selectedFacts,
       characters: isolateOpeningLegacyContext ? isolateOpeningCharacterCards(characters) :
         characters.map(c => writingCardAtChapter(c, allProjectedFacts, targetChapterOrder, historicalReplay).card) }
-    const openingTaskText = isolateOpeningLegacyContext ? positiveTaskText(forcedSelection.chapterTask) : ''
+    const openingTaskText = isolateOpeningLegacyContext ? combinedTaskText(forcedSelection.chapterTask ?? {}) : ''
     const openingTaskCharacterIds = new Set(
       isolateOpeningLegacyContext
-        ? data.characters.filter((character) => textMentions(openingTaskText, character.name)).map((character) => character.id)
+        ? data.characters.filter((character) => character.id === forcedSelection.chapterTask?.povPolicy?.povCharacterId || textMentions(openingTaskText, character.name)).map((character) => character.id)
         : []
     )
     const manualCharacterIds = new Set(
@@ -121,6 +101,8 @@ export class ContextBudgetManager {
     )
     const manualForeshadowingIds = new Set(isolateOpeningLegacyContext ? [] : (forcedSelection.foreshadowingIds ?? []))
     const forcedCharacterIds = new Set(manualCharacterIds)
+    const povId = forcedSelection.chapterTask?.povPolicy?.povCharacterId
+    if (povId) forcedCharacterIds.add(povId)
     const forcedForeshadowingIds = new Set(manualForeshadowingIds)
     const planCharacterNeeds = (forcedSelection.contextNeedPlan?.expectedCharacters ?? [])
       .filter((item) => !isolateOpeningLegacyContext || openingTaskCharacterIds.has(item.characterId))

@@ -1,4 +1,6 @@
 import { loadAgentRuntimeData } from '../AgentRuntime'
+import { readApiRegistry } from '../../main/services/ApiRegistry'
+import { listAgentModelChannels } from '../agentModelChannels'
 import { handleAgentOverviewReadTool } from './agentOverviewReadHandlers'
 import { isChapterTitleTool, runChapterTitleTool } from './agentChapterTitleTools'
 import { stringArg } from './agentToolArguments'
@@ -29,6 +31,10 @@ export class AgentToolService {
 
   static async callTool(input: AgentToolCallInput): Promise<AgentToolCallResult> {
     const args = input.arguments ?? {}
+    if (input.name === 'agent.listAvailableChannels') {
+      return { tool: input.name, ok: true, storage: { source: 'empty', storagePath: null, userDataPath: null, revision: 'not_applicable' },
+        data: listAgentModelChannels(await readApiRegistry()) }
+    }
     if (isChapterTitleTool(input.name)) return runChapterTitleTool(input.name, args)
     const library = await handleAgentLibraryTool(input.name, args)
     if (library) return library

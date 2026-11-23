@@ -83,6 +83,12 @@ function harness(initial) {
       return tree
     },
     input(name) { return nodes(tree).find((node) => ['input', 'textarea'].includes(node.type) && node.props.name === name) },
+    constraint(label) {
+      const component = nodes(tree).find(n => n.type?.name === 'ChapterTaskConstraintFields')
+      const field = nodes(component.type(component.props)).find(n => n.type === 'label' && text(n).includes(label))
+      return nodes(field).find(n => ['input', 'textarea', 'select'].includes(n.type))
+    },
+    setConstraint(label, target) { api.constraint(label).props.onChange({ target }); api.render() },
     button(label) { return nodes(tree).find((node) => node.type === 'button' && text(node) === label) },
     change(name, value) { api.input(name).props.onChange({ target: { value } }); api.render() },
     save() { nodes(tree).find((node) => node.type === 'form').props.onSubmit({ preventDefault() {} }) },
@@ -103,7 +109,31 @@ assert.match(markup, /来源：已保存的本章任务/)
 assert.match(markup, /角色资料、伏笔选择/)
 assert.match(markup, /旧草稿继续保留/)
 assert.doesNotMatch(markup, /按此任务生成/)
-assert.equal(Object.keys(ui.PIPELINE_TASK_FIELD_LABELS).length, 9)
+assert.deepEqual(Object.keys(ui.PIPELINE_TASK_FIELD_LABELS).sort(),
+  [...Object.keys(original), 'povPolicy', 'storyTimeWindow', 'mustOpenWithBeat'].sort())
+const constraintSaves = []
+const controls = harness({ task: original, busy: false, onSave: async task => { constraintSaves.push(task) } })
+controls.setConstraint('限定叙事视角', { checked: true })
+controls.setConstraint('视角角色 ID', { value: 'pov-1' })
+controls.setConstraint('感知渠道', { value: 'on_site，radio' })
+controls.setConstraint('限定故事时间窗', { checked: true })
+controls.setConstraint('故事日期', { value: '2026-08-28' })
+controls.setConstraint('起止时间', { value: '20:57–20:59' })
+controls.setConstraint('故事星期', { value: '周四' })
+controls.setConstraint('章首动作锚点', { value: '继续拉绳。' })
+controls.save(); await flush(); controls.render()
+assert.equal(constraintSaves.length, 0)
+assert.match(controls.text(), /是周五/)
+controls.setConstraint('故事星期', { value: '周五' })
+controls.save(); await flush(); controls.render()
+assert.deepEqual(constraintSaves[0], { ...original,
+  povPolicy: { mode: 'third_limited_single', povCharacterId: 'pov-1', perceptionChannels: ['on_site', 'radio'] },
+  storyTimeWindow: { date: '2026-08-28', weekday: '周五', range: '20:57–20:59' }, mustOpenWithBeat: '继续拉绳。' })
+controls.setConstraint('限定叙事视角', { checked: false })
+controls.setConstraint('限定故事时间窗', { checked: false })
+controls.setConstraint('章首动作锚点', { value: '' })
+controls.save(); await flush(); controls.render()
+assert.deepEqual(constraintSaves[1], original, 'Clearing optional constraints restores the legacy task shape.')
 
 const saves = []
 const dirtyStates = []

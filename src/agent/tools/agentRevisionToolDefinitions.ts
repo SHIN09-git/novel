@@ -1,4 +1,5 @@
 import { revisionTypeOptions } from '../../renderer/src/views/revision/revisionTypeCatalog'
+import { actorTagSchema } from '../../shared/agentActorTag'
 import type { AgentToolDefinition, JsonSchema } from './agentToolTypes'
 
 const string = { type: 'string', minLength: 1 }
@@ -16,13 +17,16 @@ export const AGENT_REVISION_TOOL_DEFINITIONS: AgentToolDefinition[] = [
   {
     name: 'agent.startBookRevisionBatch', riskLevel: 'write_preview',
     description: 'Register an ordered batch of existing chapters. Pass stable chapter IDs; it opens the first revision work item and does not run AI. Each chapter must be reviewed and committed before reviewing the next.',
-    inputSchema: schema({ operationId: string, goal: string, chapterIds: { type: 'array', items: string, minItems: 1, uniqueItems: true } },
+    inputSchema: schema({ operationId: string, goal: string, stageNeighbors: { type: 'boolean',
+      description: 'Prepare later candidates before reviewing. Review uses the opening of the latest valid next-chapter candidate from this batch. Reviews and commits remain ordered.' },
+      chapterIds: { type: 'array', items: string, minItems: 1, uniqueItems: true } },
       ['operationId', 'goal', 'chapterIds'])
   },
   {
     name: 'agent.reviewRevisionVersion', riskLevel: 'write_preview',
     description: 'Review this exact formal-chapter revision using the configured reviewer model and existing quality gate; save combined continuity evidence. Does not write chapter prose. Reuse operationId to avoid repeated review.',
-    inputSchema: schema({ ...write, ...hashes, versionId: string, expectedVersionHash: string },
+    inputSchema: schema({ ...write, ...hashes, versionId: string, expectedVersionHash: string,
+      mode: { type: 'string', enum: ['full', 'surgical_errata'], description: 'Use surgical_errata for one localized interior correction; new contradictions still block.' } },
       [...writeRequired, ...hashRequired, 'versionId', 'expectedVersionHash'])
   },
   {
@@ -55,7 +59,7 @@ export const AGENT_REVISION_TOOL_DEFINITIONS: AgentToolDefinition[] = [
   {
     name: 'agent.createManualRevisionVersion', riskLevel: 'write_preview',
     description: 'Save caller-written full text as a draft candidate for a full-text revision request, with the same source and request checks as generation. Makes no model call and does not commit a chapter.',
-    inputSchema: schema({ ...write, ...hashes, requestId: string, expectedRequestHash: string, body: string, changedSummary: string },
+    inputSchema: schema({ ...write, ...hashes, requestId: string, expectedRequestHash: string, body: string, changedSummary: string, actorTag: actorTagSchema },
       [...writeRequired, ...hashRequired, 'requestId', 'expectedRequestHash', 'body'])
   },
   {
@@ -72,7 +76,9 @@ export const AGENT_REVISION_TOOL_DEFINITIONS: AgentToolDefinition[] = [
   {
     name: 'agent.previewRevisionCommit', riskLevel: 'write_preview',
     description: 'Preview an exact revision commit. For book creative rights and revision batches, read the passing revision review and supply expectedQualityGateReportId. Changes no chapter/canon/memory.',
-    inputSchema: schema({ ...write, ...hashes, versionId: string, expectedVersionHash: string, expectedQualityGateReportId: string }, [...writeRequired, ...hashRequired, 'versionId', 'expectedVersionHash'])
+    inputSchema: schema({ ...write, ...hashes, versionId: string, expectedVersionHash: string, expectedQualityGateReportId: string,
+      updateSummaryIfAffected: { type: 'boolean', description: 'For a passing surgical_errata review only: preview and atomically mirror a unique verbatim correction in the chapter summary.' } },
+      [...writeRequired, ...hashRequired, 'versionId', 'expectedVersionHash'])
   },
   {
     name: 'agent.applyApprovedRevisionCommit', riskLevel: 'write_commit',

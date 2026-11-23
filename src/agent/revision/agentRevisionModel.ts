@@ -34,6 +34,7 @@ export interface RevisionAudit {
   modelConfigHash?: string
   qualityGateReportId?: string
   consistencyReviewReportId?: string
+  summaryEdit?: { before: string; after: string }
 }
 
 const auditPrefix = 'agent-revision-v1:'
@@ -163,9 +164,10 @@ export function replayRevisionOperation(data: AppData, projectId: string, identi
   return audit
 }
 
-export function recordRevisionOperation(data: AppData, id: string, audit: RevisionAudit, reason: string): AppData {
+export function recordRevisionOperation(data: AppData, id: string, audit: RevisionAudit, reason: string, actorTag?: string): AppData {
   const decision: AgentDecision = {
     id, agentRunId: audit.actor.agentRunId, projectId: audit.source.projectId,
+    ...(actorTag ? { actorTag } : {}),
     chapterId: audit.source.chapterId || null, step: audit.operation, action: 'revise_draft',
     reason, evidence: revisionEvidence(audit), riskLevel: 'medium', result: 'applied', createdAt: new Date().toISOString()
   }

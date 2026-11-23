@@ -16,6 +16,7 @@ import {
   type DecisionInboxEventGroup,
   type DecisionInboxRiskLevel
 } from '../../../services/DecisionInboxService'
+import { pendingInboxSources } from '../../../services/CandidateDraftSource'
 import { useConfirm } from '../components/ConfirmDialog'
 import { Header } from '../components/Layout'
 import { StatusBadge, type BadgeTone } from '../components/UI'
@@ -115,6 +116,7 @@ function DecisionInboxProjectView({ data, project, executeCandidateDecision }: D
   const confirmAction = useConfirm()
   const [view, setView] = useState<'pending' | 'history'>('pending')
   const [filter, setFilter] = useState<InboxFilter>('all')
+  const [staleOnly, setStaleOnly] = useState(false)
   const [selectedCandidateKeys, setSelectedCandidateKeys] = useState<Set<string>>(() => new Set())
   const [feedback, setFeedback] = useState('')
   const [busyLabel, setBusyLabel] = useState<string | null>(null)
@@ -133,10 +135,9 @@ function DecisionInboxProjectView({ data, project, executeCandidateDecision }: D
   [data.candidateDecisionReceipts, project.id])
   const groups = useMemo(() => DecisionInboxService.list({
     projectId: project.id,
-    memoryCandidates: data.memoryUpdateCandidates,
-    characterStateChangeCandidates: data.characterStateChangeCandidates,
+    ...pendingInboxSources(data, project.id, staleOnly),
     jobs: data.chapterGenerationJobs
-  }), [data.characterStateChangeCandidates, data.chapterGenerationJobs, data.memoryUpdateCandidates, project.id])
+  }), [data, project.id, staleOnly])
   useEffect(() => {
     const pendingKeys = new Set(groups.flatMap((group) => group.candidates.map(previewKeyFor)))
     setSelectedCandidateKeys((current) => {
@@ -351,6 +352,7 @@ function DecisionInboxProjectView({ data, project, executeCandidateDecision }: D
       </div>
 
       {view === 'pending' ? <div className="inbox-toolbar" role="group" aria-label="筛选待确认变化">
+        <label><input type="checkbox" checked={staleOnly} onChange={event => setStaleOnly(event.target.checked)} /> 仅看已失效候选</label>
         {INBOX_FILTERS.map(([value, label]) => (
           <button key={value} className={filter === value ? 'active' : ''} type="button" aria-pressed={filter === value} onClick={() => setFilter(value)}>
             {label}<span>{filterCounts[value]}</span>

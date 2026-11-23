@@ -8,6 +8,7 @@ import { saveAgentRevisionCommitBundle, saveAgentRuntimeData, type AgentRuntimeD
 import { findProjectId, requiredString } from '../tools/agentToolArguments'
 import { assertRevisionBatchTarget, firstPendingRunTarget } from '../agentBatchWriteback'
 import { requirePassingRevisionReview } from './agentRevisionReviewEvidence'
+import { summaryErratum } from './surgicalErrata'
 import {
   assertRevisionWritable, checkKnownAgentSource, checkRevisionFields, checkSourceHashes, checkVersionSource, commandIdentity,
   recordRevisionOperation, replayRevisionOperation, resolveRevisionSource, revisionAudit, revisionCommonFields,
@@ -29,7 +30,9 @@ function buildPreviewBundle(data: AppData, preview: AgentActionPreview, audit: R
     revisionReason: preview.reason,
     revisionNote: `Agent ${preview.agentRunId}; preview ${preview.id}; binding ${revisionFingerprint(audit)}. No human approval claimed.`
   })
-  return { ...bundle, ...(audit.qualityGateReportId ? { qualityGateReportId: audit.qualityGateReportId,
+  if (audit.summaryEdit && bundle.chapter.summary !== audit.summaryEdit.before) throw new Error('章摘要在预览后已变化，请重新预览。')
+  return { ...bundle, ...(audit.summaryEdit ? { chapter: { ...bundle.chapter, summary: audit.summaryEdit.after } } : {}),
+    ...(audit.qualityGateReportId ? { qualityGateReportId: audit.qualityGateReportId,
     consistencyReviewReportId: audit.consistencyReviewReportId } : {}) }
 }
 
@@ -48,7 +51,8 @@ function validateCurrentPreview(data: AppData, preview: AgentActionPreview, audi
 }
 
 export async function previewAgentRevisionCommit(data: AppData, args: Record<string, unknown>, runtime: AgentRuntimeData) {
-  checkRevisionFields(args, [...revisionWriteFields, ...revisionHashFields, 'versionId', 'expectedVersionHash', 'expectedQualityGateReportId'])
+  checkRevisionFields(args, [...revisionWriteFields, ...revisionHashFields, 'versionId', 'expectedVersionHash', 'expectedQualityGateReportId', 'updateSummaryIfAffected'])
+  if (args.updateSummaryIfAffected !== undefined && typeof args.updateSummaryIfAffected !== 'boolean') throw new Error('updateSummaryIfAffected 必须为布尔值。')
   const projectId = findProjectId(data, args)
   const identity = commandIdentity(args, 'preview_revision_commit', projectId)
   const prior = replayRevisionOperation(data, projectId, identity)
@@ -74,17 +78,22 @@ export async function previewAgentRevisionCommit(data: AppData, args: Record<str
     if (!source.chapter) throw new Error('必须为正式章节准备修订。')
     review = requirePassingRevisionReview(data, run.id, source.chapter, version, reviewId)
   }
+  if (args.updateSummaryIfAffected && (!review || !data.qualityGateReports.some(r =>
+    r.id === reviewId && r.revisionReview?.mode === 'surgical_errata'))) throw new Error('仅已通过局部勘误审稿的候选可同步章摘要。')
+  const summaryEdit = args.updateSummaryIfAffected && source.chapter
+    ? summaryErratum(source.chapter.body, version.body, source.chapter.summary) : null
   const audit: RevisionAudit = {
     schemaVersion: 1, actor: { kind: 'agent', agentRunId: identity.agentRunId }, operation: 'preview_revision_commit',
     commandHash: identity.hash, source: source.source, sessionId: session.id, requestId: request.id,
     requestHash: revisionFingerprint(request), versionId: version.id, versionHash: revisionFingerprint(version), candidateContentHash: draftContentHash(version.body),
-    ...(review ?? {})
+    ...(review ?? {}), ...(summaryEdit ? { summaryEdit } : {})
   }
   const timestamp = new Date().toISOString()
   const preview: AgentActionPreview = {
     id: previewId, agentRunId: identity.agentRunId, projectId, chapterId: session.chapterId || null,
     jobId: source.draft?.jobId ?? null, actionType: 'revision_commit', status: 'pending',
-    summary: 'Replace the bound chapter body with this revision candidate; no canon or memory changes.',
+    summary: args.updateSummaryIfAffected ? (summaryEdit ? '提交正文，并同步预览中明确匹配的章摘要原句。' : '提交正文；章摘要没有唯一匹配的原句，保持原样。') :
+      'Replace the bound chapter body with this revision candidate; no canon or memory changes.',
     riskLevel: 'medium', diffSummary: [`Body: ${source.chapter?.body.length ?? 0} -> ${version.body.length} characters.`,
       ...(version.responseScope === 'broader_than_requested' ? ['AI response is broader than the requested selection; explicit whole-chapter acknowledgement required.'] : [])],
     affectedIds: [session.id, request.id, version.id, session.chapterId, session.sourceDraftId ?? ''].filter(Boolean),
@@ -103,7 +112,8 @@ function assertPersistedBundle(bundle: RevisionCommitBundle, preview: AgentActio
     bundle.chapterId !== audit.source.chapterId || bundle.revisionSessionId !== audit.sessionId || bundle.revisionVersionId !== audit.versionId ||
     bundle.revisedBy !== 'agent' || bundle.actor?.kind !== 'agent' || bundle.actor.agentRunId !== preview.agentRunId ||
     bundle.qualityGateReportId !== audit.qualityGateReportId || bundle.consistencyReviewReportId !== audit.consistencyReviewReportId ||
-    bundle.actor.actionPreviewId !== preview.id || draftContentHash(bundle.beforeText ?? '') !== audit.source.sourceChapterContentHash ||
+    bundle.actor.actionPreviewId !== preview.id || (audit.summaryEdit && bundle.chapter.summary !== audit.summaryEdit.after) ||
+    draftContentHash(bundle.beforeText ?? '') !== audit.source.sourceChapterContentHash ||
     draftContentHash(bundle.afterText) !== audit.candidateContentHash || !bundle.revisionNote?.includes(`binding ${revisionFingerprint(audit)}.`)) {
     throw new Error('Persisted revision commit does not match the approved Agent preview.')
   }

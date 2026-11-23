@@ -13,16 +13,12 @@ import type {
 import { AgentAuthorizationService } from '../../main/services/AgentAuthorizationService'
 import { getChapterTaskForJob, prepareChapterTaskEdit, TASK_SCOPE_LABELS } from '../../services/ChapterTaskEditService'
 import { stableDecisionJson } from '../../services/candidateDecisionPrimitives'
+import { CHAPTER_TASK_FIELDS, TASK_TEXT_FIELDS, readTaskConstraints } from '../../shared/chapterTaskConstraints'
 import type { AgentRuntimeData } from '../AgentRuntime'
 import { saveAgentRuntimeData } from '../AgentRuntime'
 import { assertEarlierRunTargetsWritten } from '../agentBatchWriteback'
 import { booleanArg, findProjectId, requiredPositiveInteger, requiredString } from './agentToolArguments'
 import type { AgentToolHandlerResult } from './agentToolTypes'
-
-const TASK_FIELDS = [
-  'goal', 'conflict', 'suspenseToKeep', 'allowedPayoffs', 'forbiddenPayoffs',
-  'endingHook', 'readerEmotion', 'targetWordCount', 'styleRequirement'
-] as const satisfies readonly (keyof ChapterTask)[]
 
 const COMMON_FIELDS = ['storagePath', 'userDataPath', 'projectId', 'project'] as const
 const SOURCE_FIELDS = ['chapterOrder', 'sourceJobId', 'sourceUpdatedAt', 'sourceSnapshotId', 'sourceSnapshotUpdatedAt'] as const
@@ -105,11 +101,11 @@ function completeTaskArg(args: Record<string, unknown>): ChapterTask {
   const value = args.task
   if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('task must be a complete chapter task object.')
   const raw = value as Record<string, unknown>
-  const unknown = Object.keys(raw).filter((field) => !(TASK_FIELDS as readonly string[]).includes(field))
+  const unknown = Object.keys(raw).filter((field) => !(CHAPTER_TASK_FIELDS as readonly string[]).includes(field))
   if (unknown.length) throw new Error(`task contains unsupported fields: ${unknown.join(', ')}.`)
-  const missing = TASK_FIELDS.filter((field) => typeof raw[field] !== 'string')
+  const missing = TASK_TEXT_FIELDS.filter((field) => typeof raw[field] !== 'string')
   if (missing.length) throw new Error(`task must include text fields: ${missing.join(', ')}.`)
-  const task = Object.fromEntries(TASK_FIELDS.map((field) => [field, raw[field]])) as unknown as ChapterTask
+  const task = { ...Object.fromEntries(TASK_TEXT_FIELDS.map(field => [field, raw[field]])), ...readTaskConstraints(raw) } as ChapterTask
   if (!task.goal.trim()) throw new Error('task.goal is required.')
   if (!task.targetWordCount.trim()) throw new Error('task.targetWordCount is required.')
   return task
@@ -289,7 +285,7 @@ export function getAgentChapterTask(data: AppData, args: Record<string, unknown>
     projectId: source.projectId,
     chapterOrder: source.targetChapterOrder,
     task,
-    editableFields: TASK_FIELDS,
+    editableFields: CHAPTER_TASK_FIELDS,
     source: sourcePayload(source),
     editReference: {
       chapterOrder: source.targetChapterOrder,

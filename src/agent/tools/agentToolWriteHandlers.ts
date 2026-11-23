@@ -10,8 +10,10 @@ import { executeAgentChapterPipeline } from '../AgentPipelineExecutor'
 import { AgentJobAlreadyExecuting } from '../agentJobExecution'
 import { reopenPipelineRuntime } from '../agentPipelineWritebackGuard'
 import { recordAgentDraftDecision } from '../agentDraftActions'
+import { readActorTag } from '../../shared/agentActorTag'
 import { AgentExecutionControlService } from '../AgentExecutionControlService'
 import { applyAgentChapterAcceptance, previewAgentChapterAcceptance } from './agentChapterAcceptanceTools'
+import { applyChapterSettlement, previewChapterSettlement } from './agentChapterSettlement'
 import { readAgentChapterWorkItem, wantsChapterWorkItem } from './agentChapterWorkItem'
 import { withAgentActionAcknowledgement } from '../agentAcknowledgedAction'
 import { handleAgentChapterTaskWriteTool } from './agentChapterTaskTools'
@@ -44,6 +46,8 @@ export async function handleAgentWriteTool(
   data: AppData,
   runtime: AgentRuntimeData
 ): Promise<AgentToolHandlerResult> {
+  if ((name === 'agent.runChapterPipeline' || name === 'agent.retryChapterPipeline') &&
+      args.stopAfterStep !== undefined && args.stopAfterStep !== 'build_prompt') throw new Error('stopAfterStep 只接受 build_prompt。')
   assertAgentWriteTargetActive(name, data, args)
   const taskWrite = await handleAgentChapterTaskWriteTool(name, args, data, runtime)
   if (taskWrite.handled) return taskWrite
@@ -54,6 +58,16 @@ export async function handleAgentWriteTool(
   const revisionWrite = await handleRevisionWrite(name, args, data, runtime)
   if (revisionWrite.handled) return revisionWrite
   switch (name) {
+    case 'agent.previewChapterSettlement':
+      return { handled: true, payload: await previewChapterSettlement(data, args, runtime) }
+    case 'agent.applyChapterSettlement': {
+      const withWorkItem = wantsChapterWorkItem(args)
+      const result = await applyChapterSettlement(data, args, runtime)
+      const preview = withWorkItem && data.agentActionPreviews.find(p => p.id === args.previewId)
+      return { handled: true, payload: preview ? { ...result, workItem: await readAgentChapterWorkItem(runtime, {
+        projectId: preview.projectId, agentRunId: preview.agentRunId
+      }) } : result }
+    }
     case 'agent.previewChapterAcceptance':
       return { handled: true, payload: await previewAgentChapterAcceptance(data, args, runtime) }
     case 'agent.applyChapterAcceptance': {
@@ -97,6 +111,7 @@ export async function handleAgentWriteTool(
       const project = data.projects.find((item) => item.id === projectId)
       const targetChapterOrder = requiredPositiveInteger(args, 'chapterOrder')
       const prepared = AgentRunService.prepareSingleChapterRun({
+        proseMode: args.stopAfterStep === 'build_prompt' ? 'agent_handoff' : undefined,
         appData: data,
         projectId,
         targetChapterOrder,
@@ -127,6 +142,8 @@ export async function handleAgentWriteTool(
         payload: {
           agentRun: executed.agentRun,
           job: executed.job,
+          ...(executed.job.proseMode && executed.job.status === 'paused' && executed.job.currentStep === 'generate_chapter_draft'
+            ? { nextAction: { tool: 'agent.getChapterDraftHandoff', arguments: { jobId: executed.job.id } } } : {}),
           completedStepCount: executed.completedStepCount,
           draftIds: executed.draftIds,
           failedStep: executed.failedStep
@@ -136,7 +153,18 @@ export async function handleAgentWriteTool(
         }
       }
     }
+    case 'agent.submitChapterDraft': {
+      const agentRunId = requiredString(args, 'agentRunId')
+      const body = args.body
+      if (typeof body !== 'string' || !body.trim()) throw new Error('交稿需要非空正文。')
+      const executed = await executeAgentChapterPipeline({ runtime, agentRunId, jobId: requiredString(args, 'jobId'),
+        agentDraftSubmission: { handoffId: requiredString(args, 'handoffId'), title: requiredString(args, 'title'), body, actorTag: readActorTag(args.actorTag) } })
+      return { handled: true, payload: { workItem: await readAgentChapterWorkItem(runtime, { projectId: executed.job.projectId, agentRunId }) } }
+    }
     case 'agent.retryChapterPipeline': {
+      if (args.refreshModelConfigFromSettings !== undefined && typeof args.refreshModelConfigFromSettings !== 'boolean') {
+        throw new Error('refreshModelConfigFromSettings must be boolean.')
+      }
       const withWorkItem = wantsChapterWorkItem(args)
       const agentRunId = requiredString(args, 'agentRunId')
       const jobId = requiredString(args, 'jobId')
@@ -146,6 +174,10 @@ export async function handleAgentWriteTool(
           runtime,
           agentRunId,
           jobId,
+          refreshModelConfigFromSettings: args.refreshModelConfigFromSettings === true,
+          registryServiceId: args.registryServiceId === undefined ? undefined : requiredString(args, 'registryServiceId'),
+          expectedFailedStep: args.expectedFailedStep === undefined ? undefined : requiredString(args, 'expectedFailedStep'),
+          stopAfterStep: args.stopAfterStep === 'build_prompt' ? 'build_prompt' : undefined,
           pipelineMode: safePipelineMode(stringArg(args, 'pipelineMode')),
           estimatedWordCount: stringArg(args, 'estimatedWordCount'),
           readerEmotionTarget: stringArg(args, 'readerEmotionTarget'),

@@ -43,6 +43,7 @@ function reviewSummary(report: QualityGateReport, apiKey: string) {
   return { reportId: report.id, consistencyReviewReportId: report.revisionReview?.consistencyReviewReportId,
     versionId: report.revisionReview?.revisionVersionId, draftContentHash: report.draftContentHash,
     score: report.overallScore, passed: qualityGateEffectivelyPassed(report), issues: report.issues.length,
+    mode: report.revisionReview?.mode ?? 'full', stagedNeighbors: report.revisionReview?.stagedNeighbors ?? [],
     requiredFixes: report.requiredFixes.slice(0, 3).map(item => redactSensitiveText(item, [apiKey])),
     read: { tool: 'agent.getRevisionReview', arguments: { projectId: report.projectId, agentRunId: report.revisionReview?.agentRunId,
       versionId: report.revisionReview?.revisionVersionId, reportId: report.id, detail: 'full' } } }
@@ -58,7 +59,8 @@ function replay(data: AppData, projectId: string, reportId: string, commandHash:
 }
 
 export async function reviewAgentRevisionVersion(runtime: AgentRuntimeData, args: Record<string, unknown>) {
-  checkRevisionFields(args, [...revisionWriteFields, ...revisionHashFields, 'versionId', 'expectedVersionHash'])
+  checkRevisionFields(args, [...revisionWriteFields, ...revisionHashFields, 'versionId', 'expectedVersionHash', 'mode'])
+  if (args.mode !== undefined && args.mode !== 'full' && args.mode !== 'surgical_errata') throw new Error('未知修订审稿模式。')
   const projectId = findProjectId(runtime.data, args)
   const identity = commandIdentity(args, 'review_revision_version', projectId)
   const reportId = `${identity.id}-quality`
@@ -87,7 +89,8 @@ async function runReview(runtime: AgentRuntimeData, args: Record<string, unknown
     if (!await auth.findGrant(scope)) throw new Error('该章节没有有效修订授权，未调用审稿模型。')
   }
   await requireGrant()
-  const basis = revisionReviewBasis(data, chapter, version)
+  const mode = args.mode === 'surgical_errata' ? args.mode : undefined
+  const basis = revisionReviewBasis(data, chapter, version, runId, mode)
   const frozen = data.chapterGenerationJobs.find(job => job.id === sourceJobId && job.projectId === projectId)?.aiRunConfig
   const base = resolvePipelineRunSettings(frozen, data.settings)
   const reviewer = resolvePipelineRoleSettings(frozen, data.settings, 'reviewer')
@@ -104,22 +107,23 @@ async function runReview(runtime: AgentRuntimeData, args: Record<string, unknown
     characterStateFacts: basis.characterStateFacts, characters: basis.characters,
     hardCanonAudit: basis.canon ?? undefined, targetChapterOrder: chapter.order,
     hasAuthoritativeChapterTask: chapter.order === 1,
-    noveltyAuditResult: NoveltyDetector.audit({ generatedText: version.body, context: basis.context,
+    noveltyAuditResult: NoveltyDetector.audit({ generatedText: version.body, context: basis.canonContext,
       chapterPlan: null, project: basis.project, ...basis.refs }),
     aiService: { generateQualityGateReport: async (...input) => {
-      const result = await ai.generateQualityGateReport(...input)
+      const result = await ai.generateQualityGateReport(...input, basis.delta)
       if (!result.ok || !result.usedAI || !result.data) throw new Error(result.error || '审稿模型未返回有效报告，不能以本地模板代替。')
       return result
     } }
-  })
+  }, basis.delta ? chapter.body : undefined)
   const combined = deriveConsistencyReviewFromQualityGate({ ...report, id: reportId }, null)
-  const quality = { ...combined.qualityGateReport, revisionReview: { agentRunId: runId, revisionVersionId: version.id,
-    versionHash, contextHash: basis.contextHash, commandHash, consistencyReviewReportId: combined.consistencyReviewReport.id } }
+  const quality: QualityGateReport = { ...combined.qualityGateReport, revisionReview: { agentRunId: runId, revisionVersionId: version.id,
+    versionHash, contextHash: basis.contextHash, commandHash, consistencyReviewReportId: combined.consistencyReviewReport.id,
+    ...(mode ? { mode } : {}), ...(basis.stagedNeighbors.length ? { stagedNeighbors: basis.stagedNeighbors } : {}) } }
   return auth.withAuthorization(scope, async () => {
     const current = await fresh()
     if (current.storagePath !== storagePath || current.source === 'empty') throw new Error('书库位置已变化，未保存审稿。')
     const target = subject(current.data, projectId, runId, args)
-    if (target.chapter.order !== chapter.order || revisionReviewBasis(current.data, target.chapter, target.version).contextHash !== basis.contextHash) {
+    if (target.chapter.order !== chapter.order || revisionReviewBasis(current.data, target.chapter, target.version, runId, mode).contextHash !== basis.contextHash) {
       throw new Error('审稿期间上下文或章节顺序已变化，请重审。')
     }
     const saved = await saveAgentRuntimeData({ ...current.data,

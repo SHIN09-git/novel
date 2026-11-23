@@ -11,6 +11,7 @@ import { ContextBudgetManager } from './ContextBudgetManager'
 import { formatContinuityBridgeForPrompt, resolveContinuityBridge } from './ContinuityService'
 import { TokenEstimator } from './TokenEstimator'
 import { StoryDirectionService } from './StoryDirectionService'
+import { taskConstraintLines } from './promptFormatters/chapterTaskConstraints'
 import { coversStoryDirectionChapter } from '../shared/storyDirectionRange'
 import { HardCanonPackService } from './HardCanonPackService'
 import { PromptLintService } from './PromptLintService'
@@ -138,7 +139,8 @@ export class PromptBuilderService {
       fieldLine(isOpeningChapter ? '本章结尾收束：' : '本章结尾钩子：', task.endingHook),
       fieldLine('本章读者应该产生的情绪：', task.readerEmotion),
       fieldLine('本章预计字数：', task.targetWordCount),
-      fieldLine('文风要求：', task.styleRequirement)
+      fieldLine('文风要求：', task.styleRequirement),
+      ...taskConstraintLines(task, isOpeningChapter)
     ]
       .filter(Boolean)
       .join('\n')
@@ -157,8 +159,10 @@ export class PromptBuilderService {
     const selectedFacts = isOpeningChapter ? [] : getRelevantCharacterStatesForPrompt(
       characterSelection.map(c => c.id), contextNeedPlan, target, scopedState)
     // An omitted ledger entry must not reappear through stale card prose. Only selectedFacts print their values.
-    const { text: characterCardText, cardWarnings } = formatWritingCards(characterSelection, isOpeningChapter ? [] : scopedState, characterStateLogs,
+    const { text: cards, cardWarnings } = formatWritingCards(characterSelection, isOpeningChapter ? [] : scopedState, characterStateLogs,
       contextNeedPlan, target, stateSources, Boolean(input.stateSourceChapters))
+    const pov = task.povPolicy && characterSelection.find(c => c.id === task.povPolicy?.povCharacterId)
+    const characterCardText = pov ? `视角角色：${pov.name}（${pov.id}）\n${cards}` : cards
     const rawCharacterStateText = (isOpeningChapter
       ? [
           '【本章任务点名人物】',
