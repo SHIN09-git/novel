@@ -66,10 +66,15 @@ export async function openPackagedAgentJourney({ unpacked, profile, storagePath,
       }
       if (child) assert.equal(child.exitCode, 0, 'Packaged MCP did not close cleanly')
     } finally {
+      // Windows can stop reporting the PID before libuv delivers the child exit event.
+      const desktop = session.child
+      const exit = desktop.pid && desktop.exitCode === null && desktop.signalCode === null
+        ? once(desktop, 'close') : [desktop.exitCode, desktop.signalCode]
       const result = await cleanup(session)
-      assert.deepEqual(result?.remainingProcessIds ?? [], [], 'Packaged desktop fixture left running processes')
-      log('process-cleanup', { mcpExitCode: child?.exitCode, desktopExitCode: session.child.exitCode, remainingDesktopProcessIds: result?.remainingProcessIds })
-      assert.equal(session.child.exitCode, 0, 'Packaged desktop did not exit cleanly')
+      const [desktopExitCode, signal] = await Promise.race([exit, delay(5000, [null, 'timeout'], { ref: false })])
+      log('process-cleanup', { mcpExitCode: child?.exitCode, desktopExitCode, signal, remainingDesktopProcessIds: result?.remainingProcessIds })
+      assert.deepEqual(result.remainingProcessIds, [], 'Packaged desktop fixture left running processes')
+      assert.deepEqual([desktopExitCode, signal], [0, null], 'Packaged desktop did not exit cleanly')
     }
   }
   try {

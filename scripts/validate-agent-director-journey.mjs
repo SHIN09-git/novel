@@ -780,6 +780,8 @@ try {
         reviewSummaryCandidateAccepted: true, uiVerified: ['body', 'title', 'consistencyReport', 'qualityGateReport', 'commitReceipt'] })),
       recovery: { chapter: 4, failedStep: 'consistency_review', simulatedHttpStatus: 503, switchCommands: 1,
         retryUsedRegisteredLoopback: true, previousStepsAndBodyUnchanged: true },
+      stagedErrataVerified: process.argv.includes('--staged-errata'),
+      mcpWireRequests: summary.packagedEvidence.mcpWireRequests, authorGrantFromUi: true, defaultMcpLibraryMatchesDesktop: true,
       paidModelCalls: 0 }
   }
   console.log(JSON.stringify(summary))
@@ -805,7 +807,7 @@ try {
   log('cleanup-complete', {})
   if (releaseSummary) {
     const path = directory + '.summary.json'
-    await writeFile(path, JSON.stringify({ ...releaseSummary, cleanExit: true, remainingProcesses: 0 }, null, 2) + '\n', { flag: 'wx' })
+    await writeFile(path, JSON.stringify({ ...releaseSummary, cleanExit: true, mcpExitCode: 0, desktopExitCode: 0, remainingProcesses: 0 }, null, 2) + '\n', { flag: 'wx' })
     console.log('JOURNEY_RELEASE_SUMMARY', path)
   }
 }
